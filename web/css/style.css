@@ -361,6 +361,18 @@ main {
     opacity: 0.7;
 }
 
+/* Text cursor */
+.cell.text-cursor {
+    outline: 2px solid #ffcc00;
+    outline-offset: -2px;
+    animation: text-cursor-blink 1s step-end infinite;
+}
+
+@keyframes text-cursor-blink {
+    0%, 100% { outline-color: #ffcc00; }
+    50% { outline-color: transparent; }
+}
+
 
 /* Dialog */
 dialog {

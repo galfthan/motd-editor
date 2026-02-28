@@ -19,6 +19,7 @@ class Toolbar {
         const toolDraw = document.getElementById('tool-draw');
         const toolErase = document.getElementById('tool-erase');
         const toolChar = document.getElementById('tool-char');
+        const toolText = document.getElementById('tool-text');
         const toolSelect = document.getElementById('tool-select');
         const toolSelectSubpixel = document.getElementById('tool-select-subpixel');
         const toolPick = document.getElementById('tool-pick');
@@ -28,6 +29,7 @@ class Toolbar {
             toolDraw.classList.toggle('active', tool === 'draw');
             toolErase.classList.toggle('active', tool === 'erase');
             toolChar.classList.toggle('active', tool === 'char');
+            toolText.classList.toggle('active', tool === 'text');
             toolSelect.classList.toggle('active', tool === 'select');
             toolSelectSubpixel.classList.toggle('active', tool === 'select-subpixel');
             toolPick.classList.toggle('active', tool === 'pick');
@@ -38,6 +40,7 @@ class Toolbar {
         toolDraw.addEventListener('click', () => this.setTool('draw'));
         toolErase.addEventListener('click', () => this.setTool('erase'));
         toolChar.addEventListener('click', () => this.setTool('char'));
+        toolText.addEventListener('click', () => this.setTool('text'));
         toolSelect.addEventListener('click', () => this.setTool('select'));
         toolSelectSubpixel.addEventListener('click', () => this.setTool('select-subpixel'));
         toolPick.addEventListener('click', () => this.setTool('pick'));
@@ -45,6 +48,8 @@ class Toolbar {
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
             if (e.target.tagName === 'INPUT') return;
+            // Skip tool shortcuts when text cursor is active (typing goes to canvas)
+            if (this.renderer.tool === 'text' && this.renderer.textCursor) return;
             if (e.shiftKey && e.key.toLowerCase() === 's') {
                 this.setTool('select-subpixel');
                 return;
@@ -53,6 +58,7 @@ class Toolbar {
                 case 'd': this.setTool('draw'); break;
                 case 'e': this.setTool('erase'); break;
                 case 'c': this.setTool('char'); break;
+                case 't': this.setTool('text'); break;
                 case 's': this.setTool('select'); break;
                 case 'p': this.setTool('pick'); break;
             }

@@ -23,6 +23,9 @@ class CanvasRenderer {
         this.subpixelSelectionStart = null; // Start point during drag
         this.subpixelClipboard = null;      // 2D array of {filled, fg, bg} objects
 
+        // Text tool state
+        this.textCursor = null; // { x, y } cell coordinates, or null
+
         this.setupEventListeners();
         this.setupKeyboardShortcuts();
     }
@@ -49,6 +52,9 @@ class CanvasRenderer {
             this.pasteMode = false;
             this.clearPastePreview();
         }
+        if (tool !== 'text') {
+            this.clearTextCursor();
+        }
     }
 
     isSelectTool() {
@@ -62,6 +68,20 @@ class CanvasRenderer {
     setupKeyboardShortcuts() {
         document.addEventListener('keydown', (e) => {
             if (e.target.tagName === 'INPUT') return;
+
+            // Text tool input handling
+            if (this.tool === 'text' && this.textCursor) {
+                if (e.key === 'Escape') {
+                    this.clearTextCursor();
+                    e.preventDefault();
+                    return;
+                }
+                // Let Ctrl/Meta/Alt combos through (copy, paste, etc.)
+                if (e.ctrlKey || e.metaKey || e.altKey) return;
+                e.preventDefault();
+                this.handleTextInput(e.key);
+                return;
+            }
 
             // Escape - clear selection
             if (e.key === 'Escape') {
@@ -144,6 +164,15 @@ class CanvasRenderer {
                 this.container.appendChild(cellEl);
             }
         }
+
+        // Restore text cursor display after re-render
+        if (this.textCursor) {
+            if (this.textCursor.x >= this.canvas.width || this.textCursor.y >= this.canvas.height) {
+                this.textCursor.x = Math.min(this.textCursor.x, this.canvas.width - 1);
+                this.textCursor.y = Math.min(this.textCursor.y, this.canvas.height - 1);
+            }
+            this.updateTextCursorDisplay();
+        }
     }
 
     createCellElement(x, y, cell) {
@@ -211,6 +240,8 @@ class CanvasRenderer {
 
         if (this.tool === 'pick') {
             this.handlePickTool(e);
+        } else if (this.tool === 'text') {
+            this.handleTextToolClick(e);
         } else if (this.isSelectTool()) {
             this.handleSelectToolDown(e);
         } else if (this.tool === 'char') {
@@ -773,6 +804,144 @@ class CanvasRenderer {
             cellEl.replaceWith(newCellEl);
         } catch (error) {
             console.error('Failed to set character:', error);
+        }
+    }
+
+    // --- Text tool methods ---
+
+    handleTextToolClick(e) {
+        const cellEl = e.target.closest('.cell');
+        if (!cellEl) return;
+
+        const cellX = parseInt(cellEl.dataset.x);
+        const cellY = parseInt(cellEl.dataset.y);
+        this.setTextCursor(cellX, cellY);
+    }
+
+    setTextCursor(x, y) {
+        if (!this.canvas) return;
+        x = Math.max(0, Math.min(x, this.canvas.width - 1));
+        y = Math.max(0, Math.min(y, this.canvas.height - 1));
+
+        this.clearTextCursorDisplay();
+        this.textCursor = { x, y };
+        this.updateTextCursorDisplay();
+    }
+
+    clearTextCursor() {
+        this.clearTextCursorDisplay();
+        this.textCursor = null;
+    }
+
+    updateTextCursorDisplay() {
+        if (!this.textCursor) return;
+        const { x, y } = this.textCursor;
+        const cellEl = this.container.querySelector(`.cell[data-x="${x}"][data-y="${y}"]`);
+        if (cellEl) {
+            cellEl.classList.add('text-cursor');
+        }
+    }
+
+    clearTextCursorDisplay() {
+        this.container.querySelectorAll('.cell.text-cursor').forEach(el => {
+            el.classList.remove('text-cursor');
+        });
+    }
+
+    async handleTextInput(key) {
+        if (!this.textCursor || !this.canvas) return;
+
+        const { x, y } = this.textCursor;
+
+        if (key === 'Backspace') {
+            let newX = x - 1;
+            let newY = y;
+            if (newX < 0) {
+                if (newY > 0) {
+                    newY--;
+                    newX = this.canvas.width - 1;
+                } else {
+                    return; // At top-left corner
+                }
+            }
+            await this.setTextCell(newX, newY, 32); // Clear with space
+            this.setTextCursor(newX, newY);
+            return;
+        }
+
+        if (key === 'Enter') {
+            let newY = Math.min(y + 1, this.canvas.height - 1);
+            this.setTextCursor(0, newY);
+            return;
+        }
+
+        if (key === 'ArrowLeft') {
+            let newX = x - 1, newY = y;
+            if (newX < 0) {
+                if (newY > 0) { newY--; newX = this.canvas.width - 1; }
+                else { newX = 0; }
+            }
+            this.setTextCursor(newX, newY);
+            return;
+        }
+
+        if (key === 'ArrowRight') {
+            let newX = x + 1, newY = y;
+            if (newX >= this.canvas.width) {
+                if (newY < this.canvas.height - 1) { newY++; newX = 0; }
+                else { newX = this.canvas.width - 1; }
+            }
+            this.setTextCursor(newX, newY);
+            return;
+        }
+
+        if (key === 'ArrowUp') {
+            if (y > 0) this.setTextCursor(x, y - 1);
+            return;
+        }
+
+        if (key === 'ArrowDown') {
+            if (y < this.canvas.height - 1) this.setTextCursor(x, y + 1);
+            return;
+        }
+
+        if (key === 'Delete') {
+            await this.setTextCell(x, y, 32); // Clear with space
+            this.updateTextCursorDisplay();
+            return;
+        }
+
+        // Only accept single printable characters
+        if (key.length !== 1) return;
+
+        const charCode = key.codePointAt(0);
+        await this.setTextCell(x, y, charCode);
+
+        // Advance cursor right with wrapping
+        let newX = x + 1, newY = y;
+        if (newX >= this.canvas.width) {
+            newX = 0;
+            newY++;
+            if (newY >= this.canvas.height) {
+                newY = this.canvas.height - 1;
+                newX = this.canvas.width - 1;
+            }
+        }
+        this.setTextCursor(newX, newY);
+    }
+
+    async setTextCell(x, y, charCode) {
+        try {
+            const result = await API.setCell(x, y, charCode, this.fgColor, this.bgColor);
+            this.canvas.cells[y][x] = result.cell;
+
+            const cellEl = this.container.querySelector(`.cell[data-x="${x}"][data-y="${y}"]`);
+            if (cellEl) {
+                const newCellEl = this.createCellElement(x, y, result.cell);
+                cellEl.replaceWith(newCellEl);
+            }
+        } catch (error) {
+            console.error('Failed to set text cell:', error);
         }
     }
 
