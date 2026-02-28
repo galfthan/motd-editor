@@ -33,7 +33,7 @@ type Cell struct {
 func NewCell() Cell {
 	return Cell{
 		Type: CellTypeSextant,
-		FG:   ansi.White(),
+		FG:   ansi.NewDefaultColor(),
 		BG:   ansi.NewDefaultColor(),
 	}
 }

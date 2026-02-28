@@ -6,7 +6,7 @@ class CanvasRenderer {
         this.canvas = null;
         this.tool = 'draw'; // 'draw', 'erase', 'char', 'select', 'pick'
         this.selectedChar = null;
-        this.fgColor = { r: 255, g: 255, b: 255, default: false };
+        this.fgColor = { r: 255, g: 255, b: 255, default: true };
         this.bgColor = { r: 0, g: 0, b: 0, default: true };
         this.isDrawing = false;
         this.lastCell = null;

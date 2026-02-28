@@ -146,33 +146,40 @@ func (c *Canvas) Clear() {
 }
 
 // ToANSIText exports the canvas as text with ANSI escape codes.
+// Optimized to omit codes for default colors and skip reset on all-default lines.
 func (c *Canvas) ToANSIText() string {
 	var buf strings.Builder
-	var lastFG, lastBG *ansi.Color
+	defaultColor := ansi.NewDefaultColor()
 
 	for y := 0; y < c.Height; y++ {
+		// After reset (or start), terminal is at default colors
+		lastFG := defaultColor
+		lastBG := defaultColor
+		lineHasColor := false
+
 		for x := 0; x < c.Width; x++ {
 			cell := &c.Cells[y][x]
 
-			// Emit color codes if changed
-			if lastFG == nil || !cell.FG.Equal(*lastFG) {
+			// Emit color codes only if changed from current state
+			if !cell.FG.Equal(lastFG) {
 				buf.WriteString(cell.FG.FGCode())
-				fg := cell.FG
-				lastFG = &fg
+				lastFG = cell.FG
+				lineHasColor = true
 			}
-			if lastBG == nil || !cell.BG.Equal(*lastBG) {
+			if !cell.BG.Equal(lastBG) {
 				buf.WriteString(cell.BG.BGCode())
-				bg := cell.BG
-				lastBG = &bg
+				lastBG = cell.BG
+				lineHasColor = true
 			}
 
 			// Emit character
 			buf.WriteRune(cell.ToRune())
 		}
-		// Reset at end of line and add newline
-		buf.WriteString(ansi.Reset)
+		// Only emit reset if colors were used on this line
+		if lineHasColor {
+			buf.WriteString(ansi.Reset)
+		}
 		buf.WriteString("\n")
-		lastFG, lastBG = nil, nil
 	}
 
 	return buf.String()
