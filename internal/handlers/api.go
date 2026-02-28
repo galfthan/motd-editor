@@ -184,7 +184,10 @@ func (h *Handlers) HandleCell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.CharCode != 0 {
+	if req.CharCode == ' ' {
+		// Space means clear to empty sextant cell
+		cell.Clear()
+	} else if req.CharCode != 0 {
 		cell.SetExtendedChar(rune(req.CharCode))
 	}
 	if req.FG != nil {
