@@ -61,6 +61,7 @@ func NewServer(addr string, webFS embed.FS, fontPath string) *Server {
 	mux.HandleFunc("/api/charset/diagonal", h.HandleCharsetDiagonal)
 	mux.HandleFunc("/api/charset/triangle", h.HandleCharsetTriangle)
 	mux.HandleFunc("/api/glyphs", h.HandleGlyphs)
+	mux.HandleFunc("/api/canvas/cell-batch", h.HandleSetCellBatch)
 
 	// Static files
 	webContent, err := fs.Sub(webFS, "web")

@@ -22,18 +22,22 @@ class Toolbar {
         const toolText = document.getElementById('tool-text');
         const toolSelect = document.getElementById('tool-select');
         const toolSelectSubpixel = document.getElementById('tool-select-subpixel');
+        const toolBox = document.getElementById('tool-box');
         const toolPick = document.getElementById('tool-pick');
         const charPaletteSection = document.getElementById('char-palette-section');
+        const boxStyleSection = document.getElementById('box-style-section');
 
         this.setTool = (tool) => {
             toolDraw.classList.toggle('active', tool === 'draw');
             toolErase.classList.toggle('active', tool === 'erase');
             toolChar.classList.toggle('active', tool === 'char');
             toolText.classList.toggle('active', tool === 'text');
+            toolBox.classList.toggle('active', tool === 'box');
             toolSelect.classList.toggle('active', tool === 'select');
             toolSelectSubpixel.classList.toggle('active', tool === 'select-subpixel');
             toolPick.classList.toggle('active', tool === 'pick');
             charPaletteSection.style.display = tool === 'char' ? 'block' : 'none';
+            boxStyleSection.style.display = tool === 'box' ? 'block' : 'none';
             this.renderer.setTool(tool);
         };
 
@@ -41,9 +45,20 @@ class Toolbar {
         toolErase.addEventListener('click', () => this.setTool('erase'));
         toolChar.addEventListener('click', () => this.setTool('char'));
         toolText.addEventListener('click', () => this.setTool('text'));
+        toolBox.addEventListener('click', () => this.setTool('box'));
         toolSelect.addEventListener('click', () => this.setTool('select'));
         toolSelectSubpixel.addEventListener('click', () => this.setTool('select-subpixel'));
         toolPick.addEventListener('click', () => this.setTool('pick'));
+
+        // Box line style buttons
+        const boxStyleBtns = document.querySelectorAll('.box-style-btn');
+        boxStyleBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                boxStyleBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.renderer.boxLineStyle = parseInt(btn.dataset.style);
+            });
+        });
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
@@ -61,6 +76,7 @@ class Toolbar {
                 case 'e': this.setTool('erase'); break;
                 case 'c': this.setTool('char'); break;
                 case 't': this.setTool('text'); break;
+                case 'b': this.setTool('box'); break;
                 case 's': this.setTool('select'); break;
                 case 'p': this.setTool('pick'); break;
             }

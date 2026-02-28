@@ -187,6 +187,17 @@ const API = {
         return response.json();
     },
 
+    // Batch set multiple cells (for box drawing, etc.)
+    async setCellBatch(cells) {
+        const response = await fetch('/api/canvas/cell-batch', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cells })
+        });
+        if (!response.ok) throw new Error('Failed to set cells');
+        return response.json();
+    },
+
     // Batch set individual subpixels by subpixel coordinates
     // Each update can include: {sx, sy, filled, fg, bg}
     async setSubpixelBatch(updates) {

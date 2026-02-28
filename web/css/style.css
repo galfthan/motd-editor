@@ -361,6 +361,40 @@ main {
     opacity: 0.7;
 }
 
+/* Box tool preview */
+.cell.box-preview {
+    outline: 2px solid #ff9800;
+    outline-offset: -2px;
+}
+
+/* Box line style buttons */
+.box-style-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.box-style-btn {
+    padding: 0.375rem 0.75rem;
+    background-color: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    text-align: left;
+    transition: all 0.15s;
+}
+
+.box-style-btn:hover {
+    background-color: #454545;
+}
+
+.box-style-btn.active {
+    background-color: var(--accent);
+    border-color: var(--accent);
+}
+
 /* Text cursor */
 .cell.text-cursor {
     outline: 2px solid #ffcc00;

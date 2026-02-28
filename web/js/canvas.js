@@ -26,6 +26,11 @@ class CanvasRenderer {
         // Text tool state
         this.textCursor = null; // { x, y } cell coordinates, or null
 
+        // Box tool state
+        this.boxStart = null;       // { x, y } drag start
+        this.boxEnd = null;         // { x, y } drag end
+        this.boxLineStyle = 1;      // 1=light, 2=heavy, 3=double
+
         this.setupEventListeners();
         this.setupKeyboardShortcuts();
     }
@@ -33,8 +38,8 @@ class CanvasRenderer {
     setupEventListeners() {
         this.container.addEventListener('mousedown', (e) => this.handleMouseDown(e));
         this.container.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-        this.container.addEventListener('mouseup', () => this.handleMouseUp());
-        this.container.addEventListener('mouseleave', () => this.handleMouseUp());
+        this.container.addEventListener('mouseup', () => this.handleMouseUp(false));
+        this.container.addEventListener('mouseleave', () => this.handleMouseUp(true));
 
         // Prevent context menu on right-click
         this.container.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -57,6 +62,11 @@ class CanvasRenderer {
         }
         if (tool !== 'text') {
             this.clearTextCursor();
+        }
+        if (tool !== 'box') {
+            this.boxStart = null;
+            this.boxEnd = null;
+            this.clearBoxPreview();
         }
     }
 
@@ -243,6 +253,8 @@ class CanvasRenderer {
             this.handlePickTool(e);
         } else if (this.tool === 'text') {
             this.handleTextToolClick(e);
+        } else if (this.tool === 'box') {
+            this.handleBoxToolDown(e);
         } else if (this.isSelectTool()) {
             this.handleSelectToolDown(e);
         } else if (this.tool === 'char') {
@@ -262,14 +274,26 @@ class CanvasRenderer {
 
         if (this.isSelectTool()) {
             this.handleSelectToolMove(e);
+        } else if (this.tool === 'box') {
+            this.handleBoxToolMove(e);
         } else if (this.tool === 'char') {
             this.handleCharTool(e);
-        } else if (this.tool !== 'pick') {
+        } else if (this.tool !== 'pick' && this.tool !== 'text') {
             this.handleDrawTool(e);
         }
     }
 
-    handleMouseUp() {
+    handleMouseUp(isLeave = false) {
+        if (this.tool === 'box' && this.boxStart) {
+            if (isLeave) {
+                // Cancel box on mouseleave
+                this.boxStart = null;
+                this.boxEnd = null;
+                this.clearBoxPreview();
+            } else {
+                this.handleBoxToolUp();
+            }
+        }
         if (this.isSelectTool() && this.selectionStart) {
             this.handleSelectToolUp();
         }
@@ -806,6 +830,82 @@ class CanvasRenderer {
         } catch (error) {
             console.error('Failed to set character:', error);
         }
+    }
+
+    // --- Box tool methods ---
+
+    handleBoxToolDown(e) {
+        const cellEl = e.target.closest('.cell');
+        if (!cellEl) return;
+        const x = parseInt(cellEl.dataset.x);
+        const y = parseInt(cellEl.dataset.y);
+        this.boxStart = { x, y };
+        this.boxEnd = { x, y };
+        this.showBoxPreview(x, y, x, y);
+    }
+
+    handleBoxToolMove(e) {
+        if (!this.boxStart) return;
+        const cellEl = e.target.closest('.cell');
+        if (!cellEl) return;
+        this.boxEnd = { x: parseInt(cellEl.dataset.x), y: parseInt(cellEl.dataset.y) };
+
+        const x1 = Math.min(this.boxStart.x, this.boxEnd.x);
+        const y1 = Math.min(this.boxStart.y, this.boxEnd.y);
+        const x2 = Math.max(this.boxStart.x, this.boxEnd.x);
+        const y2 = Math.max(this.boxStart.y, this.boxEnd.y);
+        this.showBoxPreview(x1, y1, x2, y2);
+    }
+
+    async handleBoxToolUp() {
+        if (!this.boxStart || !this.boxEnd) return;
+
+        const x1 = Math.min(this.boxStart.x, this.boxEnd.x);
+        const y1 = Math.min(this.boxStart.y, this.boxEnd.y);
+        const x2 = Math.max(this.boxStart.x, this.boxEnd.x);
+        const y2 = Math.max(this.boxStart.y, this.boxEnd.y);
+
+        const chars = computeBoxChars(x1, y1, x2, y2, this.boxLineStyle, this.canvas.cells, boxDrawLookup);
+
+        if (chars.length > 0) {
+            const cells = chars.map(c => ({
+                x: c.x,
+                y: c.y,
+                charCode: c.charCode,
+                fg: this.fgColor,
+                bg: this.bgColor
+            }));
+
+            try {
+                const updatedCanvas = await API.setCellBatch(cells);
+                this.canvas = updatedCanvas;
+                this.render();
+            } catch (error) {
+                console.error('Failed to draw box:', error);
+            }
+        }
+
+        this.boxStart = null;
+        this.boxEnd = null;
+        this.clearBoxPreview();
+    }
+
+    showBoxPreview(x1, y1, x2, y2) {
+        this.clearBoxPreview();
+        for (let y = y1; y <= y2; y++) {
+            for (let x = x1; x <= x2; x++) {
+                if (x === x1 || x === x2 || y === y1 || y === y2) {
+                    const cellEl = this.container.querySelector(`.cell[data-x="${x}"][data-y="${y}"]`);
+                    if (cellEl) cellEl.classList.add('box-preview');
+                }
+            }
+        }
+    }
+
+    clearBoxPreview() {
+        this.container.querySelectorAll('.cell.box-preview').forEach(el => {
+            el.classList.remove('box-preview');
+        });
     }
 
     // --- Text tool methods ---

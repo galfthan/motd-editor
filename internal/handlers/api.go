@@ -664,6 +664,57 @@ func (h *Handlers) HandlePasteSubpixel(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.canvas)
 }
 
+// HandleSetCellBatch handles PUT to set multiple cells at once.
+func (h *Handlers) HandleSetCellBatch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req struct {
+		Cells []struct {
+			X        int         `json:"x"`
+			Y        int         `json:"y"`
+			CharCode int         `json:"charCode"`
+			FG       *ansi.Color `json:"fg,omitempty"`
+			BG       *ansi.Color `json:"bg,omitempty"`
+		} `json:"cells"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid JSON")
+		return
+	}
+
+	if len(req.Cells) == 0 {
+		writeError(w, http.StatusBadRequest, "No cells provided")
+		return
+	}
+
+	h.mu.Lock()
+	for _, c := range req.Cells {
+		cell := h.canvas.GetCell(c.X, c.Y)
+		if cell == nil {
+			continue
+		}
+		if c.CharCode == ' ' {
+			cell.Clear()
+		} else if c.CharCode != 0 {
+			cell.SetExtendedChar(rune(c.CharCode))
+		}
+		if c.FG != nil {
+			cell.FG = *c.FG
+		}
+		if c.BG != nil {
+			cell.BG = *c.BG
+		}
+	}
+	h.mu.Unlock()
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	writeJSON(w, http.StatusOK, h.canvas)
+}
+
 // HandleGlyphs returns bitmap data for extended characters (diagonals and triangles).
 // The bitmap data is from the unscii-16 HEX font (8x16 pixels per glyph).
 func (h *Handlers) HandleGlyphs(w http.ResponseWriter, r *http.Request) {
