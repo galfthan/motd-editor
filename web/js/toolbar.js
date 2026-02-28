@@ -48,6 +48,8 @@ class Toolbar {
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
             if (e.target.tagName === 'INPUT') return;
+            // Skip tool shortcuts when modifier keys are held (Ctrl+C, etc.)
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
             // Skip tool shortcuts when text cursor is active (typing goes to canvas)
             if (this.renderer.tool === 'text' && this.renderer.textCursor) return;
             if (e.shiftKey && e.key.toLowerCase() === 's') {

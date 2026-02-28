@@ -45,8 +45,11 @@ class CanvasRenderer {
         if (tool !== 'char') {
             this.selectedChar = null;
         }
-        if (tool !== 'select' && tool !== 'select-subpixel') {
+        if (tool !== 'select') {
             this.clearSelection();
+        }
+        if (tool !== 'select-subpixel') {
+            this.clearSubpixelSelection();
         }
         if (tool !== 'select' && tool !== 'select-subpixel') {
             this.pasteMode = false;
@@ -69,15 +72,13 @@ class CanvasRenderer {
         document.addEventListener('keydown', (e) => {
             if (e.target.tagName === 'INPUT') return;
 
-            // Text tool input handling
-            if (this.tool === 'text' && this.textCursor) {
+            // Text tool input handling (non-modifier keys only)
+            if (this.tool === 'text' && this.textCursor && !e.ctrlKey && !e.metaKey && !e.altKey) {
                 if (e.key === 'Escape') {
                     this.clearTextCursor();
                     e.preventDefault();
                     return;
                 }
-                // Let Ctrl/Meta/Alt combos through (copy, paste, etc.)
-                if (e.ctrlKey || e.metaKey || e.altKey) return;
                 e.preventDefault();
                 this.handleTextInput(e.key);
                 return;
