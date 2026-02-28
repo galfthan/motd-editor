@@ -31,6 +31,10 @@ class CanvasRenderer {
         this.boxEnd = null;         // { x, y } drag end
         this.boxLineStyle = 1;      // 1=light, 2=heavy, 3=double
 
+        // Line tool state
+        this.lineStart = null;      // { x, y } drag start
+        this.lineEnd = null;        // { x, y } drag end
+
         this.setupEventListeners();
         this.setupKeyboardShortcuts();
     }
@@ -66,6 +70,12 @@ class CanvasRenderer {
         if (tool !== 'box') {
             this.boxStart = null;
             this.boxEnd = null;
+        }
+        if (tool !== 'line') {
+            this.lineStart = null;
+            this.lineEnd = null;
+        }
+        if (tool !== 'box' && tool !== 'line') {
             this.clearBoxPreview();
         }
     }
@@ -255,6 +265,8 @@ class CanvasRenderer {
             this.handleTextToolClick(e);
         } else if (this.tool === 'box') {
             this.handleBoxToolDown(e);
+        } else if (this.tool === 'line') {
+            this.handleLineToolDown(e);
         } else if (this.isSelectTool()) {
             this.handleSelectToolDown(e);
         } else if (this.tool === 'char') {
@@ -276,6 +288,8 @@ class CanvasRenderer {
             this.handleSelectToolMove(e);
         } else if (this.tool === 'box') {
             this.handleBoxToolMove(e);
+        } else if (this.tool === 'line') {
+            this.handleLineToolMove(e);
         } else if (this.tool === 'char') {
             this.handleCharTool(e);
         } else if (this.tool !== 'pick' && this.tool !== 'text') {
@@ -286,12 +300,20 @@ class CanvasRenderer {
     handleMouseUp(isLeave = false) {
         if (this.tool === 'box' && this.boxStart) {
             if (isLeave) {
-                // Cancel box on mouseleave
                 this.boxStart = null;
                 this.boxEnd = null;
                 this.clearBoxPreview();
             } else {
                 this.handleBoxToolUp();
+            }
+        }
+        if (this.tool === 'line' && this.lineStart) {
+            if (isLeave) {
+                this.lineStart = null;
+                this.lineEnd = null;
+                this.clearBoxPreview();
+            } else {
+                this.handleLineToolUp();
             }
         }
         if (this.isSelectTool() && this.selectionStart) {
@@ -906,6 +928,67 @@ class CanvasRenderer {
         this.container.querySelectorAll('.cell.box-preview').forEach(el => {
             el.classList.remove('box-preview');
         });
+    }
+
+    // --- Line tool methods ---
+
+    handleLineToolDown(e) {
+        const cellEl = e.target.closest('.cell');
+        if (!cellEl) return;
+        const x = parseInt(cellEl.dataset.x);
+        const y = parseInt(cellEl.dataset.y);
+        this.lineStart = { x, y };
+        this.lineEnd = { x, y };
+    }
+
+    handleLineToolMove(e) {
+        if (!this.lineStart) return;
+        const cellEl = e.target.closest('.cell');
+        if (!cellEl) return;
+        this.lineEnd = { x: parseInt(cellEl.dataset.x), y: parseInt(cellEl.dataset.y) };
+        this.showLinePreview();
+    }
+
+    async handleLineToolUp() {
+        if (!this.lineStart || !this.lineEnd) return;
+
+        const chars = computeLineChars(
+            this.lineStart.x, this.lineStart.y,
+            this.lineEnd.x, this.lineEnd.y,
+            this.boxLineStyle, this.canvas.cells, boxDrawLookup
+        );
+
+        if (chars.length > 0) {
+            const cells = chars.map(c => ({
+                x: c.x, y: c.y, charCode: c.charCode,
+                fg: this.fgColor, bg: this.bgColor
+            }));
+
+            try {
+                const updatedCanvas = await API.setCellBatch(cells);
+                this.canvas = updatedCanvas;
+                this.render();
+            } catch (error) {
+                console.error('Failed to draw line:', error);
+            }
+        }
+
+        this.lineStart = null;
+        this.lineEnd = null;
+        this.clearBoxPreview();
+    }
+
+    showLinePreview() {
+        this.clearBoxPreview();
+        if (!this.lineStart || !this.lineEnd) return;
+        const path = computeLinePath(
+            this.lineStart.x, this.lineStart.y,
+            this.lineEnd.x, this.lineEnd.y
+        );
+        for (const { x, y } of path) {
+            const cellEl = this.container.querySelector(`.cell[data-x="${x}"][data-y="${y}"]`);
+            if (cellEl) cellEl.classList.add('box-preview');
+        }
     }
 
     // --- Text tool methods ---

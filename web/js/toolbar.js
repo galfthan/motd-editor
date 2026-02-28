@@ -23,6 +23,7 @@ class Toolbar {
         const toolSelect = document.getElementById('tool-select');
         const toolSelectSubpixel = document.getElementById('tool-select-subpixel');
         const toolBox = document.getElementById('tool-box');
+        const toolLine = document.getElementById('tool-line');
         const toolPick = document.getElementById('tool-pick');
         const charPaletteSection = document.getElementById('char-palette-section');
         const boxStyleSection = document.getElementById('box-style-section');
@@ -33,11 +34,12 @@ class Toolbar {
             toolChar.classList.toggle('active', tool === 'char');
             toolText.classList.toggle('active', tool === 'text');
             toolBox.classList.toggle('active', tool === 'box');
+            toolLine.classList.toggle('active', tool === 'line');
             toolSelect.classList.toggle('active', tool === 'select');
             toolSelectSubpixel.classList.toggle('active', tool === 'select-subpixel');
             toolPick.classList.toggle('active', tool === 'pick');
             charPaletteSection.style.display = tool === 'char' ? 'block' : 'none';
-            boxStyleSection.style.display = tool === 'box' ? 'block' : 'none';
+            boxStyleSection.style.display = (tool === 'box' || tool === 'line') ? 'block' : 'none';
             this.renderer.setTool(tool);
         };
 
@@ -46,6 +48,7 @@ class Toolbar {
         toolChar.addEventListener('click', () => this.setTool('char'));
         toolText.addEventListener('click', () => this.setTool('text'));
         toolBox.addEventListener('click', () => this.setTool('box'));
+        toolLine.addEventListener('click', () => this.setTool('line'));
         toolSelect.addEventListener('click', () => this.setTool('select'));
         toolSelectSubpixel.addEventListener('click', () => this.setTool('select-subpixel'));
         toolPick.addEventListener('click', () => this.setTool('pick'));
@@ -77,6 +80,7 @@ class Toolbar {
                 case 'c': this.setTool('char'); break;
                 case 't': this.setTool('text'); break;
                 case 'b': this.setTool('box'); break;
+                case 'l': this.setTool('line'); break;
                 case 's': this.setTool('select'); break;
                 case 'p': this.setTool('pick'); break;
             }
