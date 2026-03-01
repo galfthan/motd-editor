@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"asciiart/internal/server"
+	"motdeditor/internal/server"
 )
 
 //go:embed all:web
@@ -23,7 +23,7 @@ func main() {
 
 	srv := server.NewServer(*addr, webFS, *fontPath)
 
-	fmt.Printf("Unicode ASCII Art Editor\n")
+	fmt.Printf("MOTD Editor\n")
 	fmt.Printf("Open your browser at: http://%s\n", *addr)
 	fmt.Printf("Press Ctrl+C to stop the server\n\n")
 

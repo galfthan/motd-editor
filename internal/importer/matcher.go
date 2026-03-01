@@ -3,8 +3,8 @@ package importer
 import (
 	"math/bits"
 
-	"asciiart/internal/charset"
-	"asciiart/internal/font"
+	"motdeditor/internal/charset"
+	"motdeditor/internal/font"
 )
 
 // GlyphCandidate represents a character and its bitmap for matching.

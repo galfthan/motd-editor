@@ -7,9 +7,9 @@ import (
 	"log"
 	"net/http"
 
-	"asciiart/internal/canvas"
-	"asciiart/internal/font"
-	"asciiart/internal/handlers"
+	"motdeditor/internal/canvas"
+	"motdeditor/internal/font"
+	"motdeditor/internal/handlers"
 )
 
 // Server holds the application state and HTTP server.

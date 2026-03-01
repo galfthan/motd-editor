@@ -1,7 +1,7 @@
 package canvas
 
 import (
-	"asciiart/internal/ansi"
+	"motdeditor/internal/ansi"
 	"strings"
 )
 

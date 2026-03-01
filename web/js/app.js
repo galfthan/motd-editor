@@ -26,5 +26,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Load initial canvas
     await canvasRenderer.loadCanvas();
 
-    console.log('ASCII Art Editor initialized');
+    console.log('MOTD Editor initialized');
 });

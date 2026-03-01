@@ -1,6 +1,6 @@
-# Unicode ASCII Art Editor
+# MOTD Editor
 
-A web-based editor for creating ASCII art using Unicode sextant characters (2x3 subpixel blocks) and extended diagonal/triangle characters.
+A web-based editor for creating MOTD banners using Unicode sextant characters (2x3 subpixel blocks) and extended diagonal/triangle characters.
 
 ## Setup
 
@@ -15,8 +15,8 @@ Download GNU Unifont's plane01.hex for diagonal and triangle character support:
 ### Build and Run
 
 ```bash
-go build -o ascii-art .
-./ascii-art
+go build -o motdeditor .
+./motdeditor
 ```
 
 Open http://localhost:8080 in your browser.

@@ -9,10 +9,10 @@ import (
 	_ "image/png"
 	"io"
 
-	"asciiart/internal/ansi"
-	"asciiart/internal/canvas"
-	"asciiart/internal/charset"
-	"asciiart/internal/font"
+	"motdeditor/internal/ansi"
+	"motdeditor/internal/canvas"
+	"motdeditor/internal/charset"
+	"motdeditor/internal/font"
 
 	"golang.org/x/image/draw"
 )

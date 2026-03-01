@@ -8,11 +8,11 @@ import (
 	"strings"
 	"sync"
 
-	"asciiart/internal/ansi"
-	"asciiart/internal/canvas"
-	"asciiart/internal/charset"
-	"asciiart/internal/font"
-	"asciiart/internal/importer"
+	"motdeditor/internal/ansi"
+	"motdeditor/internal/canvas"
+	"motdeditor/internal/charset"
+	"motdeditor/internal/font"
+	"motdeditor/internal/importer"
 )
 
 // Handlers contains the HTTP handlers and shared state.
@@ -305,7 +305,7 @@ func (h *Handlers) HandleExportTxt(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	if r.URL.Query().Get("download") == "1" {
-		w.Header().Set("Content-Disposition", "attachment; filename=ascii-art.txt")
+		w.Header().Set("Content-Disposition", "attachment; filename=motd.txt")
 	}
 	w.Write([]byte(text))
 }
@@ -324,7 +324,7 @@ func (h *Handlers) HandleExportPlain(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	if r.URL.Query().Get("download") == "1" {
-		w.Header().Set("Content-Disposition", "attachment; filename=ascii-art.txt")
+		w.Header().Set("Content-Disposition", "attachment; filename=motd.txt")
 	}
 	w.Write([]byte(text))
 }

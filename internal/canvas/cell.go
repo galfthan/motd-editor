@@ -1,8 +1,8 @@
 package canvas
 
 import (
-	"asciiart/internal/ansi"
-	"asciiart/internal/charset"
+	"motdeditor/internal/ansi"
+	"motdeditor/internal/charset"
 )
 
 // CellType distinguishes between sextant-based and extended characters.

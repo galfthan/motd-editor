@@ -98,7 +98,7 @@ class Toolbar {
         this.triangleChars = [];
         this.currentTab = 'diagonal';
         this.openMenu = null;
-        this.saveFilename = 'ascii-art.txt';
+        this.saveFilename = 'motd.txt';
         this.saveFormat = 'ansi';
 
         this.setupMenuBar();
@@ -171,7 +171,7 @@ class Toolbar {
             case 'new':
                 if (confirm('Create a new canvas? Unsaved changes will be lost.')) {
                     this.renderer.createNew(40, 20, 'sextant');
-                    this.saveFilename = 'ascii-art.txt';
+                    this.saveFilename = 'motd.txt';
                     this.saveFormat = 'ansi';
                 }
                 break;
@@ -226,7 +226,7 @@ class Toolbar {
 
         form.onsubmit = async (e) => {
             e.preventDefault();
-            this.saveFilename = filenameInput.value || 'ascii-art.txt';
+            this.saveFilename = filenameInput.value || 'motd.txt';
             this.saveFormat = form.querySelector('input[name="save-format"]:checked').value;
             dialog.close();
             await this.doSave();
