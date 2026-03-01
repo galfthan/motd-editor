@@ -249,9 +249,9 @@ class CanvasRenderer {
             } else {
                 // Fallback to text if bitmap not available
                 const char = String.fromCodePoint(charCode);
-                if (charCode > 0xFF) {
-                    // Symbol characters — font-size matches cell width,
-                    // scaleY(2) on span stretches to fill 1:2 cell aspect ratio
+                if (charCode >= 0x1FB00) {
+                    // Legacy Computing symbols — square glyphs need
+                    // fontSize matching cell width + scaleY(2) to fill 1:2 cell
                     const span = document.createElement('span');
                     span.textContent = char;
                     span.style.fontFamily = "'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace";
@@ -263,7 +263,7 @@ class CanvasRenderer {
                     }
                     cellEl.appendChild(span);
                 } else {
-                    // Normal text — keep natural sizing
+                    // Normal text and box-drawing chars — natural monospace sizing
                     cellEl.textContent = char;
                     cellEl.style.fontFamily = "'Cascadia Code', 'Consolas', 'Courier New', monospace";
                     cellEl.style.fontSize = '24px';
