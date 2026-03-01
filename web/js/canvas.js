@@ -262,8 +262,21 @@ class CanvasRenderer {
                         span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
                     }
                     cellEl.appendChild(span);
+                } else if (charCode >= 0x2500 && charCode <= 0x259F) {
+                    // Box-drawing and block elements — must fill cell edge-to-edge
+                    // fontSize 32px fills height, scaleX compresses to 16px width
+                    const span = document.createElement('span');
+                    span.textContent = char;
+                    span.style.fontFamily = "'Cascadia Code', 'Consolas', 'Courier New', monospace";
+                    span.style.fontSize = '32px';
+                    span.style.lineHeight = '1';
+                    span.style.transform = 'scaleX(0.833)';
+                    if (!cell.fg.default) {
+                        span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
+                    }
+                    cellEl.appendChild(span);
                 } else {
-                    // Normal text and box-drawing chars — natural monospace sizing
+                    // Normal text — natural monospace sizing
                     cellEl.textContent = char;
                     cellEl.style.fontFamily = "'Cascadia Code', 'Consolas', 'Courier New', monospace";
                     cellEl.style.fontSize = '24px';
