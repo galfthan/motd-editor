@@ -518,7 +518,14 @@ class Toolbar {
                     btn.textContent = charInfo.char;
                 }
             } else {
-                btn.textContent = charInfo.char;
+                // Font mode — use same scaleY(2) approach as canvas
+                const span = document.createElement('span');
+                span.textContent = charInfo.char;
+                span.style.fontFamily = "'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace";
+                span.style.fontSize = '16px';
+                span.style.lineHeight = '1';
+                span.style.transform = 'scaleY(2) translateY(1px)';
+                btn.appendChild(span);
             }
 
             btn.addEventListener('click', () => {

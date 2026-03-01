@@ -11,7 +11,7 @@ class CanvasRenderer {
         this.isDrawing = false;
         this.lastCell = null;
         this.toolbar = null; // Set by app.js
-        this.fontMode = 'bitmap'; // 'bitmap' or 'font'
+        this.fontMode = 'font'; // 'bitmap' or 'font'
 
         // Selection state (cell-level for 'select' tool)
         this.selection = null;      // { x1, y1, x2, y2 } normalized (x1 <= x2, y1 <= y2)
@@ -257,7 +257,7 @@ class CanvasRenderer {
                     span.style.fontFamily = "'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace";
                     span.style.fontSize = '16px';
                     span.style.lineHeight = '1';
-                    span.style.transform = 'scaleY(2)';
+                    span.style.transform = 'scaleY(2) translateY(1px)';
                     if (!cell.fg.default) {
                         span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
                     }
