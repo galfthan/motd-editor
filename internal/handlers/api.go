@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 
 	"asciiart/internal/ansi"
@@ -742,4 +743,65 @@ func (h *Handlers) HandleGlyphs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+// HandleParseText converts plain text into a 2D array of cells.
+// Used by the frontend to parse system clipboard text for pasting.
+func (h *Handlers) HandleParseText(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid JSON")
+		return
+	}
+
+	if len(req.Text) > 1*1024*1024 {
+		writeError(w, http.StatusBadRequest, "Text too large (max 1MB)")
+		return
+	}
+
+	// Normalize line endings
+	text := strings.ReplaceAll(req.Text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+
+	lines := strings.Split(text, "\n")
+
+	// Remove trailing empty lines
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+
+	if len(lines) == 0 {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"cells": [][]canvas.Cell{},
+		})
+		return
+	}
+
+	defaultFG := ansi.NewDefaultColor()
+	defaultBG := ansi.NewDefaultColor()
+
+	cells := make([][]canvas.Cell, len(lines))
+	for i, line := range lines {
+		runes := []rune(line)
+		row := make([]canvas.Cell, len(runes))
+		for j, r := range runes {
+			c := canvas.NewCell()
+			c.FG = defaultFG
+			c.BG = defaultBG
+			c.SetChar(r)
+			row[j] = c
+		}
+		cells[i] = row
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"cells": cells,
+	})
 }

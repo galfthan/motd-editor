@@ -208,5 +208,16 @@ const API = {
         });
         if (!response.ok) throw new Error('Failed to set subpixels');
         return response.json();
+    },
+
+    // Parse plain text into cells (for clipboard paste)
+    async parseText(text) {
+        const response = await fetch('/api/canvas/parse-text', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text })
+        });
+        if (!response.ok) throw new Error('Failed to parse text');
+        return response.json();
     }
 };

@@ -36,6 +36,19 @@ class CanvasRenderer {
         this.lineStart = null;      // { x, y } drag start
         this.lineEnd = null;        // { x, y } drag end
 
+        // DOM element cache for O(1) lookups
+        this.cellElements = [];     // [y][x] → cell DOM element
+        this.subpixelElements = []; // [y][x][row][col] → subpixel DOM element
+
+        // Decoration tracking sets for O(1) clear operations
+        this._selectedCells = new Set();
+        this._selectedSubpixels = new Set();
+        this._partialSelectedCells = new Set();
+        this._pastePreviewCells = new Set();
+        this._pastePreviewSubpixels = new Set();
+        this._boxPreviewCells = new Set();
+        this._textCursorCell = null;
+
         this.setupEventListeners();
         this.setupKeyboardShortcuts();
     }
@@ -89,6 +102,30 @@ class CanvasRenderer {
         return this.tool === 'select-subpixel';
     }
 
+    getCellElement(x, y) {
+        if (y >= 0 && y < this.cellElements.length && x >= 0 && x < this.cellElements[y].length)
+            return this.cellElements[y][x];
+        return null;
+    }
+
+    getSubpixelElement(cellX, cellY, row, col) {
+        return this.subpixelElements[cellY]?.[cellX]?.[row]?.[col] || null;
+    }
+
+    cacheSubpixels(x, y, cellEl, cell) {
+        if (cell.type === 'sextant') {
+            this.subpixelElements[y][x] = [];
+            const subs = cellEl.querySelectorAll('.subpixel');
+            for (let i = 0; i < subs.length; i++) {
+                const r = Math.floor(i / 2), c = i % 2;
+                if (!this.subpixelElements[y][x][r]) this.subpixelElements[y][x][r] = [];
+                this.subpixelElements[y][x][r][c] = subs[i];
+            }
+        } else {
+            this.subpixelElements[y][x] = null;
+        }
+    }
+
     setupKeyboardShortcuts() {
         document.addEventListener('keydown', (e) => {
             if (e.target.tagName === 'INPUT') return;
@@ -138,10 +175,14 @@ class CanvasRenderer {
 
             // Ctrl+V - paste
             if (e.ctrlKey && e.key === 'v') {
-                const hasClipboard = this.isSubpixelMode() ? this.subpixelClipboard : this.clipboard;
-                if (hasClipboard) {
-                    e.preventDefault();
-                    this.pasteMode = true;
+                e.preventDefault();
+                // Subpixel paste stays internal-only
+                if (this.isSubpixelMode()) {
+                    if (this.subpixelClipboard) {
+                        this.pasteMode = true;
+                    }
+                } else {
+                    this.handlePaste();
                 }
                 return;
             }
@@ -179,11 +220,26 @@ class CanvasRenderer {
         this.container.style.gridTemplateColumns = `repeat(${this.canvas.width}, 18px)`;
         this.container.style.gridTemplateRows = `repeat(${this.canvas.height}, 34px)`;
 
+        // Reset caches
+        this.cellElements = [];
+        this.subpixelElements = [];
+        this._selectedCells.clear();
+        this._selectedSubpixels.clear();
+        this._partialSelectedCells.clear();
+        this._pastePreviewCells.clear();
+        this._pastePreviewSubpixels.clear();
+        this._boxPreviewCells.clear();
+        this._textCursorCell = null;
+
         for (let y = 0; y < this.canvas.height; y++) {
+            this.cellElements[y] = [];
+            this.subpixelElements[y] = [];
             for (let x = 0; x < this.canvas.width; x++) {
                 const cell = this.canvas.cells[y][x];
                 const cellEl = this.createCellElement(x, y, cell);
                 this.container.appendChild(cellEl);
+                this.cellElements[y][x] = cellEl;
+                this.cacheSubpixels(x, y, cellEl, cell);
             }
         }
 
@@ -305,6 +361,22 @@ class CanvasRenderer {
     }
 
     handleMouseDown(e) {
+        // Paste mode takes priority over any tool
+        if (this.pasteMode) {
+            const cellEl = e.target.closest('.cell');
+            if (!cellEl) return;
+            const cellX = parseInt(cellEl.dataset.x);
+            const cellY = parseInt(cellEl.dataset.y);
+
+            if (this.isSubpixelMode() && this.subpixelClipboard) {
+                const sp = this.getSubpixelFromEvent(e);
+                if (sp) this.pasteAtSubpixel(sp.sx, sp.sy);
+            } else if (this.clipboard) {
+                this.pasteAt(cellX, cellY);
+            }
+            return;
+        }
+
         this.isDrawing = true;
 
         if (this.tool === 'pick') {
@@ -325,7 +397,7 @@ class CanvasRenderer {
     }
 
     handleMouseMove(e) {
-        if (this.isSelectTool() && this.pasteMode) {
+        if (this.pasteMode) {
             this.showPastePreview(e);
             return;
         }
@@ -419,23 +491,11 @@ class CanvasRenderer {
             const sp = this.getSubpixelFromEvent(e);
             if (!sp) return;
 
-            // If in paste mode, place at subpixel position
-            if (this.pasteMode && this.subpixelClipboard) {
-                this.pasteAtSubpixel(sp.sx, sp.sy);
-                return;
-            }
-
             // Start new subpixel selection
             this.clearSubpixelSelection();
             this.subpixelSelectionStart = { sx: sp.sx, sy: sp.sy };
             this.subpixelSelection = { sx1: sp.sx, sy1: sp.sy, sx2: sp.sx, sy2: sp.sy };
             this.updateSubpixelSelectionDisplay();
-            return;
-        }
-
-        // Cell-level selection (original behavior)
-        if (this.pasteMode && this.clipboard) {
-            this.pasteAt(cellX, cellY);
             return;
         }
 
@@ -486,19 +546,19 @@ class CanvasRenderer {
     }
 
     updateSelectionDisplay() {
-        // Clear all selection classes
-        this.container.querySelectorAll('.cell.selected').forEach(el => {
-            el.classList.remove('selected');
-        });
+        // Clear previous selection
+        for (const el of this._selectedCells) el.classList.remove('selected');
+        this._selectedCells.clear();
 
         if (!this.selection) return;
 
         // Add selection class to cells in range
         for (let y = this.selection.y1; y <= this.selection.y2; y++) {
             for (let x = this.selection.x1; x <= this.selection.x2; x++) {
-                const cellEl = this.container.querySelector(`.cell[data-x="${x}"][data-y="${y}"]`);
+                const cellEl = this.getCellElement(x, y);
                 if (cellEl) {
                     cellEl.classList.add('selected');
+                    this._selectedCells.add(cellEl);
                 }
             }
         }
@@ -507,19 +567,16 @@ class CanvasRenderer {
     clearSelection() {
         this.selection = null;
         this.selectionStart = null;
-        this.container.querySelectorAll('.cell.selected').forEach(el => {
-            el.classList.remove('selected');
-        });
+        for (const el of this._selectedCells) el.classList.remove('selected');
+        this._selectedCells.clear();
     }
 
     // Clear only the visual subpixel selection classes (not the state)
     clearSubpixelSelectionDisplay() {
-        this.container.querySelectorAll('.subpixel.subpixel-selected').forEach(el => {
-            el.classList.remove('subpixel-selected');
-        });
-        this.container.querySelectorAll('.cell.partial-selected').forEach(el => {
-            el.classList.remove('partial-selected');
-        });
+        for (const el of this._selectedSubpixels) el.classList.remove('subpixel-selected');
+        this._selectedSubpixels.clear();
+        for (const el of this._partialSelectedCells) el.classList.remove('partial-selected');
+        this._partialSelectedCells.clear();
     }
 
     // Subpixel selection display - highlights individual subpixels
@@ -537,16 +594,17 @@ class CanvasRenderer {
                 const subCol = sx % 2;
                 const subRow = sy % 3;
 
-                const cellEl = this.container.querySelector(`.cell[data-x="${cellX}"][data-y="${cellY}"]`);
-                if (!cellEl) continue;
-
-                // Find the subpixel element within the cell
-                const subpixelEl = cellEl.querySelector(`.subpixel[data-row="${subRow}"][data-col="${subCol}"]`);
+                const subpixelEl = this.getSubpixelElement(cellX, cellY, subRow, subCol);
                 if (subpixelEl) {
                     subpixelEl.classList.add('subpixel-selected');
+                    this._selectedSubpixels.add(subpixelEl);
                 } else {
                     // For extended cells, mark the whole cell with partial selection indicator
-                    cellEl.classList.add('partial-selected');
+                    const cellEl = this.getCellElement(cellX, cellY);
+                    if (cellEl) {
+                        cellEl.classList.add('partial-selected');
+                        this._partialSelectedCells.add(cellEl);
+                    }
                 }
             }
         }
@@ -555,15 +613,13 @@ class CanvasRenderer {
     clearSubpixelSelection() {
         this.subpixelSelection = null;
         this.subpixelSelectionStart = null;
-        this.container.querySelectorAll('.subpixel.subpixel-selected').forEach(el => {
-            el.classList.remove('subpixel-selected');
-        });
-        this.container.querySelectorAll('.cell.partial-selected').forEach(el => {
-            el.classList.remove('partial-selected');
-        });
+        for (const el of this._selectedSubpixels) el.classList.remove('subpixel-selected');
+        this._selectedSubpixels.clear();
+        for (const el of this._partialSelectedCells) el.classList.remove('partial-selected');
+        this._partialSelectedCells.clear();
     }
 
-    copySelection() {
+    async copySelection() {
         if (!this.selection) return;
 
         const { x1, y1, x2, y2 } = this.selection;
@@ -576,6 +632,14 @@ class CanvasRenderer {
                 row.push(JSON.parse(JSON.stringify(this.canvas.cells[y][x])));
             }
             this.clipboard.push(row);
+        }
+
+        // Write text representation to system clipboard
+        const text = this.cellsToText(this.clipboard);
+        try {
+            await navigator.clipboard.writeText(text);
+        } catch (err) {
+            console.warn('Failed to write to system clipboard:', err);
         }
     }
 
@@ -643,14 +707,16 @@ class CanvasRenderer {
 
                     if (cellX >= this.canvas.width || cellY >= this.canvas.height) continue;
 
-                    const cellEl = this.container.querySelector(`.cell[data-x="${cellX}"][data-y="${cellY}"]`);
-                    if (!cellEl) continue;
-
-                    const subpixelEl = cellEl.querySelector(`.subpixel[data-row="${subRow}"][data-col="${subCol}"]`);
+                    const subpixelEl = this.getSubpixelElement(cellX, cellY, subRow, subCol);
                     if (subpixelEl) {
                         subpixelEl.classList.add('paste-preview-subpixel');
+                        this._pastePreviewSubpixels.add(subpixelEl);
                     } else {
-                        cellEl.classList.add('paste-preview');
+                        const cellEl = this.getCellElement(cellX, cellY);
+                        if (cellEl) {
+                            cellEl.classList.add('paste-preview');
+                            this._pastePreviewCells.add(cellEl);
+                        }
                     }
                 }
             }
@@ -676,21 +742,121 @@ class CanvasRenderer {
 
                 if (targetX >= this.canvas.width || targetY >= this.canvas.height) continue;
 
-                const targetEl = this.container.querySelector(`.cell[data-x="${targetX}"][data-y="${targetY}"]`);
+                const targetEl = this.getCellElement(targetX, targetY);
                 if (targetEl) {
                     targetEl.classList.add('paste-preview');
+                    this._pastePreviewCells.add(targetEl);
                 }
             }
         }
     }
 
     clearPastePreview() {
-        this.container.querySelectorAll('.cell.paste-preview').forEach(el => {
-            el.classList.remove('paste-preview');
-        });
-        this.container.querySelectorAll('.subpixel.paste-preview-subpixel').forEach(el => {
-            el.classList.remove('paste-preview-subpixel');
-        });
+        for (const el of this._pastePreviewCells) el.classList.remove('paste-preview');
+        this._pastePreviewCells.clear();
+        for (const el of this._pastePreviewSubpixels) el.classList.remove('paste-preview-subpixel');
+        this._pastePreviewSubpixels.clear();
+    }
+
+    // Convert a 2D subpixels array to a 6-bit sextant pattern
+    subpixelsToPattern(subpixels) {
+        let pattern = 0;
+        if (subpixels[0][0]) pattern |= 1;
+        if (subpixels[0][1]) pattern |= 2;
+        if (subpixels[1][0]) pattern |= 4;
+        if (subpixels[1][1]) pattern |= 8;
+        if (subpixels[2][0]) pattern |= 16;
+        if (subpixels[2][1]) pattern |= 32;
+        return pattern;
+    }
+
+    // Convert a 6-bit sextant pattern to its Unicode character
+    sextantPatternToChar(pattern) {
+        if (pattern === 0)  return ' ';
+        if (pattern === 63) return '\u2588';  // full block
+        if (pattern === 21) return '\u258C';  // left half
+        if (pattern === 42) return '\u2590';  // right half
+
+        let offset = pattern;
+        if (pattern > 42)      offset -= 3;
+        else if (pattern > 21) offset -= 2;
+        else                   offset -= 1;
+
+        return String.fromCodePoint(0x1FB00 + offset);
+    }
+
+    // Convert a single cell to its Unicode character
+    cellToChar(cell) {
+        if (cell.type === 'sextant') {
+            const pattern = this.subpixelsToPattern(cell.subpixels);
+            return this.sextantPatternToChar(pattern);
+        }
+        if (cell.charCode && cell.charCode !== 0) {
+            return String.fromCodePoint(cell.charCode);
+        }
+        return ' ';
+    }
+
+    // Convert a 2D cell array to a multiline text string
+    cellsToText(cells) {
+        const lines = [];
+        for (const row of cells) {
+            let line = '';
+            for (const cell of row) {
+                line += this.cellToChar(cell);
+            }
+            lines.push(line.replace(/\s+$/, ''));
+        }
+        while (lines.length > 0 && lines[lines.length - 1] === '') {
+            lines.pop();
+        }
+        return lines.join('\n');
+    }
+
+    // Handle paste: read from system clipboard, fall back to internal clipboard
+    async handlePaste() {
+        let systemText = null;
+        try {
+            systemText = await navigator.clipboard.readText();
+        } catch (err) {
+            console.warn('Failed to read system clipboard:', err);
+        }
+
+        // If we have an internal clipboard, check if system clipboard matches it
+        // (same copy session) — if so, use the rich internal clipboard to preserve colors
+        if (systemText && this.clipboard) {
+            const internalText = this.cellsToText(this.clipboard);
+            if (systemText === internalText) {
+                this.pasteMode = true;
+                return;
+            }
+        }
+
+        // System clipboard has different/new content — parse it into cells
+        if (systemText && systemText.trim().length > 0) {
+            try {
+                const result = await API.parseText(systemText);
+                if (result.cells && result.cells.length > 0) {
+                    // Apply current fg/bg colors to pasted text
+                    for (const row of result.cells) {
+                        for (const cell of row) {
+                            cell.fg = { ...this.fgColor };
+                            cell.bg = { ...this.bgColor };
+                        }
+                    }
+                    this.clipboard = result.cells;
+                    this.pasteMode = true;
+                    return;
+                }
+            } catch (err) {
+                console.error('Failed to parse clipboard text:', err);
+            }
+        }
+
+        // Fall back to internal clipboard
+        if (this.clipboard) {
+            this.pasteMode = true;
+        }
     }
 
     // Get subpixel value at subpixel coordinates
@@ -869,6 +1035,8 @@ class CanvasRenderer {
             // Re-render the entire cell (handles type conversion from extended to sextant)
             const newCellEl = this.createCellElement(cellX, cellY, result.cell);
             cellEl.replaceWith(newCellEl);
+            this.cellElements[cellY][cellX] = newCellEl;
+            this.cacheSubpixels(cellX, cellY, newCellEl, result.cell);
         } catch (error) {
             console.error('Failed to update subpixel:', error);
         }
@@ -897,6 +1065,8 @@ class CanvasRenderer {
             // Re-render this cell
             const newCellEl = this.createCellElement(cellX, cellY, result.cell);
             cellEl.replaceWith(newCellEl);
+            this.cellElements[cellY][cellX] = newCellEl;
+            this.cacheSubpixels(cellX, cellY, newCellEl, result.cell);
         } catch (error) {
             console.error('Failed to set character:', error);
         }
@@ -965,17 +1135,19 @@ class CanvasRenderer {
         for (let y = y1; y <= y2; y++) {
             for (let x = x1; x <= x2; x++) {
                 if (x === x1 || x === x2 || y === y1 || y === y2) {
-                    const cellEl = this.container.querySelector(`.cell[data-x="${x}"][data-y="${y}"]`);
-                    if (cellEl) cellEl.classList.add('box-preview');
+                    const cellEl = this.getCellElement(x, y);
+                    if (cellEl) {
+                        cellEl.classList.add('box-preview');
+                        this._boxPreviewCells.add(cellEl);
+                    }
                 }
             }
         }
     }
 
     clearBoxPreview() {
-        this.container.querySelectorAll('.cell.box-preview').forEach(el => {
-            el.classList.remove('box-preview');
-        });
+        for (const el of this._boxPreviewCells) el.classList.remove('box-preview');
+        this._boxPreviewCells.clear();
     }
 
     // --- Line tool methods ---
@@ -1034,8 +1206,11 @@ class CanvasRenderer {
             this.lineEnd.x, this.lineEnd.y
         );
         for (const { x, y } of path) {
-            const cellEl = this.container.querySelector(`.cell[data-x="${x}"][data-y="${y}"]`);
-            if (cellEl) cellEl.classList.add('box-preview');
+            const cellEl = this.getCellElement(x, y);
+            if (cellEl) {
+                cellEl.classList.add('box-preview');
+                this._boxPreviewCells.add(cellEl);
+            }
         }
     }
 
@@ -1068,16 +1243,18 @@ class CanvasRenderer {
     updateTextCursorDisplay() {
         if (!this.textCursor) return;
         const { x, y } = this.textCursor;
-        const cellEl = this.container.querySelector(`.cell[data-x="${x}"][data-y="${y}"]`);
+        const cellEl = this.getCellElement(x, y);
         if (cellEl) {
             cellEl.classList.add('text-cursor');
+            this._textCursorCell = cellEl;
         }
     }
 
     clearTextCursorDisplay() {
-        this.container.querySelectorAll('.cell.text-cursor').forEach(el => {
-            el.classList.remove('text-cursor');
-        });
+        if (this._textCursorCell) {
+            this._textCursorCell.classList.remove('text-cursor');
+            this._textCursorCell = null;
+        }
     }
 
     async handleTextInput(key) {
@@ -1167,10 +1344,12 @@ class CanvasRenderer {
             const result = await API.setCell(x, y, charCode, this.fgColor, this.bgColor);
             this.canvas.cells[y][x] = result.cell;
 
-            const cellEl = this.container.querySelector(`.cell[data-x="${x}"][data-y="${y}"]`);
+            const cellEl = this.getCellElement(x, y);
             if (cellEl) {
                 const newCellEl = this.createCellElement(x, y, result.cell);
                 cellEl.replaceWith(newCellEl);
+                this.cellElements[y][x] = newCellEl;
+                this.cacheSubpixels(x, y, newCellEl, result.cell);
             }
         } catch (error) {
             console.error('Failed to set text cell:', error);
