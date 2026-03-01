@@ -13,7 +13,11 @@ import (
 var webFS embed.FS
 
 func main() {
-	addr := flag.String("addr", "localhost:8080", "Server address")
+	defaultAddr := "localhost:8080"
+	if port := os.Getenv("PORT"); port != "" {
+		defaultAddr = "0.0.0.0:" + port
+	}
+	addr := flag.String("addr", defaultAddr, "Server address")
 	fontPath := flag.String("font", "plane01.hex", "Path to HEX font file for extended characters (GNU Unifont)")
 	flag.Parse()
 
