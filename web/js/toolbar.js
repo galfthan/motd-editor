@@ -97,14 +97,172 @@ class Toolbar {
         this.diagonalChars = [];
         this.triangleChars = [];
         this.currentTab = 'diagonal';
+        this.openMenu = null;
+        this.saveFilename = 'ascii-art.txt';
+        this.saveFormat = 'ansi';
 
+        this.setupMenuBar();
         this.setupToolButtons();
         this.setupColorPickers();
-        this.setupCanvasControls();
-        this.setupFileButtons();
+        this.setupFileInputs();
         this.setupCharPalette();
         this.loadCharsets();
     }
+
+    // --- Menu Bar ---
+
+    setupMenuBar() {
+        const menuItems = document.querySelectorAll('.menu-item');
+
+        // Click to open/close
+        menuItems.forEach(item => {
+            const trigger = item.querySelector('.menu-trigger');
+            trigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (this.openMenu === item) {
+                    this.closeMenus();
+                } else {
+                    this.openMenuDropdown(item);
+                }
+            });
+
+            // Hover-switch when a menu is already open
+            trigger.addEventListener('mouseenter', () => {
+                if (this.openMenu && this.openMenu !== item) {
+                    this.openMenuDropdown(item);
+                }
+            });
+        });
+
+        // Click outside closes menus
+        document.addEventListener('click', () => this.closeMenus());
+
+        // Prevent dropdown clicks from bubbling (action buttons close explicitly)
+        document.querySelectorAll('.menu-dropdown').forEach(dd => {
+            dd.addEventListener('click', (e) => e.stopPropagation());
+        });
+
+        // Wire up menu actions
+        document.querySelectorAll('.menu-dropdown button[data-action]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const action = btn.dataset.action;
+                this.closeMenus();
+                this.handleMenuAction(action);
+            });
+        });
+    }
+
+    openMenuDropdown(item) {
+        this.closeMenus();
+        item.classList.add('open');
+        this.openMenu = item;
+    }
+
+    closeMenus() {
+        document.querySelectorAll('.menu-item.open').forEach(item => {
+            item.classList.remove('open');
+        });
+        this.openMenu = null;
+    }
+
+    handleMenuAction(action) {
+        switch (action) {
+            case 'new':
+                if (confirm('Create a new canvas? Unsaved changes will be lost.')) {
+                    this.renderer.createNew(40, 20, 'sextant');
+                    this.saveFilename = 'ascii-art.txt';
+                    this.saveFormat = 'ansi';
+                }
+                break;
+            case 'open':
+                document.getElementById('file-input').click();
+                break;
+            case 'save':
+                this.doSave();
+                break;
+            case 'save-as':
+                this.showSaveAsDialog();
+                break;
+            case 'import-png':
+                document.getElementById('png-input').click();
+                break;
+            case 'resize':
+                this.showResizeDialog();
+                break;
+            case 'clear':
+                if (confirm('Clear the entire canvas?')) {
+                    this.renderer.clear();
+                }
+                break;
+        }
+    }
+
+    // --- Save / Save As ---
+
+    async doSave() {
+        try {
+            const text = this.saveFormat === 'ansi'
+                ? await API.downloadTxt()
+                : await API.downloadPlain();
+            this.downloadText(text, this.saveFilename);
+        } catch (error) {
+            alert('Failed to save: ' + error.message);
+        }
+    }
+
+    showSaveAsDialog() {
+        const dialog = document.getElementById('save-as-dialog');
+        const form = document.getElementById('save-as-form');
+        const filenameInput = document.getElementById('save-filename');
+        const cancelBtn = document.getElementById('save-as-cancel');
+
+        filenameInput.value = this.saveFilename;
+        form.querySelectorAll('input[name="save-format"]').forEach(r => {
+            r.checked = (r.value === this.saveFormat);
+        });
+
+        cancelBtn.onclick = () => dialog.close();
+
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+            this.saveFilename = filenameInput.value || 'ascii-art.txt';
+            this.saveFormat = form.querySelector('input[name="save-format"]:checked').value;
+            dialog.close();
+            await this.doSave();
+        };
+
+        dialog.showModal();
+        filenameInput.select();
+    }
+
+    // --- Resize Dialog ---
+
+    showResizeDialog() {
+        const dialog = document.getElementById('resize-dialog');
+        const form = document.getElementById('resize-form');
+        const widthInput = document.getElementById('resize-width');
+        const heightInput = document.getElementById('resize-height');
+        const cancelBtn = document.getElementById('resize-cancel');
+
+        if (this.renderer.canvas) {
+            widthInput.value = this.renderer.canvas.width;
+            heightInput.value = this.renderer.canvas.height;
+        }
+
+        cancelBtn.onclick = () => dialog.close();
+
+        form.onsubmit = (e) => {
+            e.preventDefault();
+            const width = parseInt(widthInput.value) || 40;
+            const height = parseInt(heightInput.value) || 20;
+            this.renderer.resize(width, height);
+            dialog.close();
+        };
+
+        dialog.showModal();
+    }
+
+    // --- Tool Buttons ---
 
     setupToolButtons() {
         const toolDraw = document.getElementById('tool-draw');
@@ -118,6 +276,7 @@ class Toolbar {
         const toolPick = document.getElementById('tool-pick');
         const charPaletteSection = document.getElementById('char-palette-section');
         const boxStyleSection = document.getElementById('box-style-section');
+        const contextPanel = document.getElementById('context-panel');
 
         this.setTool = (tool) => {
             toolDraw.classList.toggle('active', tool === 'draw');
@@ -129,8 +288,13 @@ class Toolbar {
             toolSelect.classList.toggle('active', tool === 'select');
             toolSelectSubpixel.classList.toggle('active', tool === 'select-subpixel');
             toolPick.classList.toggle('active', tool === 'pick');
-            charPaletteSection.style.display = tool === 'char' ? 'block' : 'none';
-            boxStyleSection.style.display = (tool === 'box' || tool === 'line') ? 'block' : 'none';
+
+            const showCharPalette = tool === 'char';
+            const showBoxStyle = tool === 'box' || tool === 'line';
+            charPaletteSection.style.display = showCharPalette ? 'block' : 'none';
+            boxStyleSection.style.display = showBoxStyle ? 'block' : 'none';
+            contextPanel.style.display = (showCharPalette || showBoxStyle) ? 'block' : 'none';
+
             this.renderer.setTool(tool);
         };
 
@@ -156,7 +320,27 @@ class Toolbar {
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            if (e.target.tagName === 'INPUT') return;
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+            // Ctrl+S: Save, Ctrl+Shift+S: Save As
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+                e.preventDefault();
+                if (e.shiftKey) {
+                    this.showSaveAsDialog();
+                } else {
+                    this.doSave();
+                }
+                return;
+            }
+
+            // Escape: close menus first
+            if (e.key === 'Escape') {
+                if (this.openMenu) {
+                    this.closeMenus();
+                    return;
+                }
+            }
+
             // Skip tool shortcuts when modifier keys are held (Ctrl+C, etc.)
             if (e.ctrlKey || e.metaKey || e.altKey) return;
             // Skip tool shortcuts when text cursor is active (typing goes to canvas)
@@ -177,6 +361,8 @@ class Toolbar {
             }
         });
     }
+
+    // --- Color Pickers ---
 
     setupColorPickers() {
         const fgColor = document.getElementById('fg-color');
@@ -212,55 +398,12 @@ class Toolbar {
         bgDefault.addEventListener('change', updateBg);
     }
 
-    setupCanvasControls() {
-        const widthInput = document.getElementById('canvas-width');
-        const heightInput = document.getElementById('canvas-height');
-        const resizeBtn = document.getElementById('btn-resize');
-        const clearBtn = document.getElementById('btn-clear');
+    // --- File Inputs ---
 
-        resizeBtn.addEventListener('click', () => {
-            const width = parseInt(widthInput.value) || 40;
-            const height = parseInt(heightInput.value) || 20;
-            this.renderer.resize(width, height);
-        });
-
-        clearBtn.addEventListener('click', () => {
-            if (confirm('Clear the entire canvas?')) {
-                this.renderer.clear();
-            }
-        });
-    }
-
-    setupFileButtons() {
-        const saveBtn = document.getElementById('btn-save');
-        const savePlainBtn = document.getElementById('btn-save-plain');
-        const loadBtn = document.getElementById('btn-load');
-        const importPngBtn = document.getElementById('btn-import-png');
+    setupFileInputs() {
         const fileInput = document.getElementById('file-input');
         const pngInput = document.getElementById('png-input');
 
-        // Save with ANSI
-        saveBtn.addEventListener('click', async () => {
-            try {
-                const text = await API.downloadTxt();
-                this.downloadText(text, 'ascii-art.txt');
-            } catch (error) {
-                alert('Failed to save: ' + error.message);
-            }
-        });
-
-        // Save plain
-        savePlainBtn.addEventListener('click', async () => {
-            try {
-                const text = await API.downloadPlain();
-                this.downloadText(text, 'ascii-art.txt');
-            } catch (error) {
-                alert('Failed to save: ' + error.message);
-            }
-        });
-
-        // Load
-        loadBtn.addEventListener('click', () => fileInput.click());
         fileInput.addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (!file) return;
@@ -268,14 +411,14 @@ class Toolbar {
             try {
                 const canvas = await API.importTxt(file);
                 this.renderer.setCanvas(canvas);
+                this.saveFilename = file.name;
+                this.saveFormat = 'ansi';
             } catch (error) {
-                alert('Failed to load: ' + error.message);
+                alert('Failed to open: ' + error.message);
             }
             fileInput.value = '';
         });
 
-        // Import PNG
-        importPngBtn.addEventListener('click', () => pngInput.click());
         pngInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (!file) return;
@@ -284,9 +427,10 @@ class Toolbar {
         });
     }
 
+    // --- Character Palette ---
+
     setupCharPalette() {
         const tabs = document.querySelectorAll('.char-tabs .tab-btn');
-        const palette = document.getElementById('char-palette');
 
         tabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -359,6 +503,8 @@ class Toolbar {
         });
     }
 
+    // --- PNG Import ---
+
     showPngDialog(file) {
         const dialog = document.getElementById('png-dialog');
         const form = document.getElementById('png-form');
@@ -397,6 +543,8 @@ class Toolbar {
         dialog.showModal();
     }
 
+    // --- Utilities ---
+
     downloadText(text, filename) {
         const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
@@ -413,7 +561,6 @@ class Toolbar {
         const fgDefault = document.getElementById('fg-default');
         const bgDefault = document.getElementById('bg-default');
 
-        // Convert RGB to hex
         const toHex = (r, g, b) => '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
 
         fgColor.value = toHex(fg.r, fg.g, fg.b);

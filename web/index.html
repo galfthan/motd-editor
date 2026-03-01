@@ -12,97 +12,85 @@
 </head>
 <body>
     <div id="app">
-        <header>
-            <h1>Unicode ASCII Art Editor</h1>
-            <div class="header-controls">
+        <nav class="menu-bar">
+            <div class="menu-bar-left">
+                <div class="menu-item" data-menu="file">
+                    <button class="menu-trigger">File</button>
+                    <div class="menu-dropdown">
+                        <button data-action="new">New</button>
+                        <button data-action="open">Open...</button>
+                        <hr>
+                        <button data-action="save"><span class="menu-label">Save</span><span class="menu-shortcut">Ctrl+S</span></button>
+                        <button data-action="save-as"><span class="menu-label">Save As...</span><span class="menu-shortcut">Ctrl+Shift+S</span></button>
+                        <hr>
+                        <button data-action="import-png">Import PNG...</button>
+                    </div>
+                </div>
+                <div class="menu-item" data-menu="canvas">
+                    <button class="menu-trigger">Canvas</button>
+                    <div class="menu-dropdown">
+                        <button data-action="resize">Resize...</button>
+                        <button data-action="clear">Clear</button>
+                    </div>
+                </div>
+            </div>
+            <div class="menu-bar-right">
                 <span id="status">Sextant Mode | 40×20 chars</span>
             </div>
-        </header>
+        </nav>
+
+        <div class="toolbar-strip">
+            <div class="toolbar-tools">
+                <button id="tool-draw" class="tool-btn active" title="Draw (D)">
+                    <span class="icon">✏️</span> Draw
+                </button>
+                <button id="tool-erase" class="tool-btn" title="Erase (E)">
+                    <span class="icon">🧹</span> Erase
+                </button>
+                <button id="tool-char" class="tool-btn" title="Symbol (C)">
+                    <span class="icon">🔣</span> Symbol
+                </button>
+                <button id="tool-text" class="tool-btn" title="Text (T)">
+                    <span class="icon">T</span> Text
+                </button>
+                <button id="tool-box" class="tool-btn" title="Box (B)">
+                    <span class="icon">▭</span> Box
+                </button>
+                <button id="tool-line" class="tool-btn" title="Line (L)">
+                    <span class="icon">╱</span> Line
+                </button>
+                <button id="tool-select" class="tool-btn" title="Select (S)">
+                    <span class="icon">⬚</span> Select
+                </button>
+                <button id="tool-select-subpixel" class="tool-btn" title="Select Subpixels (Shift+S)">
+                    <span class="icon">⠿</span> Subpix
+                </button>
+                <button id="tool-pick" class="tool-btn" title="Pick Color (P)">
+                    <span class="icon">💧</span> Pick
+                </button>
+            </div>
+            <div class="toolbar-separator"></div>
+            <div class="toolbar-colors">
+                <div class="color-row">
+                    <label>FG:</label>
+                    <input type="color" id="fg-color" value="#ffffff">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="fg-default" checked> Def
+                    </label>
+                </div>
+                <div class="color-row">
+                    <label>BG:</label>
+                    <input type="color" id="bg-color" value="#000000">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="bg-default" checked> Def
+                    </label>
+                </div>
+            </div>
+        </div>
 
         <main>
-            <aside class="toolbar">
-                <section class="tool-section">
-                    <h3>Tools</h3>
-                    <div class="tool-buttons">
-                        <button id="tool-draw" class="tool-btn active" title="Draw (D)">
-                            <span class="icon">✏️</span> Draw
-                        </button>
-                        <button id="tool-erase" class="tool-btn" title="Erase (E)">
-                            <span class="icon">🧹</span> Erase
-                        </button>
-                        <button id="tool-char" class="tool-btn" title="Character (C)">
-                            <span class="icon">🔣</span> Char
-                        </button>
-                        <button id="tool-text" class="tool-btn" title="Text (T)">
-                            <span class="icon">T</span> Text
-                        </button>
-                        <button id="tool-box" class="tool-btn" title="Box (B)">
-                            <span class="icon">▭</span> Box
-                        </button>
-                        <button id="tool-line" class="tool-btn" title="Line (L)">
-                            <span class="icon">╱</span> Line
-                        </button>
-                        <button id="tool-select" class="tool-btn" title="Select (S)">
-                            <span class="icon">⬚</span> Select
-                        </button>
-                        <button id="tool-select-subpixel" class="tool-btn" title="Select Subpixels (Shift+S)">
-                            <span class="icon">⠿</span> Subpixels
-                        </button>
-                        <button id="tool-pick" class="tool-btn" title="Pick Color (P)">
-                            <span class="icon">💧</span> Pick
-                        </button>
-                    </div>
-                </section>
-
-                <section class="tool-section">
-                    <h3>Colors</h3>
-                    <div class="color-picker">
-                        <div class="color-row">
-                            <label>FG:</label>
-                            <input type="color" id="fg-color" value="#ffffff">
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="fg-default" checked> Default
-                            </label>
-                        </div>
-                        <div class="color-row">
-                            <label>BG:</label>
-                            <input type="color" id="bg-color" value="#000000">
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="bg-default" checked> Default
-                            </label>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="tool-section">
-                    <h3>Canvas</h3>
-                    <div class="canvas-controls">
-                        <div class="size-input">
-                            <label>W:</label>
-                            <input type="number" id="canvas-width" value="40" min="1" max="500">
-                        </div>
-                        <div class="size-input">
-                            <label>H:</label>
-                            <input type="number" id="canvas-height" value="20" min="1" max="200">
-                        </div>
-                        <button id="btn-resize">Resize</button>
-                        <button id="btn-clear">Clear</button>
-                    </div>
-                </section>
-
-                <section class="tool-section">
-                    <h3>File</h3>
-                    <div class="file-buttons">
-                        <button id="btn-save">Save (.txt)</button>
-                        <button id="btn-save-plain">Save Plain</button>
-                        <button id="btn-load">Load</button>
-                        <button id="btn-import-png">Import PNG</button>
-                    </div>
-                    <input type="file" id="file-input" accept=".txt" style="display:none">
-                    <input type="file" id="png-input" accept="image/*" style="display:none">
-                </section>
-
-                <section class="tool-section" id="box-style-section" style="display:none">
+            <aside id="context-panel" class="context-panel" style="display:none">
+                <section id="box-style-section" style="display:none">
                     <h3>Line Style</h3>
                     <div class="box-style-buttons">
                         <button class="box-style-btn active" data-style="1">┌─┐ Light</button>
@@ -110,9 +98,8 @@
                         <button class="box-style-btn" data-style="3">╔═╗ Double</button>
                     </div>
                 </section>
-
-                <section class="tool-section char-palette" id="char-palette-section" style="display:none">
-                    <h3>Characters</h3>
+                <section class="char-palette" id="char-palette-section" style="display:none">
+                    <h3>Symbols</h3>
                     <div class="char-tabs">
                         <button class="tab-btn active" data-tab="diagonal">Diagonal</button>
                         <button class="tab-btn" data-tab="triangle">Triangle</button>
@@ -124,7 +111,6 @@
                     <div id="char-palette" class="char-grid"></div>
                 </section>
             </aside>
-
             <div class="editor-area">
                 <div class="canvas-container">
                     <div id="canvas" class="canvas"></div>
@@ -132,6 +118,51 @@
             </div>
         </main>
     </div>
+
+    <!-- Hidden file inputs -->
+    <input type="file" id="file-input" accept=".txt" style="display:none">
+    <input type="file" id="png-input" accept="image/*" style="display:none">
+
+    <!-- Save As Dialog -->
+    <dialog id="save-as-dialog">
+        <h3>Save As</h3>
+        <form id="save-as-form">
+            <div class="form-row">
+                <label for="save-filename">Filename:</label>
+                <input type="text" id="save-filename" value="ascii-art.txt">
+            </div>
+            <div class="form-row">
+                <label>Format:</label>
+                <div class="radio-group">
+                    <label><input type="radio" name="save-format" value="ansi" checked> ANSI</label>
+                    <label><input type="radio" name="save-format" value="plain"> Plain</label>
+                </div>
+            </div>
+            <div class="dialog-buttons">
+                <button type="button" id="save-as-cancel">Cancel</button>
+                <button type="submit">Save</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Resize Dialog -->
+    <dialog id="resize-dialog">
+        <h3>Resize Canvas</h3>
+        <form id="resize-form">
+            <div class="form-row">
+                <label>Width (chars):</label>
+                <input type="number" id="resize-width" value="40" min="1" max="500">
+            </div>
+            <div class="form-row">
+                <label>Height (chars):</label>
+                <input type="number" id="resize-height" value="20" min="1" max="200">
+            </div>
+            <div class="dialog-buttons">
+                <button type="button" id="resize-cancel">Cancel</button>
+                <button type="submit">Resize</button>
+            </div>
+        </form>
+    </dialog>
 
     <!-- PNG Import Dialog -->
     <dialog id="png-dialog">

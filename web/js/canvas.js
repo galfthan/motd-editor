@@ -1169,9 +1169,5 @@ class CanvasRenderer {
         this.canvas = canvasData;
         this.render();
         this.updateStatus();
-
-        // Update size inputs
-        document.getElementById('canvas-width').value = canvasData.width;
-        document.getElementById('canvas-height').value = canvasData.height;
     }
 }
