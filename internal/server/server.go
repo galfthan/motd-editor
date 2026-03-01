@@ -22,8 +22,8 @@ type Server struct {
 
 // NewServer creates a new server instance with the given address.
 func NewServer(addr string, webFS embed.FS, fontPath string) *Server {
-	// Create initial canvas (40x20 characters)
-	c := canvas.NewCanvas(40, 20, "sextant")
+	// Create initial canvas (80x60 characters)
+	c := canvas.NewCanvas(80, 60, "sextant")
 
 	// Load bitmap font for extended characters
 	var hexFont *font.HexFont

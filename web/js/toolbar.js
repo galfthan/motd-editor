@@ -170,7 +170,7 @@ class Toolbar {
         switch (action) {
             case 'new':
                 if (confirm('Create a new canvas? Unsaved changes will be lost.')) {
-                    this.renderer.createNew(40, 20, 'sextant');
+                    this.renderer.createNew(80, 60, 'sextant');
                     this.saveFilename = 'motd.txt';
                     this.saveFormat = 'ansi';
                 }
@@ -254,8 +254,8 @@ class Toolbar {
 
         form.onsubmit = (e) => {
             e.preventDefault();
-            const width = parseInt(widthInput.value) || 40;
-            const height = parseInt(heightInput.value) || 20;
+            const width = parseInt(widthInput.value) || 80;
+            const height = parseInt(heightInput.value) || 60;
             this.renderer.resize(width, height);
             dialog.close();
         };
