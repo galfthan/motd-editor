@@ -69,27 +69,29 @@
                     <span class="icon">💧</span> Pick
                 </button>
             </div>
-            <div class="toolbar-separator"></div>
-            <div class="toolbar-colors">
-                <div class="color-row">
-                    <label>FG:</label>
-                    <input type="color" id="fg-color" value="#ffffff">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="fg-default" checked> Def
-                    </label>
-                </div>
-                <div class="color-row">
-                    <label>BG:</label>
-                    <input type="color" id="bg-color" value="#000000">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="bg-default" checked> Def
-                    </label>
-                </div>
-            </div>
         </div>
 
         <main>
-            <aside id="context-panel" class="context-panel" style="display:none">
+            <aside id="context-panel" class="context-panel">
+                <section id="color-section">
+                    <h3>Colors</h3>
+                    <div class="sidebar-colors">
+                        <div class="color-row" id="fg-color-row">
+                            <label>FG:</label>
+                            <input type="color" id="fg-color" value="#ffffff">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="fg-default" checked> Def
+                            </label>
+                        </div>
+                        <div class="color-row" id="bg-color-row">
+                            <label>BG:</label>
+                            <input type="color" id="bg-color" value="#000000">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="bg-default" checked> Def
+                            </label>
+                        </div>
+                    </div>
+                </section>
                 <section id="box-style-section" style="display:none">
                     <h3>Line Style</h3>
                     <div class="box-style-buttons">

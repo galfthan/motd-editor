@@ -276,7 +276,6 @@ class Toolbar {
         const toolPick = document.getElementById('tool-pick');
         const charPaletteSection = document.getElementById('char-palette-section');
         const boxStyleSection = document.getElementById('box-style-section');
-        const contextPanel = document.getElementById('context-panel');
 
         this.setTool = (tool) => {
             toolDraw.classList.toggle('active', tool === 'draw');
@@ -293,7 +292,6 @@ class Toolbar {
             const showBoxStyle = tool === 'box' || tool === 'line';
             charPaletteSection.style.display = showCharPalette ? 'block' : 'none';
             boxStyleSection.style.display = showBoxStyle ? 'block' : 'none';
-            contextPanel.style.display = (showCharPalette || showBoxStyle) ? 'block' : 'none';
 
             this.renderer.setTool(tool);
         };
@@ -370,11 +368,15 @@ class Toolbar {
         const fgDefault = document.getElementById('fg-default');
         const bgDefault = document.getElementById('bg-default');
 
+        const fgRow = document.getElementById('fg-color-row');
+        const bgRow = document.getElementById('bg-color-row');
+
         const updateFg = () => {
             const hex = fgColor.value;
             const r = parseInt(hex.substr(1, 2), 16);
             const g = parseInt(hex.substr(3, 2), 16);
             const b = parseInt(hex.substr(5, 2), 16);
+            fgRow.classList.toggle('color-inactive', fgDefault.checked);
             this.renderer.setFgColor({
                 r, g, b,
                 default: fgDefault.checked
@@ -386,11 +388,16 @@ class Toolbar {
             const r = parseInt(hex.substr(1, 2), 16);
             const g = parseInt(hex.substr(3, 2), 16);
             const b = parseInt(hex.substr(5, 2), 16);
+            bgRow.classList.toggle('color-inactive', bgDefault.checked);
             this.renderer.setBgColor({
                 r, g, b,
                 default: bgDefault.checked
             });
         };
+
+        // Set initial inactive state
+        fgRow.classList.toggle('color-inactive', fgDefault.checked);
+        bgRow.classList.toggle('color-inactive', bgDefault.checked);
 
         fgColor.addEventListener('input', updateFg);
         fgDefault.addEventListener('change', updateFg);
@@ -565,10 +572,12 @@ class Toolbar {
 
         fgColor.value = toHex(fg.r, fg.g, fg.b);
         fgDefault.checked = fg.default;
+        document.getElementById('fg-color-row').classList.toggle('color-inactive', fg.default);
         this.renderer.setFgColor(fg);
 
         bgColor.value = toHex(bg.r, bg.g, bg.b);
         bgDefault.checked = bg.default;
+        document.getElementById('bg-color-row').classList.toggle('color-inactive', bg.default);
         this.renderer.setBgColor(bg);
     }
 }
