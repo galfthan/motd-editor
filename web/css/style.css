@@ -393,51 +393,39 @@ main {
 
 /* Canvas Grid */
 .canvas {
-    display: inline-grid;
-    gap: 0;
+    position: relative;
     background-color: var(--bg-secondary);
-    padding: 1px;
     user-select: none;
 }
 
 .cell {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    grid-template-rows: repeat(3, 1fr);
-    gap: 1px;
-    background-color: var(--cell-bg);
-    width: 16px;
-    height: 32px;
-    position: relative;
-    cursor: crosshair;
-    border: 1px solid var(--border);
-    box-sizing: content-box;
-}
-
-.cell.extended {
     display: flex;
     align-items: center;
     justify-content: center;
     overflow: hidden;
+    background-color: var(--cell-bg);
+    width: 16px;
+    height: 32px;
+    position: absolute;
+    cursor: crosshair;
+    border: 1px solid var(--border);
+    box-sizing: content-box;
+    contain: layout style paint;
 }
 
-.cell.extended img {
+.cell img {
     width: 100%;
     height: 100%;
     display: block;
 }
 
-.subpixel {
-    background-color: var(--subpixel-off);
-    transition: background-color 0.1s;
-}
-
-.subpixel.filled {
-    background-color: var(--subpixel-on);
-}
-
-.subpixel:hover {
-    opacity: 0.8;
+/* Subpixel overlay for selection/paste preview highlighting */
+.subpixel-overlay {
+    position: absolute;
+    width: 50%;
+    height: 33.333%;
+    pointer-events: none;
+    z-index: 1;
 }
 
 .cell-char {
@@ -458,18 +446,13 @@ main {
     outline-offset: -2px;
 }
 
-.subpixel.subpixel-selected {
-    outline: 1px solid var(--accent) !important;
+.subpixel-overlay.subpixel-selected {
+    outline: 1px solid var(--accent);
     outline-offset: -1px;
 }
 
-.cell.partial-selected {
-    outline: 1px dashed var(--accent);
-    outline-offset: -1px;
-}
-
-.subpixel.paste-preview-subpixel {
-    outline: 1px dashed var(--success) !important;
+.subpixel-overlay.paste-preview-subpixel {
+    outline: 1px dashed var(--success);
     outline-offset: -1px;
 }
 

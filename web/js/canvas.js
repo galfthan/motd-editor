@@ -38,12 +38,10 @@ class CanvasRenderer {
 
         // DOM element cache for O(1) lookups
         this.cellElements = [];     // [y][x] → cell DOM element
-        this.subpixelElements = []; // [y][x][row][col] → subpixel DOM element
 
         // Decoration tracking sets for O(1) clear operations
         this._selectedCells = new Set();
         this._selectedSubpixels = new Set();
-        this._partialSelectedCells = new Set();
         this._pastePreviewCells = new Set();
         this._pastePreviewSubpixels = new Set();
         this._boxPreviewCells = new Set();
@@ -106,24 +104,6 @@ class CanvasRenderer {
         if (y >= 0 && y < this.cellElements.length && x >= 0 && x < this.cellElements[y].length)
             return this.cellElements[y][x];
         return null;
-    }
-
-    getSubpixelElement(cellX, cellY, row, col) {
-        return this.subpixelElements[cellY]?.[cellX]?.[row]?.[col] || null;
-    }
-
-    cacheSubpixels(x, y, cellEl, cell) {
-        if (cell.type === 'sextant') {
-            this.subpixelElements[y][x] = [];
-            const subs = cellEl.querySelectorAll('.subpixel');
-            for (let i = 0; i < subs.length; i++) {
-                const r = Math.floor(i / 2), c = i % 2;
-                if (!this.subpixelElements[y][x][r]) this.subpixelElements[y][x][r] = [];
-                this.subpixelElements[y][x][r][c] = subs[i];
-            }
-        } else {
-            this.subpixelElements[y][x] = null;
-        }
     }
 
     setupKeyboardShortcuts() {
@@ -217,31 +197,29 @@ class CanvasRenderer {
 
         this.container.innerHTML = '';
         // Cell is 16x32 + 2px border = 18x34 total (2x scale of 8x16 Unifont)
-        this.container.style.gridTemplateColumns = `repeat(${this.canvas.width}, 18px)`;
-        this.container.style.gridTemplateRows = `repeat(${this.canvas.height}, 34px)`;
+        this.container.style.width = (this.canvas.width * 18) + 'px';
+        this.container.style.height = (this.canvas.height * 34) + 'px';
 
         // Reset caches
         this.cellElements = [];
-        this.subpixelElements = [];
         this._selectedCells.clear();
         this._selectedSubpixels.clear();
-        this._partialSelectedCells.clear();
         this._pastePreviewCells.clear();
         this._pastePreviewSubpixels.clear();
         this._boxPreviewCells.clear();
         this._textCursorCell = null;
 
+        const fragment = document.createDocumentFragment();
         for (let y = 0; y < this.canvas.height; y++) {
             this.cellElements[y] = [];
-            this.subpixelElements[y] = [];
             for (let x = 0; x < this.canvas.width; x++) {
                 const cell = this.canvas.cells[y][x];
                 const cellEl = this.createCellElement(x, y, cell);
-                this.container.appendChild(cellEl);
+                fragment.appendChild(cellEl);
                 this.cellElements[y][x] = cellEl;
-                this.cacheSubpixels(x, y, cellEl, cell);
             }
         }
+        this.container.appendChild(fragment);
 
         // Restore text cursor display after re-render
         if (this.textCursor) {
@@ -258,101 +236,80 @@ class CanvasRenderer {
         cellEl.className = 'cell';
         cellEl.dataset.x = x;
         cellEl.dataset.y = y;
+        cellEl.style.left = (x * 18) + 'px';
+        cellEl.style.top = (y * 34) + 'px';
 
         // Apply background color
         if (!cell.bg.default) {
             cellEl.style.backgroundColor = `rgb(${cell.bg.r}, ${cell.bg.g}, ${cell.bg.b})`;
         }
 
+        // Determine character code (sextant cells use pattern→char conversion)
+        let charCode;
         if (cell.type === 'sextant') {
-            // Create 6 subpixel elements
-            for (let row = 0; row < 3; row++) {
-                for (let col = 0; col < 2; col++) {
-                    const subEl = document.createElement('div');
-                    subEl.className = 'subpixel';
-                    subEl.dataset.row = row;
-                    subEl.dataset.col = col;
+            const pattern = this.subpixelsToPattern(cell.subpixels);
+            charCode = this.sextantPatternToChar(pattern).codePointAt(0);
+        } else {
+            charCode = cell.charCode || 32;
+        }
 
-                    if (cell.subpixels[row][col]) {
-                        subEl.classList.add('filled');
-                        if (!cell.fg.default) {
-                            subEl.style.backgroundColor = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
-                        }
-                    } else {
-                        // Unfilled subpixels show the background color
-                        if (!cell.bg.default) {
-                            subEl.style.backgroundColor = `rgb(${cell.bg.r}, ${cell.bg.g}, ${cell.bg.b})`;
-                        }
-                    }
+        // Empty cell — no content needed
+        if (charCode === 32) return cellEl;
 
-                    cellEl.appendChild(subEl);
-                }
+        // Render character via bitmap or font
+        const useBitmap = this.fontMode !== 'font'
+            && bitmapRenderer && bitmapRenderer.ready
+            && bitmapRenderer.hasGlyph(charCode);
+
+        if (useBitmap) {
+            const img = bitmapRenderer.createImage(charCode, cell.fg, cell.bg);
+            if (img) {
+                cellEl.appendChild(img);
             }
         } else {
-            // Extended character - render via bitmap renderer for exact dimensions
-            cellEl.classList.add('extended');
-            const charCode = cell.charCode || 32;
-
-            const useBitmap = this.fontMode !== 'font'
-                && bitmapRenderer && bitmapRenderer.ready
-                && bitmapRenderer.hasGlyph(charCode);
-
-            if (useBitmap) {
-                const img = bitmapRenderer.createImage(charCode, cell.fg, cell.bg);
-                if (img) {
-                    cellEl.appendChild(img);
+            // Font-based rendering
+            const char = String.fromCodePoint(charCode);
+            const isLegacyTiling = (charCode >= 0x1FB00 && charCode <= 0x1FBAF)
+                || (charCode >= 0x1FBCE && charCode <= 0x1FBDF);
+            const isLegacyMisc = charCode >= 0x1FB00 && !isLegacyTiling;
+            if (isLegacyTiling) {
+                const span = document.createElement('span');
+                span.textContent = char;
+                span.style.fontFamily = "'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace";
+                span.style.fontSize = '16px';
+                span.style.lineHeight = '1';
+                span.style.transform = 'scaleY(2) translateY(1px)';
+                if (!cell.fg.default) {
+                    span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
                 }
+                cellEl.appendChild(span);
+            } else if (isLegacyMisc) {
+                const span = document.createElement('span');
+                span.textContent = char;
+                span.style.fontFamily = "'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace";
+                span.style.fontSize = '16px';
+                span.style.lineHeight = '1';
+                if (!cell.fg.default) {
+                    span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
+                }
+                cellEl.appendChild(span);
+            } else if (charCode >= 0x2500 && charCode <= 0x259F) {
+                const span = document.createElement('span');
+                span.textContent = char;
+                span.style.fontFamily = "'Cascadia Code', 'Consolas', 'Courier New', monospace";
+                span.style.fontSize = '32px';
+                span.style.lineHeight = '1';
+                span.style.transform = 'scaleX(0.833)';
+                if (!cell.fg.default) {
+                    span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
+                }
+                cellEl.appendChild(span);
             } else {
-                // Fallback to text if bitmap not available
-                const char = String.fromCodePoint(charCode);
-                const isLegacyTiling = (charCode >= 0x1FB00 && charCode <= 0x1FBAF)
-                    || (charCode >= 0x1FBCE && charCode <= 0x1FBDF);
-                const isLegacyMisc = charCode >= 0x1FB00 && !isLegacyTiling;
-                if (isLegacyTiling) {
-                    // Legacy Computing tiling symbols — square glyphs need
-                    // fontSize matching cell width + scaleY(2) to fill 1:2 cell
-                    const span = document.createElement('span');
-                    span.textContent = char;
-                    span.style.fontFamily = "'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace";
-                    span.style.fontSize = '16px';
-                    span.style.lineHeight = '1';
-                    span.style.transform = 'scaleY(2) translateY(1px)';
-                    if (!cell.fg.default) {
-                        span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
-                    }
-                    cellEl.appendChild(span);
-                } else if (isLegacyMisc) {
-                    // Legacy Computing icons — square glyphs, no vertical stretch
-                    const span = document.createElement('span');
-                    span.textContent = char;
-                    span.style.fontFamily = "'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace";
-                    span.style.fontSize = '16px';
-                    span.style.lineHeight = '1';
-                    if (!cell.fg.default) {
-                        span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
-                    }
-                    cellEl.appendChild(span);
-                } else if (charCode >= 0x2500 && charCode <= 0x259F) {
-                    // Box-drawing and block elements — must fill cell edge-to-edge
-                    // fontSize 32px fills height, scaleX compresses to 16px width
-                    const span = document.createElement('span');
-                    span.textContent = char;
-                    span.style.fontFamily = "'Cascadia Code', 'Consolas', 'Courier New', monospace";
-                    span.style.fontSize = '32px';
-                    span.style.lineHeight = '1';
-                    span.style.transform = 'scaleX(0.833)';
-                    if (!cell.fg.default) {
-                        span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
-                    }
-                    cellEl.appendChild(span);
-                } else {
-                    // Normal text — natural monospace sizing
-                    cellEl.textContent = char;
-                    cellEl.style.fontFamily = "'Cascadia Code', 'Consolas', 'Courier New', monospace";
-                    cellEl.style.fontSize = '24px';
-                    if (!cell.fg.default) {
-                        cellEl.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
-                    }
+                cellEl.textContent = char;
+                cellEl.style.fontFamily = "'Cascadia Code', 'Consolas', 'Courier New', monospace";
+                cellEl.style.fontSize = '24px';
+                if (!cell.fg.default) {
+                    cellEl.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
                 }
             }
         }
@@ -571,12 +528,10 @@ class CanvasRenderer {
         this._selectedCells.clear();
     }
 
-    // Clear only the visual subpixel selection classes (not the state)
+    // Clear only the visual subpixel selection overlays (not the state)
     clearSubpixelSelectionDisplay() {
-        for (const el of this._selectedSubpixels) el.classList.remove('subpixel-selected');
+        for (const el of this._selectedSubpixels) el.remove();
         this._selectedSubpixels.clear();
-        for (const el of this._partialSelectedCells) el.classList.remove('partial-selected');
-        this._partialSelectedCells.clear();
     }
 
     // Subpixel selection display - highlights individual subpixels
@@ -586,7 +541,7 @@ class CanvasRenderer {
 
         const { sx1, sy1, sx2, sy2 } = this.subpixelSelection;
 
-        // Iterate through subpixel range
+        // Iterate through subpixel range, creating overlay divs
         for (let sy = sy1; sy <= sy2; sy++) {
             for (let sx = sx1; sx <= sx2; sx++) {
                 const cellX = Math.floor(sx / 2);
@@ -594,18 +549,15 @@ class CanvasRenderer {
                 const subCol = sx % 2;
                 const subRow = sy % 3;
 
-                const subpixelEl = this.getSubpixelElement(cellX, cellY, subRow, subCol);
-                if (subpixelEl) {
-                    subpixelEl.classList.add('subpixel-selected');
-                    this._selectedSubpixels.add(subpixelEl);
-                } else {
-                    // For extended cells, mark the whole cell with partial selection indicator
-                    const cellEl = this.getCellElement(cellX, cellY);
-                    if (cellEl) {
-                        cellEl.classList.add('partial-selected');
-                        this._partialSelectedCells.add(cellEl);
-                    }
-                }
+                const cellEl = this.getCellElement(cellX, cellY);
+                if (!cellEl) continue;
+
+                const overlay = document.createElement('div');
+                overlay.className = 'subpixel-overlay subpixel-selected';
+                overlay.style.left = (subCol * 50) + '%';
+                overlay.style.top = (subRow * 33.333) + '%';
+                cellEl.appendChild(overlay);
+                this._selectedSubpixels.add(overlay);
             }
         }
     }
@@ -613,10 +565,8 @@ class CanvasRenderer {
     clearSubpixelSelection() {
         this.subpixelSelection = null;
         this.subpixelSelectionStart = null;
-        for (const el of this._selectedSubpixels) el.classList.remove('subpixel-selected');
+        for (const el of this._selectedSubpixels) el.remove();
         this._selectedSubpixels.clear();
-        for (const el of this._partialSelectedCells) el.classList.remove('partial-selected');
-        this._partialSelectedCells.clear();
     }
 
     async copySelection() {
@@ -707,17 +657,15 @@ class CanvasRenderer {
 
                     if (cellX >= this.canvas.width || cellY >= this.canvas.height) continue;
 
-                    const subpixelEl = this.getSubpixelElement(cellX, cellY, subRow, subCol);
-                    if (subpixelEl) {
-                        subpixelEl.classList.add('paste-preview-subpixel');
-                        this._pastePreviewSubpixels.add(subpixelEl);
-                    } else {
-                        const cellEl = this.getCellElement(cellX, cellY);
-                        if (cellEl) {
-                            cellEl.classList.add('paste-preview');
-                            this._pastePreviewCells.add(cellEl);
-                        }
-                    }
+                    const cellEl = this.getCellElement(cellX, cellY);
+                    if (!cellEl) continue;
+
+                    const overlay = document.createElement('div');
+                    overlay.className = 'subpixel-overlay paste-preview-subpixel';
+                    overlay.style.left = (subCol * 50) + '%';
+                    overlay.style.top = (subRow * 33.333) + '%';
+                    cellEl.appendChild(overlay);
+                    this._pastePreviewSubpixels.add(overlay);
                 }
             }
             return;
@@ -754,7 +702,7 @@ class CanvasRenderer {
     clearPastePreview() {
         for (const el of this._pastePreviewCells) el.classList.remove('paste-preview');
         this._pastePreviewCells.clear();
-        for (const el of this._pastePreviewSubpixels) el.classList.remove('paste-preview-subpixel');
+        for (const el of this._pastePreviewSubpixels) el.remove();
         this._pastePreviewSubpixels.clear();
     }
 
@@ -996,24 +944,12 @@ class CanvasRenderer {
         const cellX = parseInt(cellEl.dataset.x);
         const cellY = parseInt(cellEl.dataset.y);
 
-        // Check if clicking on a subpixel or on an extended cell
-        const subpixelEl = e.target.closest('.subpixel');
-        let subRow = 0, subCol = 0;
-
-        if (subpixelEl) {
-            subRow = parseInt(subpixelEl.dataset.row);
-            subCol = parseInt(subpixelEl.dataset.col);
-        } else if (cellEl.classList.contains('extended')) {
-            // Clicking on extended cell - calculate subpixel from click position
-            const rect = cellEl.getBoundingClientRect();
-            const relX = (e.clientX - rect.left) / rect.width;
-            const relY = (e.clientY - rect.top) / rect.height;
-            subCol = relX < 0.5 ? 0 : 1;
-            subRow = Math.floor(relY * 3);
-            if (subRow > 2) subRow = 2;
-        } else {
-            return;
-        }
+        // Calculate subpixel from click position within cell
+        const rect = cellEl.getBoundingClientRect();
+        const relX = (e.clientX - rect.left) / rect.width;
+        const relY = (e.clientY - rect.top) / rect.height;
+        const subCol = relX < 0.5 ? 0 : 1;
+        const subRow = Math.min(2, Math.floor(relY * 3));
 
         // Avoid re-processing same subpixel while dragging
         const key = `${cellX},${cellY},${subRow},${subCol}`;
@@ -1036,7 +972,6 @@ class CanvasRenderer {
             const newCellEl = this.createCellElement(cellX, cellY, result.cell);
             cellEl.replaceWith(newCellEl);
             this.cellElements[cellY][cellX] = newCellEl;
-            this.cacheSubpixels(cellX, cellY, newCellEl, result.cell);
         } catch (error) {
             console.error('Failed to update subpixel:', error);
         }
@@ -1066,7 +1001,6 @@ class CanvasRenderer {
             const newCellEl = this.createCellElement(cellX, cellY, result.cell);
             cellEl.replaceWith(newCellEl);
             this.cellElements[cellY][cellX] = newCellEl;
-            this.cacheSubpixels(cellX, cellY, newCellEl, result.cell);
         } catch (error) {
             console.error('Failed to set character:', error);
         }
@@ -1349,7 +1283,6 @@ class CanvasRenderer {
                 const newCellEl = this.createCellElement(x, y, result.cell);
                 cellEl.replaceWith(newCellEl);
                 this.cellElements[y][x] = newCellEl;
-                this.cacheSubpixels(x, y, newCellEl, result.cell);
             }
         } catch (error) {
             console.error('Failed to set text cell:', error);
