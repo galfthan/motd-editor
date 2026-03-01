@@ -203,6 +203,7 @@ main {
 /* Character Palette */
 .char-tabs {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.25rem;
     margin-bottom: 0.5rem;
 }
@@ -226,7 +227,7 @@ main {
     display: grid;
     grid-template-columns: repeat(8, 1fr);
     gap: 2px;
-    max-height: 200px;
+    max-height: 300px;
     overflow-y: auto;
 }
 

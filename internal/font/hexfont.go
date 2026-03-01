@@ -81,21 +81,12 @@ func (f *HexFont) GetGlyphsInRange(start, end rune) map[rune][]byte {
 	return result
 }
 
-// GetExtendedGlyphs returns bitmap data for diagonal and triangle characters
-// Diagonals: U+1FB3C - U+1FB67
-// Triangles: U+1FB68 - U+1FB6F
+// GetExtendedGlyphs returns bitmap data for all Symbols for Legacy Computing characters.
+// Covers U+1FB3C - U+1FBFA (diagonals, triangles, blocks, shades, lines, symbols, digits).
 func (f *HexFont) GetExtendedGlyphs() map[int][]byte {
 	result := make(map[int][]byte)
 
-	// Diagonals: U+1FB3C - U+1FB67
-	for r := rune(0x1FB3C); r <= rune(0x1FB67); r++ {
-		if glyph, ok := f.Glyphs[r]; ok {
-			result[int(r)] = glyph
-		}
-	}
-
-	// Triangles: U+1FB68 - U+1FB6F
-	for r := rune(0x1FB68); r <= rune(0x1FB6F); r++ {
+	for r := rune(0x1FB3C); r <= rune(0x1FBFA); r++ {
 		if glyph, ok := f.Glyphs[r]; ok {
 			result[int(r)] = glyph
 		}

@@ -1,5 +1,96 @@
 // Toolbar and controls functionality
 
+// Additional Symbols for Legacy Computing characters (U+1FB70-U+1FBFA)
+// Grouped by category for the character palette tabs
+const LEGACY_CHARS = {
+    blocks: [
+        [0x1FB70, 'Vertical 1/8 Block-2'], [0x1FB71, 'Vertical 1/8 Block-3'],
+        [0x1FB72, 'Vertical 1/8 Block-4'], [0x1FB73, 'Vertical 1/8 Block-5'],
+        [0x1FB74, 'Vertical 1/8 Block-6'], [0x1FB75, 'Vertical 1/8 Block-7'],
+        [0x1FB76, 'Horizontal 1/8 Block-2'], [0x1FB77, 'Horizontal 1/8 Block-3'],
+        [0x1FB78, 'Horizontal 1/8 Block-4'], [0x1FB79, 'Horizontal 1/8 Block-5'],
+        [0x1FB7A, 'Horizontal 1/8 Block-6'], [0x1FB7B, 'Horizontal 1/8 Block-7'],
+        [0x1FB7C, 'Left+Lower 1/8 Block'], [0x1FB7D, 'Left+Upper 1/8 Block'],
+        [0x1FB7E, 'Right+Upper 1/8 Block'], [0x1FB7F, 'Right+Lower 1/8 Block'],
+        [0x1FB80, 'Upper+Lower 1/8 Block'], [0x1FB81, 'Horizontal 1/8 Block-1358'],
+        [0x1FB82, 'Upper 1/4 Block'], [0x1FB83, 'Upper 3/8 Block'],
+        [0x1FB84, 'Upper 5/8 Block'], [0x1FB85, 'Upper 3/4 Block'],
+        [0x1FB86, 'Upper 7/8 Block'], [0x1FB87, 'Right 1/4 Block'],
+        [0x1FB88, 'Right 3/8 Block'], [0x1FB89, 'Right 5/8 Block'],
+        [0x1FB8A, 'Right 3/4 Block'], [0x1FB8B, 'Right 7/8 Block'],
+        [0x1FBCE, 'Left 2/3 Block'], [0x1FBCF, 'Left 1/3 Block'],
+        [0x1FBE4, 'Upper Centre 1/4 Block'], [0x1FBE5, 'Lower Centre 1/4 Block'],
+        [0x1FBE6, 'Middle Left 1/4 Block'], [0x1FBE7, 'Middle Right 1/4 Block'],
+    ],
+    shades: [
+        [0x1FB8C, 'Left Half Medium Shade'], [0x1FB8D, 'Right Half Medium Shade'],
+        [0x1FB8E, 'Upper Half Medium Shade'], [0x1FB8F, 'Lower Half Medium Shade'],
+        [0x1FB90, 'Inverse Medium Shade'],
+        [0x1FB91, 'Upper Half Block+Lower Inverse Shade'],
+        [0x1FB92, 'Upper Inverse Shade+Lower Half Block'],
+        [0x1FB94, 'Left Inverse Shade+Right Half Block'],
+        [0x1FB95, 'Checkerboard Fill'], [0x1FB96, 'Inverse Checkerboard Fill'],
+        [0x1FB97, 'Heavy Horizontal Fill'],
+        [0x1FB98, 'UL to LR Fill'], [0x1FB99, 'UR to LL Fill'],
+        [0x1FB9A, 'Upper+Lower Triangular Half Block'],
+        [0x1FB9B, 'Left+Right Triangular Half Block'],
+        [0x1FB9C, 'UL Triangular Medium Shade'],
+        [0x1FB9D, 'UR Triangular Medium Shade'],
+        [0x1FB9E, 'LR Triangular Medium Shade'],
+        [0x1FB9F, 'LL Triangular Medium Shade'],
+    ],
+    lines: [
+        [0x1FBA0, 'Diag Upper Centre to Middle Left'],
+        [0x1FBA1, 'Diag Upper Centre to Middle Right'],
+        [0x1FBA2, 'Diag Middle Left to Lower Centre'],
+        [0x1FBA3, 'Diag Middle Right to Lower Centre'],
+        [0x1FBA4, 'Diag UC-ML-LC'], [0x1FBA5, 'Diag UC-MR-LC'],
+        [0x1FBA6, 'Diag ML-LC-MR'], [0x1FBA7, 'Diag ML-UC-MR'],
+        [0x1FBA8, 'Diag UC-ML & MR-LC'], [0x1FBA9, 'Diag UC-MR & ML-LC'],
+        [0x1FBAA, 'Diag UC-MR-LC-ML'], [0x1FBAB, 'Diag UC-ML-LC-MR'],
+        [0x1FBAC, 'Diag ML-UC-MR-LC'], [0x1FBAD, 'Diag MR-UC-ML-LC'],
+        [0x1FBAE, 'Diag Diamond'], [0x1FBAF, 'Horizontal+Vertical Stroke'],
+        [0x1FBD0, 'Diag MR to Lower Left'], [0x1FBD1, 'Diag UR to ML'],
+        [0x1FBD2, 'Diag UL to MR'], [0x1FBD3, 'Diag ML to Lower Right'],
+        [0x1FBD4, 'Diag UL to LC'], [0x1FBD5, 'Diag UC to LR'],
+        [0x1FBD6, 'Diag UR to LC'], [0x1FBD7, 'Diag UC to LL'],
+        [0x1FBD8, 'Diag UL-MC-UR'], [0x1FBD9, 'Diag UR-MC-LR'],
+        [0x1FBDA, 'Diag LL-MC-LR'], [0x1FBDB, 'Diag UL-MC-LL'],
+        [0x1FBDC, 'Diag UL-LC-UR'], [0x1FBDD, 'Diag UR-ML-LR'],
+        [0x1FBDE, 'Diag LL-UC-LR'], [0x1FBDF, 'Diag UL-MR-LL'],
+    ],
+    misc: [
+        [0x1FBB0, 'Arrowhead Pointer'], [0x1FBB1, 'Inverse Check Mark'],
+        [0x1FBB2, 'Left Half Running Man'], [0x1FBB3, 'Right Half Running Man'],
+        [0x1FBB4, 'Inverse Down Arrow Tip Left'],
+        [0x1FBB5, 'Left Arrow+1/8 Blocks'], [0x1FBB6, 'Right Arrow+1/8 Blocks'],
+        [0x1FBB7, 'Down Arrow+Right 1/8'], [0x1FBB8, 'Up Arrow+Right 1/8'],
+        [0x1FBB9, 'Left Half Folder'], [0x1FBBA, 'Right Half Folder'],
+        [0x1FBBB, 'Voided Greek Cross'], [0x1FBBC, 'Right Open Squared Dot'],
+        [0x1FBBD, 'Negative Diagonal Cross'],
+        [0x1FBBE, 'Negative Diag MR-LC'], [0x1FBBF, 'Negative Diag Diamond'],
+        [0x1FBC0, 'Heavy Saltire Rounded'], [0x1FBC1, 'Left 1/3 Point Index'],
+        [0x1FBC2, 'Mid 1/3 Point Index'], [0x1FBC3, 'Right 1/3 Point Index'],
+        [0x1FBC4, 'Negative Squared ?'], [0x1FBC5, 'Stick Figure'],
+        [0x1FBC6, 'Stick Figure Arms Up'], [0x1FBC7, 'Stick Figure Left'],
+        [0x1FBC8, 'Stick Figure Right'], [0x1FBC9, 'Stick Figure Dress'],
+        [0x1FBCA, 'White Up Chevron'], [0x1FBCB, 'White Cross Mark'],
+        [0x1FBCC, 'Raised Left Bracket'], [0x1FBCD, 'Black Up Chevron'],
+        [0x1FBE0, 'Top Half White Circle'], [0x1FBE1, 'Right Half White Circle'],
+        [0x1FBE2, 'Bottom Half White Circle'], [0x1FBE3, 'Left Half White Circle'],
+        [0x1FBE8, 'Top Half Black Circle'], [0x1FBE9, 'Right Half Black Circle'],
+        [0x1FBEA, 'Bottom Half Black Circle'], [0x1FBEB, 'Left Half Black Circle'],
+        [0x1FBEC, 'TR Quarter Black Circle'], [0x1FBED, 'BL Quarter Black Circle'],
+        [0x1FBEE, 'BR Quarter Black Circle'], [0x1FBEF, 'TL Quarter Black Circle'],
+        [0x1FBF0, 'Segmented 0'], [0x1FBF1, 'Segmented 1'],
+        [0x1FBF2, 'Segmented 2'], [0x1FBF3, 'Segmented 3'],
+        [0x1FBF4, 'Segmented 4'], [0x1FBF5, 'Segmented 5'],
+        [0x1FBF6, 'Segmented 6'], [0x1FBF7, 'Segmented 7'],
+        [0x1FBF8, 'Segmented 8'], [0x1FBF9, 'Segmented 9'],
+        [0x1FBFA, 'Alarm Bell'],
+    ],
+};
+
 class Toolbar {
     constructor(canvasRenderer) {
         this.renderer = canvasRenderer;
@@ -219,18 +310,31 @@ class Toolbar {
         }
     }
 
+    getCharsForTab(tab) {
+        if (tab === 'diagonal') return this.diagonalChars;
+        if (tab === 'triangle') return this.triangleChars;
+        const legacy = LEGACY_CHARS[tab];
+        if (legacy) {
+            return legacy.map(([code, name]) => ({
+                char: String.fromCodePoint(code),
+                code,
+                name,
+            }));
+        }
+        return [];
+    }
+
     renderCharPalette() {
         const palette = document.getElementById('char-palette');
         palette.innerHTML = '';
 
-        const chars = this.currentTab === 'diagonal' ? this.diagonalChars : this.triangleChars;
+        const chars = this.getCharsForTab(this.currentTab);
 
         chars.forEach(charInfo => {
             const btn = document.createElement('button');
             btn.textContent = charInfo.char;
             btn.title = charInfo.name || `U+${charInfo.code.toString(16).toUpperCase()}`;
             btn.addEventListener('click', () => {
-                // Remove selected from all buttons
                 palette.querySelectorAll('button').forEach(b => b.classList.remove('selected'));
                 btn.classList.add('selected');
                 this.renderer.setSelectedChar(charInfo.code);
