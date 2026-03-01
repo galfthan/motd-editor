@@ -200,15 +200,12 @@ class Toolbar {
 
     // --- Save / Save As ---
 
-    async doSave() {
-        try {
-            const text = this.saveFormat === 'ansi'
-                ? await API.downloadTxt()
-                : await API.downloadPlain();
-            this.downloadText(text, this.saveFilename);
-        } catch (error) {
-            alert('Failed to save: ' + error.message);
-        }
+    doSave() {
+        const cellToCharFn = (cell) => this.renderer.cellToChar(cell);
+        const text = this.saveFormat === 'ansi'
+            ? canvasToANSI(this.renderer.canvas, cellToCharFn)
+            : canvasToPlain(this.renderer.canvas, cellToCharFn);
+        this.downloadText(text, this.saveFilename);
     }
 
     showSaveAsDialog() {
@@ -224,12 +221,12 @@ class Toolbar {
 
         cancelBtn.onclick = () => dialog.close();
 
-        form.onsubmit = async (e) => {
+        form.onsubmit = (e) => {
             e.preventDefault();
             this.saveFilename = filenameInput.value || 'motd.txt';
             this.saveFormat = form.querySelector('input[name="save-format"]:checked').value;
             dialog.close();
-            await this.doSave();
+            this.doSave();
         };
 
         dialog.showModal();

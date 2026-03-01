@@ -182,14 +182,10 @@ class CanvasRenderer {
         this.bgColor = color;
     }
 
-    async loadCanvas() {
-        try {
-            this.canvas = await API.getCanvas();
-            this.render();
-            this.updateStatus();
-        } catch (error) {
-            console.error('Failed to load canvas:', error);
-        }
+    loadCanvas() {
+        this.canvas = createCanvas(80, 60);
+        this.render();
+        this.updateStatus();
     }
 
     render() {
@@ -593,25 +589,17 @@ class CanvasRenderer {
         }
     }
 
-    async cutSelection() {
+    cutSelection() {
         if (!this.selection) return;
 
         this.copySelection();
 
-        // Clear the selected cells
         const { x1, y1, x2, y2 } = this.selection;
         for (let y = y1; y <= y2; y++) {
             for (let x = x1; x <= x2; x++) {
-                // Clear cell to empty sextant
-                try {
-                    const result = await API.setCell(x, y, 32,
-                        { r: 255, g: 255, b: 255, default: true },
-                        { r: 0, g: 0, b: 0, default: true }
-                    );
-                    this.canvas.cells[y][x] = result.cell;
-                } catch (error) {
-                    console.error('Failed to clear cell:', error);
-                }
+                clearCell(this.canvas.cells[y][x]);
+                this.canvas.cells[y][x].fg = { r: 255, g: 255, b: 255, default: true };
+                this.canvas.cells[y][x].bg = { r: 0, g: 0, b: 0, default: true };
             }
         }
 
@@ -619,17 +607,19 @@ class CanvasRenderer {
         this.clearSelection();
     }
 
-    async pasteAt(x, y) {
+    pasteAt(x, y) {
         if (!this.clipboard || this.clipboard.length === 0) return;
 
-        try {
-            // Use batch paste API for instant paste
-            const updatedCanvas = await API.paste(x, y, this.clipboard);
-            this.canvas = updatedCanvas;
-            this.render();
-        } catch (error) {
-            console.error('Failed to paste:', error);
+        for (let dy = 0; dy < this.clipboard.length; dy++) {
+            for (let dx = 0; dx < this.clipboard[dy].length; dx++) {
+                const tx = x + dx;
+                const ty = y + dy;
+                if (tx >= 0 && tx < this.canvas.width && ty >= 0 && ty < this.canvas.height) {
+                    this.canvas.cells[ty][tx] = JSON.parse(JSON.stringify(this.clipboard[dy][dx]));
+                }
+            }
         }
+        this.render();
 
         this.pasteMode = false;
         this.clearPastePreview();
@@ -782,22 +772,11 @@ class CanvasRenderer {
 
         // System clipboard has different/new content — parse it into cells
         if (systemText && systemText.trim().length > 0) {
-            try {
-                const result = await API.parseText(systemText);
-                if (result.cells && result.cells.length > 0) {
-                    // Apply current fg/bg colors to pasted text
-                    for (const row of result.cells) {
-                        for (const cell of row) {
-                            cell.fg = { ...this.fgColor };
-                            cell.bg = { ...this.bgColor };
-                        }
-                    }
-                    this.clipboard = result.cells;
-                    this.pasteMode = true;
-                    return;
-                }
-            } catch (err) {
-                console.error('Failed to parse clipboard text:', err);
+            const cells = parseTextToCells(systemText, this.fgColor, this.bgColor);
+            if (cells.length > 0) {
+                this.clipboard = cells;
+                this.pasteMode = true;
+                return;
             }
         }
 
@@ -867,77 +846,61 @@ class CanvasRenderer {
     }
 
     // Subpixel-level cut: copy subpixels then clear source
-    async cutSelectionSubpixel() {
+    cutSelectionSubpixel() {
         if (!this.subpixelSelection) return;
 
         this.copySelectionSubpixel();
 
         const { sx1, sy1, sx2, sy2 } = this.subpixelSelection;
-
-        // Build list of subpixels to clear
-        const updates = [];
         for (let sy = sy1; sy <= sy2; sy++) {
             for (let sx = sx1; sx <= sx2; sx++) {
-                updates.push({ sx, sy, filled: false });
+                const cellX = Math.floor(sx / 2);
+                const cellY = Math.floor(sy / 3);
+                const subCol = sx % 2;
+                const subRow = sy % 3;
+                if (cellX >= 0 && cellX < this.canvas.width && cellY >= 0 && cellY < this.canvas.height) {
+                    setCellSubpixel(this.canvas.cells[cellY][cellX], subRow, subCol, false);
+                }
             }
         }
-
-        try {
-            const updatedCanvas = await API.setSubpixelBatch(updates);
-            this.canvas = updatedCanvas;
-            this.render();
-        } catch (error) {
-            console.error('Failed to cut subpixels:', error);
-        }
-
+        this.render();
         this.clearSubpixelSelection();
     }
 
     // Subpixel-level paste at subpixel coordinates
-    async pasteAtSubpixel(sx, sy) {
+    pasteAtSubpixel(sx, sy) {
         if (!this.subpixelClipboard || this.subpixelClipboard.length === 0) return;
 
         const height = this.subpixelClipboard.length;
         const width = this.subpixelClipboard[0].length;
 
-        // Build list of subpixels to set with per-subpixel colors
-        const updates = [];
         for (let dy = 0; dy < height; dy++) {
             for (let dx = 0; dx < width; dx++) {
                 const targetSx = sx + dx;
                 const targetSy = sy + dy;
                 const cellX = Math.floor(targetSx / 2);
                 const cellY = Math.floor(targetSy / 3);
+                const subCol = targetSx % 2;
+                const subRow = targetSy % 3;
 
-                // Skip out of bounds
                 if (cellX < 0 || cellX >= this.canvas.width || cellY < 0 || cellY >= this.canvas.height) {
                     continue;
                 }
 
                 const data = this.subpixelClipboard[dy][dx];
-                updates.push({
-                    sx: targetSx,
-                    sy: targetSy,
-                    filled: data.filled,
-                    fg: data.fg,
-                    bg: data.bg
-                });
+                const cell = this.canvas.cells[cellY][cellX];
+                setCellSubpixel(cell, subRow, subCol, data.filled);
+                if (data.fg) cell.fg = { ...data.fg };
+                if (data.bg) cell.bg = { ...data.bg };
             }
         }
 
-        try {
-            const updatedCanvas = await API.setSubpixelBatch(updates);
-            this.canvas = updatedCanvas;
-            this.render();
-        } catch (error) {
-            console.error('Failed to paste subpixels:', error);
-        }
-
+        this.render();
         this.pasteMode = false;
         this.clearPastePreview();
     }
 
-    async handleDrawTool(e) {
+    handleDrawTool(e) {
         const cellEl = e.target.closest('.cell');
         if (!cellEl) return;
 
@@ -958,26 +921,17 @@ class CanvasRenderer {
 
         const filled = this.tool === 'draw';
 
-        try {
-            // Send colors with the request
-            const result = await API.setSubpixel(
-                cellX, cellY, subRow, subCol, filled,
-                this.fgColor, this.bgColor
-            );
+        const cell = this.canvas.cells[cellY][cellX];
+        cell.fg = { ...this.fgColor };
+        cell.bg = { ...this.bgColor };
+        setCellSubpixel(cell, subRow, subCol, filled);
 
-            // Update local canvas state
-            this.canvas.cells[cellY][cellX] = result.cell;
-
-            // Re-render the entire cell (handles type conversion from extended to sextant)
-            const newCellEl = this.createCellElement(cellX, cellY, result.cell);
-            cellEl.replaceWith(newCellEl);
-            this.cellElements[cellY][cellX] = newCellEl;
-        } catch (error) {
-            console.error('Failed to update subpixel:', error);
-        }
+        const newCellEl = this.createCellElement(cellX, cellY, cell);
+        cellEl.replaceWith(newCellEl);
+        this.cellElements[cellY][cellX] = newCellEl;
     }
 
-    async handleCharTool(e) {
+    handleCharTool(e) {
         if (!this.selectedChar) return;
 
         const cellEl = e.target.closest('.cell');
@@ -991,19 +945,14 @@ class CanvasRenderer {
         if (this.lastCell === key) return;
         this.lastCell = key;
 
-        try {
-            const result = await API.setCell(cellX, cellY, this.selectedChar, this.fgColor, this.bgColor);
+        const cell = this.canvas.cells[cellY][cellX];
+        cell.fg = { ...this.fgColor };
+        cell.bg = { ...this.bgColor };
+        setCellChar(cell, this.selectedChar);
 
-            // Update local canvas state
-            this.canvas.cells[cellY][cellX] = result.cell;
-
-            // Re-render this cell
-            const newCellEl = this.createCellElement(cellX, cellY, result.cell);
-            cellEl.replaceWith(newCellEl);
-            this.cellElements[cellY][cellX] = newCellEl;
-        } catch (error) {
-            console.error('Failed to set character:', error);
-        }
+        const newCellEl = this.createCellElement(cellX, cellY, cell);
+        cellEl.replaceWith(newCellEl);
+        this.cellElements[cellY][cellX] = newCellEl;
     }
 
     // --- Box tool methods ---
@@ -1031,7 +980,7 @@ class CanvasRenderer {
         this.showBoxPreview(x1, y1, x2, y2);
     }
 
-    async handleBoxToolUp() {
+    handleBoxToolUp() {
         if (!this.boxStart || !this.boxEnd) return;
 
         const x1 = Math.min(this.boxStart.x, this.boxEnd.x);
@@ -1041,22 +990,14 @@ class CanvasRenderer {
 
         const chars = computeBoxChars(x1, y1, x2, y2, this.boxLineStyle, this.canvas.cells, boxDrawLookup);
 
+        for (const c of chars) {
+            const cell = this.canvas.cells[c.y][c.x];
+            cell.fg = { ...this.fgColor };
+            cell.bg = { ...this.bgColor };
+            setCellChar(cell, c.charCode);
+        }
         if (chars.length > 0) {
-            const cells = chars.map(c => ({
-                x: c.x,
-                y: c.y,
-                charCode: c.charCode,
-                fg: this.fgColor,
-                bg: this.bgColor
-            }));
-
-            try {
-                const updatedCanvas = await API.setCellBatch(cells);
-                this.canvas = updatedCanvas;
-                this.render();
-            } catch (error) {
-                console.error('Failed to draw box:', error);
-            }
+            this.render();
         }
 
         this.boxStart = null;
@@ -1103,7 +1044,7 @@ class CanvasRenderer {
         this.showLinePreview();
     }
 
-    async handleLineToolUp() {
+    handleLineToolUp() {
         if (!this.lineStart || !this.lineEnd) return;
 
         const chars = computeLineChars(
@@ -1112,19 +1053,14 @@ class CanvasRenderer {
             this.boxLineStyle, this.canvas.cells, boxDrawLookup
         );
 
+        for (const c of chars) {
+            const cell = this.canvas.cells[c.y][c.x];
+            cell.fg = { ...this.fgColor };
+            cell.bg = { ...this.bgColor };
+            setCellChar(cell, c.charCode);
+        }
         if (chars.length > 0) {
-            const cells = chars.map(c => ({
-                x: c.x, y: c.y, charCode: c.charCode,
-                fg: this.fgColor, bg: this.bgColor
-            }));
-
-            try {
-                const updatedCanvas = await API.setCellBatch(cells);
-                this.canvas = updatedCanvas;
-                this.render();
-            } catch (error) {
-                console.error('Failed to draw line:', error);
-            }
+            this.render();
         }
 
         this.lineStart = null;
@@ -1191,7 +1127,7 @@ class CanvasRenderer {
         }
     }
 
-    async handleTextInput(key) {
+    handleTextInput(key) {
         if (!this.textCursor || !this.canvas) return;
 
         const { x, y } = this.textCursor;
@@ -1207,7 +1143,7 @@ class CanvasRenderer {
                     return; // At top-left corner
                 }
             }
-            await this.setTextCell(newX, newY, 32); // Clear with space
+            this.setTextCell(newX, newY, 32); // Clear with space
             this.setTextCursor(newX, newY);
             return;
         }
@@ -1249,7 +1185,7 @@ class CanvasRenderer {
         }
 
         if (key === 'Delete') {
-            await this.setTextCell(x, y, 32); // Clear with space
+            this.setTextCell(x, y, 32); // Clear with space
             this.updateTextCursorDisplay();
             return;
         }
@@ -1258,7 +1194,7 @@ class CanvasRenderer {
         if (key.length !== 1) return;
 
         const charCode = key.codePointAt(0);
-        await this.setTextCell(x, y, charCode);
+        this.setTextCell(x, y, charCode);
 
         // Advance cursor right with wrapping
         let newX = x + 1, newY = y;
@@ -1273,19 +1209,17 @@ class CanvasRenderer {
         this.setTextCursor(newX, newY);
     }
 
-    async setTextCell(x, y, charCode) {
-        try {
-            const result = await API.setCell(x, y, charCode, this.fgColor, this.bgColor);
-            this.canvas.cells[y][x] = result.cell;
+    setTextCell(x, y, charCode) {
+        const cell = this.canvas.cells[y][x];
+        cell.fg = { ...this.fgColor };
+        cell.bg = { ...this.bgColor };
+        setCellChar(cell, charCode);
 
-            const cellEl = this.getCellElement(x, y);
-            if (cellEl) {
-                const newCellEl = this.createCellElement(x, y, result.cell);
-                cellEl.replaceWith(newCellEl);
-                this.cellElements[y][x] = newCellEl;
-            }
-        } catch (error) {
-            console.error('Failed to set text cell:', error);
+        const cellEl = this.getCellElement(x, y);
+        if (cellEl) {
+            const newCellEl = this.createCellElement(x, y, cell);
+            cellEl.replaceWith(newCellEl);
+            this.cellElements[y][x] = newCellEl;
         }
     }
 
@@ -1296,33 +1230,22 @@ class CanvasRenderer {
         }
     }
 
-    async resize(width, height) {
-        try {
-            this.canvas = await API.resize(width, height);
-            this.render();
-            this.updateStatus();
-        } catch (error) {
-            console.error('Failed to resize:', error);
-        }
+    resize(width, height) {
+        resizeCanvas(this.canvas, width, height);
+        this.render();
+        this.updateStatus();
     }
 
-    async clear() {
-        try {
-            this.canvas = await API.clear();
-            this.render();
-        } catch (error) {
-            console.error('Failed to clear:', error);
-        }
+    clear() {
+        clearCanvas(this.canvas);
+        this.render();
     }
 
-    async createNew(width, height, mode) {
-        try {
-            this.canvas = await API.createCanvas(width, height, mode);
-            this.render();
-            this.updateStatus();
-        } catch (error) {
-            console.error('Failed to create canvas:', error);
-        }
+    createNew(width, height, mode) {
+        this.canvas = createCanvas(width, height);
+        this.canvas.mode = mode || 'sextant';
+        this.render();
+        this.updateStatus();
     }
 
     setCanvas(canvasData) {

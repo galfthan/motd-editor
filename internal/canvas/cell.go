@@ -164,6 +164,7 @@ func (c *Cell) SetExtendedChar(charCode rune) {
 func (c *Cell) ConvertToSextant() {
 	c.Type = CellTypeSextant
 	c.CharCode = 0
+	c.Subpixels = [3][2]bool{}
 }
 
 // SetChar sets this cell to display the given character.
