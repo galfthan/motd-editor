@@ -518,13 +518,18 @@ class Toolbar {
                     btn.textContent = charInfo.char;
                 }
             } else {
-                // Font mode — use same scaleY(2) approach as canvas
+                // Font mode
+                const code = charInfo.code;
+                const isTiling = (code >= 0x1FB00 && code <= 0x1FBAF)
+                    || (code >= 0x1FBCE && code <= 0x1FBDF);
                 const span = document.createElement('span');
                 span.textContent = charInfo.char;
                 span.style.fontFamily = "'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace";
                 span.style.fontSize = '16px';
                 span.style.lineHeight = '1';
-                span.style.transform = 'scaleY(2) translateY(1px)';
+                if (isTiling) {
+                    span.style.transform = 'scaleY(2) translateY(1px)';
+                }
                 btn.appendChild(span);
             }
 

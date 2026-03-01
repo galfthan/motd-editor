@@ -249,8 +249,11 @@ class CanvasRenderer {
             } else {
                 // Fallback to text if bitmap not available
                 const char = String.fromCodePoint(charCode);
-                if (charCode >= 0x1FB00) {
-                    // Legacy Computing symbols — square glyphs need
+                const isLegacyTiling = (charCode >= 0x1FB00 && charCode <= 0x1FBAF)
+                    || (charCode >= 0x1FBCE && charCode <= 0x1FBDF);
+                const isLegacyMisc = charCode >= 0x1FB00 && !isLegacyTiling;
+                if (isLegacyTiling) {
+                    // Legacy Computing tiling symbols — square glyphs need
                     // fontSize matching cell width + scaleY(2) to fill 1:2 cell
                     const span = document.createElement('span');
                     span.textContent = char;
@@ -258,6 +261,17 @@ class CanvasRenderer {
                     span.style.fontSize = '16px';
                     span.style.lineHeight = '1';
                     span.style.transform = 'scaleY(2) translateY(1px)';
+                    if (!cell.fg.default) {
+                        span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
+                    }
+                    cellEl.appendChild(span);
+                } else if (isLegacyMisc) {
+                    // Legacy Computing icons — square glyphs, no vertical stretch
+                    const span = document.createElement('span');
+                    span.textContent = char;
+                    span.style.fontFamily = "'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace";
+                    span.style.fontSize = '16px';
+                    span.style.lineHeight = '1';
                     if (!cell.fg.default) {
                         span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
                     }
