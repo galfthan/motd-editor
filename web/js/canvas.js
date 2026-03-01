@@ -11,6 +11,7 @@ class CanvasRenderer {
         this.isDrawing = false;
         this.lastCell = null;
         this.toolbar = null; // Set by app.js
+        this.fontMode = 'bitmap'; // 'bitmap' or 'font'
 
         // Selection state (cell-level for 'select' tool)
         this.selection = null;      // { x1, y1, x2, y2 } normalized (x1 <= x2, y1 <= y2)
@@ -236,7 +237,11 @@ class CanvasRenderer {
             cellEl.classList.add('extended');
             const charCode = cell.charCode || 32;
 
-            if (bitmapRenderer && bitmapRenderer.ready && bitmapRenderer.hasGlyph(charCode)) {
+            const useBitmap = this.fontMode !== 'font'
+                && bitmapRenderer && bitmapRenderer.ready
+                && bitmapRenderer.hasGlyph(charCode);
+
+            if (useBitmap) {
                 const img = bitmapRenderer.createImage(charCode, cell.fg, cell.bg);
                 if (img) {
                     cellEl.appendChild(img);
@@ -244,11 +249,27 @@ class CanvasRenderer {
             } else {
                 // Fallback to text if bitmap not available
                 const char = String.fromCodePoint(charCode);
-                cellEl.textContent = char;
-                cellEl.style.fontFamily = "'Noto Sans Symbols 2', 'Segoe UI Symbol', monospace";
-                cellEl.style.fontSize = '28px';
-                if (!cell.fg.default) {
-                    cellEl.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
+                if (charCode > 0xFF) {
+                    // Symbol characters — font-size matches cell width,
+                    // scaleY(2) on span stretches to fill 1:2 cell aspect ratio
+                    const span = document.createElement('span');
+                    span.textContent = char;
+                    span.style.fontFamily = "'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace";
+                    span.style.fontSize = '16px';
+                    span.style.lineHeight = '1';
+                    span.style.transform = 'scaleY(2)';
+                    if (!cell.fg.default) {
+                        span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
+                    }
+                    cellEl.appendChild(span);
+                } else {
+                    // Normal text — keep natural sizing
+                    cellEl.textContent = char;
+                    cellEl.style.fontFamily = "'Cascadia Code', 'Consolas', 'Courier New', monospace";
+                    cellEl.style.fontSize = '24px';
+                    if (!cell.fg.default) {
+                        cellEl.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
+                    }
                 }
             }
         }

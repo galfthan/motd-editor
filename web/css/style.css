@@ -345,6 +345,33 @@ main {
     border-color: var(--accent);
 }
 
+/* Render Toggle */
+.render-toggle {
+    display: flex;
+    gap: 0.25rem;
+}
+
+.render-mode-btn {
+    flex: 1;
+    padding: 0.375rem 0.5rem;
+    background-color: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8125rem;
+    transition: all 0.15s;
+}
+
+.render-mode-btn:hover {
+    background-color: #454545;
+}
+
+.render-mode-btn.active {
+    background-color: var(--accent);
+    border-color: var(--accent);
+}
+
 /* Editor Area */
 .editor-area {
     flex: 1;

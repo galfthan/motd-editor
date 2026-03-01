@@ -104,6 +104,7 @@ class Toolbar {
         this.setupMenuBar();
         this.setupToolButtons();
         this.setupColorPickers();
+        this.setupRenderToggle();
         this.setupFileInputs();
         this.setupCharPalette();
         this.loadCharsets();
@@ -405,6 +406,21 @@ class Toolbar {
         bgDefault.addEventListener('change', updateBg);
     }
 
+    // --- Render Toggle ---
+
+    setupRenderToggle() {
+        const btns = document.querySelectorAll('.render-mode-btn');
+        btns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                btns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.renderer.fontMode = btn.dataset.mode;
+                this.renderer.render();
+                this.renderCharPalette();
+            });
+        });
+    }
+
     // --- File Inputs ---
 
     setupFileInputs() {
@@ -490,7 +506,11 @@ class Toolbar {
             btn.title = charInfo.name || `U+${charInfo.code.toString(16).toUpperCase()}`;
 
             // Use bitmap renderer for consistent look with canvas
-            if (bitmapRenderer && bitmapRenderer.ready && bitmapRenderer.hasGlyph(charInfo.code)) {
+            const useBitmap = this.renderer.fontMode !== 'font'
+                && bitmapRenderer && bitmapRenderer.ready
+                && bitmapRenderer.hasGlyph(charInfo.code);
+
+            if (useBitmap) {
                 const img = bitmapRenderer.createImage(charInfo.code, paletteFG, paletteBG);
                 if (img) {
                     btn.appendChild(img);
