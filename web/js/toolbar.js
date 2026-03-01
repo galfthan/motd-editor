@@ -330,10 +330,26 @@ class Toolbar {
 
         const chars = this.getCharsForTab(this.currentTab);
 
+        // Palette display colors: white on toolbar background
+        const paletteFG = { r: 255, g: 255, b: 255, default: false };
+        const paletteBG = { r: 37, g: 37, b: 37, default: false };
+
         chars.forEach(charInfo => {
             const btn = document.createElement('button');
-            btn.textContent = charInfo.char;
             btn.title = charInfo.name || `U+${charInfo.code.toString(16).toUpperCase()}`;
+
+            // Use bitmap renderer for consistent look with canvas
+            if (bitmapRenderer && bitmapRenderer.ready && bitmapRenderer.hasGlyph(charInfo.code)) {
+                const img = bitmapRenderer.createImage(charInfo.code, paletteFG, paletteBG);
+                if (img) {
+                    btn.appendChild(img);
+                } else {
+                    btn.textContent = charInfo.char;
+                }
+            } else {
+                btn.textContent = charInfo.char;
+            }
+
             btn.addEventListener('click', () => {
                 palette.querySelectorAll('button').forEach(b => b.classList.remove('selected'));
                 btn.classList.add('selected');

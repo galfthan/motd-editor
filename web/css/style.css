@@ -225,14 +225,14 @@ main {
 
 .char-grid {
     display: grid;
-    grid-template-columns: repeat(8, 1fr);
+    grid-template-columns: repeat(10, 1fr);
     gap: 2px;
     max-height: 300px;
     overflow-y: auto;
 }
 
 .char-grid button {
-    aspect-ratio: 1;
+    aspect-ratio: 1 / 2;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -243,6 +243,15 @@ main {
     font-size: 1rem;
     cursor: pointer;
     border-radius: 2px;
+    padding: 0;
+    overflow: hidden;
+}
+
+.char-grid button img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    image-rendering: pixelated;
 }
 
 .char-grid button:hover {
