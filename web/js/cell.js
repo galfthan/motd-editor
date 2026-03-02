@@ -105,6 +105,21 @@ function canvasToANSI(canvas, cellToCharFn) {
 
         for (let x = 0; x < canvas.width; x++) {
             const cell = canvas.cells[y][x];
+            const ch = cellToCharFn(cell);
+
+            if (ch === ' ') {
+                if (cell.bg.default) {
+                    line += ' ';
+                    continue;
+                }
+                if (!colorsEqual(cell.bg, lastBG)) {
+                    line += `\x1b[48;2;${cell.bg.r};${cell.bg.g};${cell.bg.b}m`;
+                    lastBG = cell.bg;
+                    lineHasColor = true;
+                }
+                line += ' ';
+                continue;
+            }
 
             if (!colorsEqual(cell.fg, lastFG)) {
                 if (cell.fg.default) {
@@ -125,7 +140,7 @@ function canvasToANSI(canvas, cellToCharFn) {
                 lineHasColor = true;
             }
 
-            line += cellToCharFn(cell);
+            line += ch;
         }
         if (lineHasColor) {
             line += '\x1b[0m';
