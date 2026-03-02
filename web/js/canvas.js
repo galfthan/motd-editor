@@ -11,7 +11,7 @@ class CanvasRenderer {
         this.isDrawing = false;
         this.lastCell = null;
         this.toolbar = null; // Set by app.js
-        this.fontMode = 'font'; // 'bitmap' or 'font'
+        this.fontMode = 'font';
 
         // Selection state (cell-level for 'select' tool)
         this.selection = null;      // { x1, y1, x2, y2 } normalized (x1 <= x2, y1 <= y2)
@@ -252,61 +252,49 @@ class CanvasRenderer {
         // Empty cell — no content needed
         if (charCode === 32) return cellEl;
 
-        // Render character via bitmap or font
-        const useBitmap = this.fontMode !== 'font'
-            && bitmapRenderer && bitmapRenderer.ready
-            && bitmapRenderer.hasGlyph(charCode);
-
-        if (useBitmap) {
-            const img = bitmapRenderer.createImage(charCode, cell.fg, cell.bg);
-            if (img) {
-                cellEl.appendChild(img);
+        // Font-based rendering
+        const char = String.fromCodePoint(charCode);
+        const isLegacyTiling = (charCode >= 0x1FB00 && charCode <= 0x1FBAF)
+            || (charCode >= 0x1FBCE && charCode <= 0x1FBDF);
+        const isLegacyMisc = charCode >= 0x1FB00 && !isLegacyTiling;
+        if (isLegacyTiling) {
+            const span = document.createElement('span');
+            span.textContent = char;
+            span.style.fontFamily = "'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace";
+            span.style.fontSize = '16px';
+            span.style.lineHeight = '1';
+            span.style.transform = 'scaleY(2) translateY(1px)';
+            if (!cell.fg.default) {
+                span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
             }
+            cellEl.appendChild(span);
+        } else if (isLegacyMisc) {
+            const span = document.createElement('span');
+            span.textContent = char;
+            span.style.fontFamily = "'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace";
+            span.style.fontSize = '16px';
+            span.style.lineHeight = '1';
+            if (!cell.fg.default) {
+                span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
+            }
+            cellEl.appendChild(span);
+        } else if (charCode >= 0x2500 && charCode <= 0x259F) {
+            const span = document.createElement('span');
+            span.textContent = char;
+            span.style.fontFamily = "'Cascadia Code', 'Consolas', 'Courier New', monospace";
+            span.style.fontSize = '32px';
+            span.style.lineHeight = '1';
+            span.style.transform = 'scaleX(0.833)';
+            if (!cell.fg.default) {
+                span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
+            }
+            cellEl.appendChild(span);
         } else {
-            // Font-based rendering
-            const char = String.fromCodePoint(charCode);
-            const isLegacyTiling = (charCode >= 0x1FB00 && charCode <= 0x1FBAF)
-                || (charCode >= 0x1FBCE && charCode <= 0x1FBDF);
-            const isLegacyMisc = charCode >= 0x1FB00 && !isLegacyTiling;
-            if (isLegacyTiling) {
-                const span = document.createElement('span');
-                span.textContent = char;
-                span.style.fontFamily = "'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace";
-                span.style.fontSize = '16px';
-                span.style.lineHeight = '1';
-                span.style.transform = 'scaleY(2) translateY(1px)';
-                if (!cell.fg.default) {
-                    span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
-                }
-                cellEl.appendChild(span);
-            } else if (isLegacyMisc) {
-                const span = document.createElement('span');
-                span.textContent = char;
-                span.style.fontFamily = "'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace";
-                span.style.fontSize = '16px';
-                span.style.lineHeight = '1';
-                if (!cell.fg.default) {
-                    span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
-                }
-                cellEl.appendChild(span);
-            } else if (charCode >= 0x2500 && charCode <= 0x259F) {
-                const span = document.createElement('span');
-                span.textContent = char;
-                span.style.fontFamily = "'Cascadia Code', 'Consolas', 'Courier New', monospace";
-                span.style.fontSize = '32px';
-                span.style.lineHeight = '1';
-                span.style.transform = 'scaleX(0.833)';
-                if (!cell.fg.default) {
-                    span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
-                }
-                cellEl.appendChild(span);
-            } else {
-                cellEl.textContent = char;
-                cellEl.style.fontFamily = "'Cascadia Code', 'Consolas', 'Courier New', monospace";
-                cellEl.style.fontSize = '24px';
-                if (!cell.fg.default) {
-                    cellEl.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
-                }
+            cellEl.textContent = char;
+            cellEl.style.fontFamily = "'Cascadia Code', 'Consolas', 'Courier New', monospace";
+            cellEl.style.fontSize = '24px';
+            if (!cell.fg.default) {
+                cellEl.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
             }
         }
 

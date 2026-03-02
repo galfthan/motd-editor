@@ -22,8 +22,6 @@
                         <hr>
                         <button data-action="save"><span class="menu-label">Save</span><span class="menu-shortcut">Ctrl+S</span></button>
                         <button data-action="save-as"><span class="menu-label">Save As...</span><span class="menu-shortcut">Ctrl+Shift+S</span></button>
-                        <hr>
-                        <button data-action="import-png">Import PNG...</button>
                     </div>
                 </div>
                 <div class="menu-item" data-menu="canvas">
@@ -100,13 +98,6 @@
                         <button class="box-style-btn" data-style="3">╔═╗ Double</button>
                     </div>
                 </section>
-                <section id="render-section">
-                    <h3>Rendering</h3>
-                    <div class="render-toggle">
-                        <button class="render-mode-btn" data-mode="bitmap">Bitmap</button>
-                        <button class="render-mode-btn active" data-mode="font">Font</button>
-                    </div>
-                </section>
                 <section class="char-palette" id="char-palette-section" style="display:none">
                     <h3>Symbols</h3>
                     <div class="char-tabs">
@@ -128,9 +119,8 @@
         </main>
     </div>
 
-    <!-- Hidden file inputs -->
+    <!-- Hidden file input -->
     <input type="file" id="file-input" accept=".txt" style="display:none">
-    <input type="file" id="png-input" accept="image/*" style="display:none">
 
     <!-- Save As Dialog -->
     <dialog id="save-as-dialog">
@@ -173,49 +163,9 @@
         </form>
     </dialog>
 
-    <!-- PNG Import Dialog -->
-    <dialog id="png-dialog">
-        <h3>Import PNG</h3>
-        <form id="png-form">
-            <div class="form-row">
-                <label>Width (chars):</label>
-                <input type="number" id="png-width" value="80" min="1" max="500">
-            </div>
-            <div class="form-row">
-                <label>Threshold:</label>
-                <input type="range" id="png-threshold" value="250" min="0" max="255">
-                <span id="png-threshold-value">250</span>
-            </div>
-            <div class="form-row">
-                <label>
-                    <input type="checkbox" id="png-invert"> Invert
-                </label>
-            </div>
-            <div class="form-row">
-                <label>
-                    <input type="checkbox" id="png-color"> Use Colors
-                </label>
-            </div>
-            <div class="form-row">
-                <label>
-                    <input type="checkbox" id="png-bitmap"> Bitmap Matching
-                </label>
-            </div>
-            <div class="form-row">
-                <label>
-                    <input type="checkbox" id="png-extended"> Extended Chars (diagonals/triangles)
-                </label>
-            </div>
-            <div class="dialog-buttons">
-                <button type="button" id="png-cancel">Cancel</button>
-                <button type="submit">Import</button>
-            </div>
-        </form>
-    </dialog>
-
     <script src="js/cell.js"></script>
-    <script src="js/api.js"></script>
-    <script src="js/glyphCache.js"></script>
+    <script src="js/charset.js"></script>
+    <script src="js/ansi-import.js"></script>
     <script src="js/boxdraw.js"></script>
     <script src="js/canvas.js"></script>
     <script src="js/toolbar.js"></script>

@@ -184,9 +184,6 @@ class Toolbar {
             case 'save-as':
                 this.showSaveAsDialog();
                 break;
-            case 'import-png':
-                document.getElementById('png-input').click();
-                break;
             case 'resize':
                 this.showResizeDialog();
                 break;
@@ -406,44 +403,31 @@ class Toolbar {
     // --- Render Toggle ---
 
     setupRenderToggle() {
-        const btns = document.querySelectorAll('.render-mode-btn');
-        btns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                btns.forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                this.renderer.fontMode = btn.dataset.mode;
-                this.renderer.render();
-                this.renderCharPalette();
-            });
-        });
+        // Render toggle removed — font-only rendering
     }
 
     // --- File Inputs ---
 
     setupFileInputs() {
         const fileInput = document.getElementById('file-input');
-        const pngInput = document.getElementById('png-input');
 
-        fileInput.addEventListener('change', async (e) => {
+        fileInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (!file) return;
 
-            try {
-                const canvas = await API.importTxt(file);
-                this.renderer.setCanvas(canvas);
-                this.saveFilename = file.name;
-                this.saveFormat = 'ansi';
-            } catch (error) {
-                alert('Failed to open: ' + error.message);
-            }
+            const reader = new FileReader();
+            reader.onload = () => {
+                try {
+                    const canvas = parseANSIText(reader.result);
+                    this.renderer.setCanvas(canvas);
+                    this.saveFilename = file.name;
+                    this.saveFormat = 'ansi';
+                } catch (error) {
+                    alert('Failed to open: ' + error.message);
+                }
+            };
+            reader.readAsText(file);
             fileInput.value = '';
-        });
-
-        pngInput.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            this.showPngDialog(file);
-            pngInput.value = '';
         });
     }
 
@@ -462,16 +446,10 @@ class Toolbar {
         });
     }
 
-    async loadCharsets() {
-        try {
-            [this.diagonalChars, this.triangleChars] = await Promise.all([
-                API.getDiagonalChars(),
-                API.getTriangleChars()
-            ]);
-            this.renderCharPalette();
-        } catch (error) {
-            console.error('Failed to load charsets:', error);
-        }
+    loadCharsets() {
+        this.diagonalChars = DIAGONAL_CHARS;
+        this.triangleChars = TRIANGLE_CHARS;
+        this.renderCharPalette();
     }
 
     getCharsForTab(tab) {
@@ -494,41 +472,22 @@ class Toolbar {
 
         const chars = this.getCharsForTab(this.currentTab);
 
-        // Palette display colors: white on toolbar background
-        const paletteFG = { r: 255, g: 255, b: 255, default: false };
-        const paletteBG = { r: 37, g: 37, b: 37, default: false };
-
         chars.forEach(charInfo => {
             const btn = document.createElement('button');
             btn.title = charInfo.name || `U+${charInfo.code.toString(16).toUpperCase()}`;
 
-            // Use bitmap renderer for consistent look with canvas
-            const useBitmap = this.renderer.fontMode !== 'font'
-                && bitmapRenderer && bitmapRenderer.ready
-                && bitmapRenderer.hasGlyph(charInfo.code);
-
-            if (useBitmap) {
-                const img = bitmapRenderer.createImage(charInfo.code, paletteFG, paletteBG);
-                if (img) {
-                    btn.appendChild(img);
-                } else {
-                    btn.textContent = charInfo.char;
-                }
-            } else {
-                // Font mode
-                const code = charInfo.code;
-                const isTiling = (code >= 0x1FB00 && code <= 0x1FBAF)
-                    || (code >= 0x1FBCE && code <= 0x1FBDF);
-                const span = document.createElement('span');
-                span.textContent = charInfo.char;
-                span.style.fontFamily = "'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace";
-                span.style.fontSize = '16px';
-                span.style.lineHeight = '1';
-                if (isTiling) {
-                    span.style.transform = 'scaleY(2) translateY(1px)';
-                }
-                btn.appendChild(span);
+            const code = charInfo.code;
+            const isTiling = (code >= 0x1FB00 && code <= 0x1FBAF)
+                || (code >= 0x1FBCE && code <= 0x1FBDF);
+            const span = document.createElement('span');
+            span.textContent = charInfo.char;
+            span.style.fontFamily = "'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace";
+            span.style.fontSize = '16px';
+            span.style.lineHeight = '1';
+            if (isTiling) {
+                span.style.transform = 'scaleY(2) translateY(1px)';
             }
+            btn.appendChild(span);
 
             btn.addEventListener('click', () => {
                 palette.querySelectorAll('button').forEach(b => b.classList.remove('selected'));
@@ -537,46 +496,6 @@ class Toolbar {
             });
             palette.appendChild(btn);
         });
-    }
-
-    // --- PNG Import ---
-
-    showPngDialog(file) {
-        const dialog = document.getElementById('png-dialog');
-        const form = document.getElementById('png-form');
-        const thresholdInput = document.getElementById('png-threshold');
-        const thresholdValue = document.getElementById('png-threshold-value');
-        const cancelBtn = document.getElementById('png-cancel');
-
-        // Update threshold display
-        thresholdInput.addEventListener('input', () => {
-            thresholdValue.textContent = thresholdInput.value;
-        });
-
-        cancelBtn.addEventListener('click', () => dialog.close());
-
-        form.onsubmit = async (e) => {
-            e.preventDefault();
-
-            const options = {
-                width: parseInt(document.getElementById('png-width').value) || 80,
-                threshold: parseInt(thresholdInput.value),
-                invert: document.getElementById('png-invert').checked,
-                color: document.getElementById('png-color').checked,
-                bitmap: document.getElementById('png-bitmap').checked,
-                extended: document.getElementById('png-extended').checked
-            };
-
-            try {
-                const canvas = await API.importPNG(file, options);
-                this.renderer.setCanvas(canvas);
-                dialog.close();
-            } catch (error) {
-                alert('Failed to import PNG: ' + error.message);
-            }
-        };
-
-        dialog.showModal();
     }
 
     // --- Utilities ---
