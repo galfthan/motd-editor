@@ -57,6 +57,19 @@ class CanvasRenderer {
         this.container.addEventListener('mouseup', () => this.handleMouseUp(false));
         this.container.addEventListener('mouseleave', () => this.handleMouseUp(true));
 
+        // Window-level handlers take over while the pointer is outside the canvas:
+        // they let select drags and paste-preview keep tracking (clamped to canvas
+        // edges) and let a select drag finalise on release outside the canvas.
+        window.addEventListener('mousemove', (e) => {
+            if (this.container.contains(e.target)) return;
+            this.handleMouseMove(e);
+        });
+        window.addEventListener('mouseup', () => {
+            if (this.isDrawing && this.isSelectTool()) {
+                this.handleMouseUp(false);
+            }
+        });
+
         // Prevent context menu on right-click
         this.container.addEventListener('contextmenu', (e) => e.preventDefault());
     }
@@ -377,7 +390,13 @@ class CanvasRenderer {
                 this.handleLineToolUp();
             }
         }
-        if (this.isSelectTool() && this.selectionStart) {
+        if (this.isSelectTool() && (this.selectionStart || this.subpixelSelectionStart)) {
+            if (isLeave) {
+                // Drag continues; window-level handlers in setupEventListeners
+                // keep updating the clamped selection while the pointer is outside,
+                // and finalise when the user releases the button anywhere.
+                return;
+            }
             this.handleSelectToolUp();
         }
         this.isDrawing = false;
@@ -420,6 +439,29 @@ class CanvasRenderer {
         };
     }
 
+    // Cell coords from a mouse event, clamped to canvas extents.
+    // Works whether the pointer is inside the canvas or outside it.
+    cellCoordsFromEvent(e) {
+        if (!this.canvas) return null;
+        const rect = this.container.getBoundingClientRect();
+        const relX = e.clientX - rect.left;
+        const relY = e.clientY - rect.top;
+        const cellX = Math.max(0, Math.min(this.canvas.width  - 1, Math.floor(relX / 18)));
+        const cellY = Math.max(0, Math.min(this.canvas.height - 1, Math.floor(relY / 34)));
+        return { cellX, cellY };
+    }
+
+    // Subpixel coords from a mouse event, clamped to canvas extents.
+    subpixelCoordsFromEvent(e) {
+        if (!this.canvas) return null;
+        const rect = this.container.getBoundingClientRect();
+        const relX = e.clientX - rect.left;
+        const relY = e.clientY - rect.top;
+        const sx = Math.max(0, Math.min(this.canvas.width  * 2 - 1, Math.floor(relX / 9)));
+        const sy = Math.max(0, Math.min(this.canvas.height * 3 - 1, Math.floor(relY * 3 / 34)));
+        return { sx, sy, cellX: Math.floor(sx / 2), cellY: Math.floor(sy / 3) };
+    }
+
     handleSelectToolDown(e) {
         const cellEl = e.target.closest('.cell');
         if (!cellEl) return;
@@ -450,7 +492,7 @@ class CanvasRenderer {
         // Subpixel mode
         if (this.isSubpixelMode()) {
             if (!this.subpixelSelectionStart) return;
-            const sp = this.getSubpixelFromEvent(e);
+            const sp = this.subpixelCoordsFromEvent(e);
             if (!sp) return;
 
             this.subpixelSelection = {
@@ -466,17 +508,14 @@ class CanvasRenderer {
         // Cell-level mode
         if (!this.selectionStart) return;
 
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return;
-
-        const cellX = parseInt(cellEl.dataset.x);
-        const cellY = parseInt(cellEl.dataset.y);
+        const c = this.cellCoordsFromEvent(e);
+        if (!c) return;
 
         this.selection = {
-            x1: Math.min(this.selectionStart.x, cellX),
-            y1: Math.min(this.selectionStart.y, cellY),
-            x2: Math.max(this.selectionStart.x, cellX),
-            y2: Math.max(this.selectionStart.y, cellY)
+            x1: Math.min(this.selectionStart.x, c.cellX),
+            y1: Math.min(this.selectionStart.y, c.cellY),
+            x2: Math.max(this.selectionStart.x, c.cellX),
+            y2: Math.max(this.selectionStart.y, c.cellY)
         };
         this.updateSelectionDisplay();
     }
@@ -618,7 +657,7 @@ class CanvasRenderer {
 
         // Subpixel mode paste preview
         if (this.isSubpixelMode() && this.subpixelClipboard) {
-            const sp = this.getSubpixelFromEvent(e);
+            const sp = this.subpixelCoordsFromEvent(e);
             if (!sp) return;
 
             const height = this.subpixelClipboard.length;
@@ -652,11 +691,11 @@ class CanvasRenderer {
         // Cell-level paste preview
         if (!this.clipboard || this.clipboard.length === 0) return;
 
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return;
+        const c = this.cellCoordsFromEvent(e);
+        if (!c) return;
 
-        const x = parseInt(cellEl.dataset.x);
-        const y = parseInt(cellEl.dataset.y);
+        const x = c.cellX;
+        const y = c.cellY;
 
         const clipboardHeight = this.clipboard.length;
         const clipboardWidth = this.clipboard[0].length;
