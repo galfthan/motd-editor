@@ -192,6 +192,9 @@ function getNewBoxConnections(x, y, x1, y1, x2, y2, style) {
 function computeBoxChars(x1, y1, x2, y2, style, canvasCells, lookup) {
     const result = [];
 
+    // Style 0 = no line: caller may still want fill, but no border chars
+    if (style === 0) return result;
+
     // Single cell - no valid box char
     if (x1 === x2 && y1 === y2) return result;
 
@@ -276,6 +279,7 @@ function computeLinePath(x1, y1, x2, y2) {
 
 // Compute box-drawing characters along a line path, merging with existing chars
 function computeLineChars(x1, y1, x2, y2, style, canvasCells, lookup) {
+    if (style === 0) return [];
     const path = computeLinePath(x1, y1, x2, y2);
     if (path.length < 2) return [];
 
