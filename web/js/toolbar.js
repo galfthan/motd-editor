@@ -271,6 +271,7 @@ class Toolbar {
         const toolPick = document.getElementById('tool-pick');
         const charPaletteSection = document.getElementById('char-palette-section');
         const boxStyleSection = document.getElementById('box-style-section');
+        const boxFillSection = document.getElementById('box-fill-section');
 
         this.setTool = (tool) => {
             toolDraw.classList.toggle('active', tool === 'draw');
@@ -285,8 +286,10 @@ class Toolbar {
 
             const showCharPalette = tool === 'char';
             const showBoxStyle = tool === 'box' || tool === 'line';
+            const showBoxFill = tool === 'box';
             charPaletteSection.style.display = showCharPalette ? 'block' : 'none';
             boxStyleSection.style.display = showBoxStyle ? 'block' : 'none';
+            boxFillSection.style.display = showBoxFill ? 'block' : 'none';
 
             this.renderer.setTool(tool);
         };
@@ -308,6 +311,16 @@ class Toolbar {
                 boxStyleBtns.forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 this.renderer.boxLineStyle = parseInt(btn.dataset.style);
+            });
+        });
+
+        // Box fill mode buttons
+        const boxFillBtns = document.querySelectorAll('.box-fill-btn');
+        boxFillBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                boxFillBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.renderer.boxFillMode = parseInt(btn.dataset.fill);
             });
         });
 

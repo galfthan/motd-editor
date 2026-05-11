@@ -30,7 +30,8 @@ class CanvasRenderer {
         // Box tool state
         this.boxStart = null;       // { x, y } drag start
         this.boxEnd = null;         // { x, y } drag end
-        this.boxLineStyle = 1;      // 1=light, 2=heavy, 3=double
+        this.boxLineStyle = 1;      // 0=none, 1=light, 2=heavy, 3=double
+        this.boxFillMode = 0;       // 0=no fill, 1=fill & clear, 2=recolor only
 
         // Line tool state
         this.lineStart = null;      // { x, y } drag start
@@ -1015,15 +1016,38 @@ class CanvasRenderer {
         const x2 = Math.max(this.boxStart.x, this.boxEnd.x);
         const y2 = Math.max(this.boxStart.y, this.boxEnd.y);
 
-        const chars = computeBoxChars(x1, y1, x2, y2, this.boxLineStyle, this.canvas.cells, boxDrawLookup);
+        let changed = false;
 
+        // Fill: when there is a border, fill the interior only; otherwise fill the whole area
+        if (this.boxFillMode > 0) {
+            const hasBorder = this.boxLineStyle > 0;
+            const fx1 = hasBorder ? x1 + 1 : x1;
+            const fy1 = hasBorder ? y1 + 1 : y1;
+            const fx2 = hasBorder ? x2 - 1 : x2;
+            const fy2 = hasBorder ? y2 - 1 : y2;
+            for (let y = fy1; y <= fy2; y++) {
+                for (let x = fx1; x <= fx2; x++) {
+                    const cell = this.canvas.cells[y][x];
+                    if (this.boxFillMode === 1) {
+                        clearCell(cell);
+                    }
+                    cell.fg = { ...this.fgColor };
+                    cell.bg = { ...this.bgColor };
+                    changed = true;
+                }
+            }
+        }
+
+        const chars = computeBoxChars(x1, y1, x2, y2, this.boxLineStyle, this.canvas.cells, boxDrawLookup);
         for (const c of chars) {
             const cell = this.canvas.cells[c.y][c.x];
             cell.fg = { ...this.fgColor };
             cell.bg = { ...this.bgColor };
             setCellChar(cell, c.charCode);
+            changed = true;
         }
-        if (chars.length > 0) {
+
+        if (changed) {
             this.render();
         }
 
@@ -1034,9 +1058,11 @@ class CanvasRenderer {
 
     showBoxPreview(x1, y1, x2, y2) {
         this.clearBoxPreview();
+        const showInterior = this.boxFillMode > 0;
         for (let y = y1; y <= y2; y++) {
             for (let x = x1; x <= x2; x++) {
-                if (x === x1 || x === x2 || y === y1 || y === y2) {
+                const onBorder = (x === x1 || x === x2 || y === y1 || y === y2);
+                if (onBorder || showInterior) {
                     const cellEl = this.getCellElement(x, y);
                     if (cellEl) {
                         cellEl.classList.add('box-preview');

@@ -338,7 +338,8 @@ main {
     gap: 0.25rem;
 }
 
-.box-style-btn {
+.box-style-btn,
+.box-fill-btn {
     padding: 0.375rem 0.75rem;
     background-color: var(--bg-tertiary);
     border: 1px solid var(--border);
@@ -350,11 +351,13 @@ main {
     transition: all 0.15s;
 }
 
-.box-style-btn:hover {
+.box-style-btn:hover,
+.box-fill-btn:hover {
     background-color: #454545;
 }
 
-.box-style-btn.active {
+.box-style-btn.active,
+.box-fill-btn.active {
     background-color: var(--accent);
     border-color: var(--accent);
 }
