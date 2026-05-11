@@ -291,6 +291,19 @@ class Toolbar {
             boxStyleSection.style.display = showBoxStyle ? 'block' : 'none';
             boxFillSection.style.display = showBoxFill ? 'block' : 'none';
 
+            // "None" line style is a no-op for the line tool, so hide it there.
+            // If it was selected, fall back to Light.
+            const noneBtn = document.querySelector('.box-style-btn[data-style="0"]');
+            if (noneBtn) {
+                noneBtn.style.display = (tool === 'line') ? 'none' : '';
+                if (tool === 'line' && this.renderer.boxLineStyle === 0) {
+                    const lightBtn = document.querySelector('.box-style-btn[data-style="1"]');
+                    document.querySelectorAll('.box-style-btn').forEach(b => b.classList.remove('active'));
+                    if (lightBtn) lightBtn.classList.add('active');
+                    this.renderer.boxLineStyle = 1;
+                }
+            }
+
             this.renderer.setTool(tool);
         };
 
