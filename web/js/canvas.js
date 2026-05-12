@@ -929,18 +929,17 @@ class CanvasRenderer {
     }
 
     handleDrawTool(e) {
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return;
+        // Use container-relative coords — using e.target.closest('.cell') plus
+        // per-cell rects gave inconsistent subpixels at cell boundaries (the
+        // child <span> with scaleY(2) and the 1px cell borders can flip
+        // e.target between adjacent cells before the position crosses).
+        if (!this.canvas) return;
+        const sp = this.subpixelCoordsFromEvent(e);
+        if (!sp) return;
 
-        const cellX = parseInt(cellEl.dataset.x);
-        const cellY = parseInt(cellEl.dataset.y);
-
-        // Calculate subpixel from click position within cell
-        const rect = cellEl.getBoundingClientRect();
-        const relX = (e.clientX - rect.left) / rect.width;
-        const relY = (e.clientY - rect.top) / rect.height;
-        const subCol = relX < 0.5 ? 0 : 1;
-        const subRow = Math.min(2, Math.floor(relY * 3));
+        const { cellX, cellY, sx, sy } = sp;
+        const subCol = sx % 2;
+        const subRow = sy % 3;
 
         // Avoid re-processing same subpixel while dragging
         const key = `${cellX},${cellY},${subRow},${subCol}`;
@@ -954,9 +953,12 @@ class CanvasRenderer {
         cell.bg = { ...this.bgColor };
         setCellSubpixel(cell, subRow, subCol, filled);
 
-        const newCellEl = this.createCellElement(cellX, cellY, cell);
-        cellEl.replaceWith(newCellEl);
-        this.cellElements[cellY][cellX] = newCellEl;
+        const cellEl = this.getCellElement(cellX, cellY);
+        if (cellEl) {
+            const newCellEl = this.createCellElement(cellX, cellY, cell);
+            cellEl.replaceWith(newCellEl);
+            this.cellElements[cellY][cellX] = newCellEl;
+        }
     }
 
     handleCharTool(e) {
