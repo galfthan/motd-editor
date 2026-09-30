@@ -145,30 +145,35 @@ class CanvasRenderer {
                 return;
             }
 
-            // Ctrl+C - copy
-            if (e.ctrlKey && e.key === 'c') {
-                e.preventDefault();
+            // Ctrl on Windows/Linux, Cmd on macOS
+            const mod = e.ctrlKey || e.metaKey;
+
+            // Ctrl+C - copy (leave the native copy alone when nothing is selected)
+            if (mod && e.key === 'c') {
                 if (this.isSubpixelMode() && this.subpixelSelection) {
+                    e.preventDefault();
                     this.copySelectionSubpixel();
                 } else if (this.selection) {
+                    e.preventDefault();
                     this.copySelection();
                 }
                 return;
             }
 
             // Ctrl+X - cut
-            if (e.ctrlKey && e.key === 'x') {
-                e.preventDefault();
+            if (mod && e.key === 'x') {
                 if (this.isSubpixelMode() && this.subpixelSelection) {
+                    e.preventDefault();
                     this.cutSelectionSubpixel();
                 } else if (this.selection) {
+                    e.preventDefault();
                     this.cutSelection();
                 }
                 return;
             }
 
             // Ctrl+V - paste
-            if (e.ctrlKey && e.key === 'v') {
+            if (mod && e.key === 'v') {
                 e.preventDefault();
                 // Subpixel paste stays internal-only
                 if (this.isSubpixelMode()) {
@@ -230,6 +235,10 @@ class CanvasRenderer {
             }
         }
         this.container.appendChild(fragment);
+
+        // Restore selection highlights after re-render (state outlives the DOM)
+        this.updateSelectionDisplay();
+        this.updateSubpixelSelectionDisplay();
 
         // Restore text cursor display after re-render
         if (this.textCursor) {
@@ -318,16 +327,13 @@ class CanvasRenderer {
     handleMouseDown(e) {
         // Paste mode takes priority over any tool
         if (this.pasteMode) {
-            const cellEl = e.target.closest('.cell');
-            if (!cellEl) return;
-            const cellX = parseInt(cellEl.dataset.x);
-            const cellY = parseInt(cellEl.dataset.y);
-
+            // Same hit-testing as showPastePreview, so paste lands where previewed
             if (this.isSubpixelMode() && this.subpixelClipboard) {
-                const sp = this.getSubpixelFromEvent(e);
+                const sp = this.subpixelCoordsFromEvent(e);
                 if (sp) this.pasteAtSubpixel(sp.sx, sp.sy);
             } else if (this.clipboard) {
-                this.pasteAt(cellX, cellY);
+                const c = this.cellCoordsFromEvent(e);
+                if (c) this.pasteAt(c.cellX, c.cellY);
             }
             return;
         }
@@ -405,40 +411,19 @@ class CanvasRenderer {
     }
 
     handlePickTool(e) {
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return;
-
-        const cellX = parseInt(cellEl.dataset.x);
-        const cellY = parseInt(cellEl.dataset.y);
-        const cell = this.canvas.cells[cellY][cellX];
+        const c = this.cellCoordsFromEvent(e);
+        if (!c) return;
+        const cell = this.canvas.cells[c.cellY][c.cellX];
 
         if (this.toolbar) {
             this.toolbar.setColors(cell.fg, cell.bg);
         }
     }
 
-    // Get subpixel coordinates from mouse event
-    getSubpixelFromEvent(e) {
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return null;
-
-        const cellX = parseInt(cellEl.dataset.x);
-        const cellY = parseInt(cellEl.dataset.y);
-        const rect = cellEl.getBoundingClientRect();
-        const relX = (e.clientX - rect.left) / rect.width;
-        const relY = (e.clientY - rect.top) / rect.height;
-
-        // Each cell is 2 subpixels wide, 3 tall
-        const subCol = relX < 0.5 ? 0 : 1;
-        const subRow = Math.min(2, Math.floor(relY * 3));
-
-        return {
-            sx: cellX * 2 + subCol,
-            sy: cellY * 3 + subRow,
-            cellX,
-            cellY
-        };
-    }
+    // All pointer hit-testing uses container-relative coords. Using
+    // e.target.closest('.cell') plus per-cell rects gave inconsistent results at
+    // cell boundaries (the child <span> with scaleY(2) and the 1px cell borders
+    // can flip e.target between adjacent cells before the position crosses).
 
     // Cell coords from a mouse event, clamped to canvas extents.
     // Works whether the pointer is inside the canvas or outside it.
@@ -464,15 +449,9 @@ class CanvasRenderer {
     }
 
     handleSelectToolDown(e) {
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return;
-
-        const cellX = parseInt(cellEl.dataset.x);
-        const cellY = parseInt(cellEl.dataset.y);
-
         // Subpixel mode handling
         if (this.isSubpixelMode()) {
-            const sp = this.getSubpixelFromEvent(e);
+            const sp = this.subpixelCoordsFromEvent(e);
             if (!sp) return;
 
             // Start new subpixel selection
@@ -482,6 +461,10 @@ class CanvasRenderer {
             this.updateSubpixelSelectionDisplay();
             return;
         }
+
+        const c = this.cellCoordsFromEvent(e);
+        if (!c) return;
+        const { cellX, cellY } = c;
 
         this.clearSelection();
         this.selectionStart = { x: cellX, y: cellY };
@@ -698,11 +681,9 @@ class CanvasRenderer {
         const x = c.cellX;
         const y = c.cellY;
 
-        const clipboardHeight = this.clipboard.length;
-        const clipboardWidth = this.clipboard[0].length;
-
-        for (let dy = 0; dy < clipboardHeight; dy++) {
-            for (let dx = 0; dx < clipboardWidth; dx++) {
+        // Rows can differ in length (pasted text), so match pasteAt row by row
+        for (let dy = 0; dy < this.clipboard.length; dy++) {
+            for (let dx = 0; dx < this.clipboard[dy].length; dx++) {
                 const targetX = x + dx;
                 const targetY = y + dy;
 
@@ -929,10 +910,6 @@ class CanvasRenderer {
     }
 
     handleDrawTool(e) {
-        // Use container-relative coords — using e.target.closest('.cell') plus
-        // per-cell rects gave inconsistent subpixels at cell boundaries (the
-        // child <span> with scaleY(2) and the 1px cell borders can flip
-        // e.target between adjacent cells before the position crosses).
         if (!this.canvas) return;
         const sp = this.subpixelCoordsFromEvent(e);
         if (!sp) return;
@@ -948,9 +925,12 @@ class CanvasRenderer {
 
         const filled = this.tool === 'draw';
 
+        // Erase keeps the cell's colours so the remaining subpixels are unchanged
         const cell = this.canvas.cells[cellY][cellX];
-        cell.fg = { ...this.fgColor };
-        cell.bg = { ...this.bgColor };
+        if (filled) {
+            cell.fg = { ...this.fgColor };
+            cell.bg = { ...this.bgColor };
+        }
         setCellSubpixel(cell, subRow, subCol, filled);
 
         const cellEl = this.getCellElement(cellX, cellY);
@@ -964,11 +944,9 @@ class CanvasRenderer {
     handleCharTool(e) {
         if (!this.selectedChar) return;
 
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return;
-
-        const cellX = parseInt(cellEl.dataset.x);
-        const cellY = parseInt(cellEl.dataset.y);
+        const c = this.cellCoordsFromEvent(e);
+        if (!c) return;
+        const { cellX, cellY } = c;
 
         // Avoid re-processing same cell while dragging
         const key = `${cellX},${cellY}`;
@@ -980,18 +958,21 @@ class CanvasRenderer {
         cell.bg = { ...this.bgColor };
         setCellChar(cell, this.selectedChar);
 
-        const newCellEl = this.createCellElement(cellX, cellY, cell);
-        cellEl.replaceWith(newCellEl);
-        this.cellElements[cellY][cellX] = newCellEl;
+        const cellEl = this.getCellElement(cellX, cellY);
+        if (cellEl) {
+            const newCellEl = this.createCellElement(cellX, cellY, cell);
+            cellEl.replaceWith(newCellEl);
+            this.cellElements[cellY][cellX] = newCellEl;
+        }
     }
 
     // --- Box tool methods ---
 
     handleBoxToolDown(e) {
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return;
-        const x = parseInt(cellEl.dataset.x);
-        const y = parseInt(cellEl.dataset.y);
+        const c = this.cellCoordsFromEvent(e);
+        if (!c) return;
+        const x = c.cellX;
+        const y = c.cellY;
         this.boxStart = { x, y };
         this.boxEnd = { x, y };
         this.showBoxPreview(x, y, x, y);
@@ -999,9 +980,9 @@ class CanvasRenderer {
 
     handleBoxToolMove(e) {
         if (!this.boxStart) return;
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return;
-        this.boxEnd = { x: parseInt(cellEl.dataset.x), y: parseInt(cellEl.dataset.y) };
+        const c = this.cellCoordsFromEvent(e);
+        if (!c) return;
+        this.boxEnd = { x: c.cellX, y: c.cellY };
 
         const x1 = Math.min(this.boxStart.x, this.boxEnd.x);
         const y1 = Math.min(this.boxStart.y, this.boxEnd.y);
@@ -1083,19 +1064,17 @@ class CanvasRenderer {
     // --- Line tool methods ---
 
     handleLineToolDown(e) {
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return;
-        const x = parseInt(cellEl.dataset.x);
-        const y = parseInt(cellEl.dataset.y);
-        this.lineStart = { x, y };
-        this.lineEnd = { x, y };
+        const c = this.cellCoordsFromEvent(e);
+        if (!c) return;
+        this.lineStart = { x: c.cellX, y: c.cellY };
+        this.lineEnd = { x: c.cellX, y: c.cellY };
     }
 
     handleLineToolMove(e) {
         if (!this.lineStart) return;
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return;
-        this.lineEnd = { x: parseInt(cellEl.dataset.x), y: parseInt(cellEl.dataset.y) };
+        const c = this.cellCoordsFromEvent(e);
+        if (!c) return;
+        this.lineEnd = { x: c.cellX, y: c.cellY };
         this.showLinePreview();
     }
 
@@ -1142,12 +1121,9 @@ class CanvasRenderer {
     // --- Text tool methods ---
 
     handleTextToolClick(e) {
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return;
-
-        const cellX = parseInt(cellEl.dataset.x);
-        const cellY = parseInt(cellEl.dataset.y);
-        this.setTextCursor(cellX, cellY);
+        const c = this.cellCoordsFromEvent(e);
+        if (!c) return;
+        this.setTextCursor(c.cellX, c.cellY);
     }
 
     setTextCursor(x, y) {
@@ -1245,8 +1221,9 @@ class CanvasRenderer {
             return;
         }
 
-        // Only accept single printable characters
-        if (key.length !== 1) return;
+        // Only accept single printable characters (count code points, not
+        // UTF-16 units, so astral chars like emoji aren't rejected)
+        if ([...key].length !== 1) return;
 
         const charCode = key.codePointAt(0);
         this.setTextCell(x, y, charCode);
@@ -1285,7 +1262,23 @@ class CanvasRenderer {
         }
     }
 
+    // Drop selections and in-progress drags; they refer to the old canvas extents.
+    resetInteractionState() {
+        this.clearSelection();
+        this.clearSubpixelSelection();
+        this.pasteMode = false;
+        this.clearPastePreview();
+        this.boxStart = null;
+        this.boxEnd = null;
+        this.lineStart = null;
+        this.lineEnd = null;
+        this.clearBoxPreview();
+        this.isDrawing = false;
+        this.lastCell = null;
+    }
+
     resize(width, height) {
+        this.resetInteractionState();
         resizeCanvas(this.canvas, width, height);
         this.render();
         this.updateStatus();
@@ -1297,6 +1290,7 @@ class CanvasRenderer {
     }
 
     createNew(width, height, mode) {
+        this.resetInteractionState();
         this.canvas = createCanvas(width, height);
         this.canvas.mode = mode || 'sextant';
         this.render();
@@ -1304,6 +1298,7 @@ class CanvasRenderer {
     }
 
     setCanvas(canvasData) {
+        this.resetInteractionState();
         this.canvas = canvasData;
         this.render();
         this.updateStatus();

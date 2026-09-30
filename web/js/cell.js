@@ -108,12 +108,10 @@ function canvasToANSI(canvas, cellToCharFn) {
             const ch = cellToCharFn(cell);
 
             if (ch === ' ') {
-                if (cell.bg.default) {
-                    line += ' ';
-                    continue;
-                }
                 if (!colorsEqual(cell.bg, lastBG)) {
-                    line += `\x1b[48;2;${cell.bg.r};${cell.bg.g};${cell.bg.b}m`;
+                    line += cell.bg.default
+                        ? '\x1b[49m'
+                        : `\x1b[48;2;${cell.bg.r};${cell.bg.g};${cell.bg.b}m`;
                     lastBG = cell.bg;
                     lineHasColor = true;
                 }

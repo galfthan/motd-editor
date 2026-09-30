@@ -161,17 +161,14 @@ class BoxDrawLookup {
 function getNewBoxConnections(x, y, x1, y1, x2, y2, style) {
     const conn = { up: 0, down: 0, left: 0, right: 0 };
 
-    // Degenerate: vertical line
+    // Degenerate: vertical/horizontal line. Every cell, ends included, gets a
+    // full segment (no half-line chars exist in the lookup table).
     if (x1 === x2) {
-        if (y > y1) conn.up = style;
-        if (y < y2) conn.down = style;
+        conn.up = conn.down = style;
         return conn;
     }
-
-    // Degenerate: horizontal line
     if (y1 === y2) {
-        if (x > x1) conn.left = style;
-        if (x < x2) conn.right = style;
+        conn.left = conn.right = style;
         return conn;
     }
 
@@ -186,6 +183,26 @@ function getNewBoxConnections(x, y, x1, y1, x2, y2, style) {
     }
 
     return conn;
+}
+
+// Merge the new stroke's connections with an existing box-draw char and return
+// the resulting char code (or null). Unicode has no char for some style mixes
+// (e.g. heavy+double); then the existing arms are redrawn in the new style, and
+// failing that the new stroke is drawn on its own.
+function mergeWithExisting(conn, existingCell, style, lookup) {
+    const ec = existingCell && existingCell.type !== 'sextant'
+        ? lookup.getConnections(existingCell.charCode)
+        : null;
+    if (ec) {
+        const dirs = ['up', 'down', 'left', 'right'];
+        const merged = dirs.map(d => Math.max(conn[d], ec[d]));
+        const restyled = dirs.map(d => conn[d] || (ec[d] ? style : 0));
+        for (const c of [merged, restyled]) {
+            const code = lookup.lookupChar(...c);
+            if (code !== null) return code;
+        }
+    }
+    return lookup.lookupChar(conn.up, conn.down, conn.left, conn.right);
 }
 
 // Compute all box-drawing characters for a rectangle, merging with existing box chars
@@ -204,23 +221,8 @@ function computeBoxChars(x1, y1, x2, y2, style, canvasCells, lookup) {
             if (x !== x1 && x !== x2 && y !== y1 && y !== y2) continue;
 
             const conn = getNewBoxConnections(x, y, x1, y1, x2, y2, style);
-
-            // Check existing cell for box-draw char and merge
             const existingCell = canvasCells[y] && canvasCells[y][x];
-            if (existingCell) {
-                const existingCode = existingCell.type !== 'sextant' ? existingCell.charCode : null;
-                if (existingCode && lookup.isBoxDrawChar(existingCode)) {
-                    const ec = lookup.getConnections(existingCode);
-                    if (ec) {
-                        conn.up = Math.max(conn.up, ec.up);
-                        conn.down = Math.max(conn.down, ec.down);
-                        conn.left = Math.max(conn.left, ec.left);
-                        conn.right = Math.max(conn.right, ec.right);
-                    }
-                }
-            }
-
-            const charCode = lookup.lookupChar(conn.up, conn.down, conn.left, conn.right);
+            const charCode = mergeWithExisting(conn, existingCell, style, lookup);
             if (charCode !== null) {
                 result.push({ x, y, charCode });
             }
@@ -319,22 +321,8 @@ function computeLineChars(x1, y1, x2, y2, style, canvasCells, lookup) {
             if (prev.y !== y) { conn.up = style; conn.down = style; }
         }
 
-        // Merge with existing box-draw char on canvas
         const existingCell = canvasCells[y] && canvasCells[y][x];
-        if (existingCell) {
-            const existingCode = existingCell.type !== 'sextant' ? existingCell.charCode : null;
-            if (existingCode && lookup.isBoxDrawChar(existingCode)) {
-                const ec = lookup.getConnections(existingCode);
-                if (ec) {
-                    conn.up = Math.max(conn.up, ec.up);
-                    conn.down = Math.max(conn.down, ec.down);
-                    conn.left = Math.max(conn.left, ec.left);
-                    conn.right = Math.max(conn.right, ec.right);
-                }
-            }
-        }
-
-        const charCode = lookup.lookupChar(conn.up, conn.down, conn.left, conn.right);
+        const charCode = mergeWithExisting(conn, existingCell, style, lookup);
         if (charCode !== null) {
             result.push({ x, y, charCode });
         }

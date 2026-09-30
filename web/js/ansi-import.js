@@ -46,7 +46,9 @@ function defaultBG() {
     return { r: 0, g: 0, b: 0, default: true };
 }
 
-const ansiRegex = /\x1b\[([0-9;]*)m/g;
+// Any CSI sequence (params, intermediates, final byte). Only SGR ('m') is
+// interpreted; cursor moves, erase-line, mode switches etc. are dropped.
+const ansiRegex = /\x1b\[([0-?]*)([ -\/]*)([@-~])/g;
 
 function parseLine(line) {
     const cells = [];
@@ -66,10 +68,11 @@ function parseLine(line) {
         }
 
         // Parse the SGR codes
-        const codes = match[1];
-        const result = parseCodes(codes, fg, bg);
-        fg = result.fg;
-        bg = result.bg;
+        if (match[3] === 'm' && match[2] === '') {
+            const result = parseCodes(match[1], fg, bg);
+            fg = result.fg;
+            bg = result.bg;
+        }
 
         lastIndex = ansiRegex.lastIndex;
     }
@@ -163,10 +166,11 @@ function parseCodes(codes, fg, bg) {
 }
 
 function parseANSIText(text) {
-    let lines = text.split('\n');
+    text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lines = text.split('\n');
 
-    // Remove trailing empty lines
-    while (lines.length > 0 && lines[lines.length - 1].trim() === '') {
+    // Drop only the empty piece after the final newline; blank rows are content
+    if (lines.length > 0 && lines[lines.length - 1] === '') {
         lines.pop();
     }
 
