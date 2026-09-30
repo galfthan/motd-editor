@@ -12,10 +12,6 @@ class BoxDrawLookup {
         return up | (down << 2) | (left << 4) | (right << 6);
     }
 
-    isBoxDrawChar(code) {
-        return this.charToConn.has(code);
-    }
-
     getConnections(code) {
         return this.charToConn.get(code) || null;
     }
@@ -161,17 +157,14 @@ class BoxDrawLookup {
 function getNewBoxConnections(x, y, x1, y1, x2, y2, style) {
     const conn = { up: 0, down: 0, left: 0, right: 0 };
 
-    // Degenerate: vertical line
+    // Degenerate: vertical/horizontal line. Every cell, ends included, gets a
+    // full segment (no half-line chars exist in the lookup table).
     if (x1 === x2) {
-        if (y > y1) conn.up = style;
-        if (y < y2) conn.down = style;
+        conn.up = conn.down = style;
         return conn;
     }
-
-    // Degenerate: horizontal line
     if (y1 === y2) {
-        if (x > x1) conn.left = style;
-        if (x < x2) conn.right = style;
+        conn.left = conn.right = style;
         return conn;
     }
 
@@ -186,6 +179,26 @@ function getNewBoxConnections(x, y, x1, y1, x2, y2, style) {
     }
 
     return conn;
+}
+
+// Merge the new stroke's connections with an existing box-draw char and return
+// the resulting char code (or null). Unicode has no char for some style mixes
+// (e.g. heavy+double); then the existing arms are redrawn in the new style, and
+// failing that the new stroke is drawn on its own.
+function mergeWithExisting(conn, existingCell, style, lookup) {
+    const ec = existingCell && existingCell.type !== 'sextant'
+        ? lookup.getConnections(existingCell.charCode)
+        : null;
+    if (ec) {
+        const dirs = ['up', 'down', 'left', 'right'];
+        const merged = dirs.map(d => Math.max(conn[d], ec[d]));
+        const restyled = dirs.map(d => conn[d] || (ec[d] ? style : 0));
+        for (const c of [merged, restyled]) {
+            const code = lookup.lookupChar(...c);
+            if (code !== null) return code;
+        }
+    }
+    return lookup.lookupChar(conn.up, conn.down, conn.left, conn.right);
 }
 
 // Compute all box-drawing characters for a rectangle, merging with existing box chars
@@ -204,23 +217,8 @@ function computeBoxChars(x1, y1, x2, y2, style, canvasCells, lookup) {
             if (x !== x1 && x !== x2 && y !== y1 && y !== y2) continue;
 
             const conn = getNewBoxConnections(x, y, x1, y1, x2, y2, style);
-
-            // Check existing cell for box-draw char and merge
             const existingCell = canvasCells[y] && canvasCells[y][x];
-            if (existingCell) {
-                const existingCode = existingCell.type !== 'sextant' ? existingCell.charCode : null;
-                if (existingCode && lookup.isBoxDrawChar(existingCode)) {
-                    const ec = lookup.getConnections(existingCode);
-                    if (ec) {
-                        conn.up = Math.max(conn.up, ec.up);
-                        conn.down = Math.max(conn.down, ec.down);
-                        conn.left = Math.max(conn.left, ec.left);
-                        conn.right = Math.max(conn.right, ec.right);
-                    }
-                }
-            }
-
-            const charCode = lookup.lookupChar(conn.up, conn.down, conn.left, conn.right);
+            const charCode = mergeWithExisting(conn, existingCell, style, lookup);
             if (charCode !== null) {
                 result.push({ x, y, charCode });
             }
@@ -231,49 +229,29 @@ function computeBoxChars(x1, y1, x2, y2, style, canvasCells, lookup) {
 }
 
 // Compute the cell path for a line from (x1,y1) to (x2,y2).
-// Straight for H/V, S-shaped for diagonal (H-V-H or V-H-V).
+// Straight for H/V, S-shaped for diagonal: H-V-H when at least as wide as
+// tall, else V-H-V, with the middle leg at the midpoint.
 function computeLinePath(x1, y1, x2, y2) {
-    if (x1 === x2 && y1 === y2) return [{ x: x1, y: y1 }];
+    let corners;
+    if (Math.abs(x2 - x1) >= Math.abs(y2 - y1)) {
+        const midX = Math.round((x1 + x2) / 2);
+        corners = [[x1, y1], [midX, y1], [midX, y2], [x2, y2]];
+    } else {
+        const midY = Math.round((y1 + y2) / 2);
+        corners = [[x1, y1], [x1, midY], [x2, midY], [x2, y2]];
+    }
 
-    const dx = Math.abs(x2 - x1);
-    const dy = Math.abs(y2 - y1);
-    const path = [];
-    const visited = new Set();
-
-    function add(x, y) {
-        const key = `${x},${y}`;
-        if (!visited.has(key)) {
-            visited.add(key);
+    // Walk each (axis-aligned) leg one cell at a time
+    const path = [{ x: x1, y: y1 }];
+    for (let i = 1; i < corners.length; i++) {
+        let [x, y] = corners[i - 1];
+        const [tx, ty] = corners[i];
+        while (x !== tx || y !== ty) {
+            x += Math.sign(tx - x);
+            y += Math.sign(ty - y);
             path.push({ x, y });
         }
     }
-
-    if (dy === 0) {
-        // Pure horizontal
-        const step = x1 < x2 ? 1 : -1;
-        for (let x = x1; step > 0 ? x <= x2 : x >= x2; x += step) add(x, y1);
-    } else if (dx === 0) {
-        // Pure vertical
-        const step = y1 < y2 ? 1 : -1;
-        for (let y = y1; step > 0 ? y <= y2 : y >= y2; y += step) add(x1, y);
-    } else if (dx >= dy) {
-        // S-shape: H-V-H (split horizontal, single vertical)
-        const midX = Math.round((x1 + x2) / 2);
-        const stepX = x1 < x2 ? 1 : -1;
-        const stepY = y1 < y2 ? 1 : -1;
-        for (let x = x1; stepX > 0 ? x <= midX : x >= midX; x += stepX) add(x, y1);
-        for (let y = y1; stepY > 0 ? y <= y2 : y >= y2; y += stepY) add(midX, y);
-        for (let x = midX; stepX > 0 ? x <= x2 : x >= x2; x += stepX) add(x, y2);
-    } else {
-        // S-shape: V-H-V (split vertical, single horizontal)
-        const midY = Math.round((y1 + y2) / 2);
-        const stepX = x1 < x2 ? 1 : -1;
-        const stepY = y1 < y2 ? 1 : -1;
-        for (let y = y1; stepY > 0 ? y <= midY : y >= midY; y += stepY) add(x1, y);
-        for (let x = x1; stepX > 0 ? x <= x2 : x >= x2; x += stepX) add(x, midY);
-        for (let y = midY; stepY > 0 ? y <= y2 : y >= y2; y += stepY) add(x2, y);
-    }
-
     return path;
 }
 
@@ -319,22 +297,8 @@ function computeLineChars(x1, y1, x2, y2, style, canvasCells, lookup) {
             if (prev.y !== y) { conn.up = style; conn.down = style; }
         }
 
-        // Merge with existing box-draw char on canvas
         const existingCell = canvasCells[y] && canvasCells[y][x];
-        if (existingCell) {
-            const existingCode = existingCell.type !== 'sextant' ? existingCell.charCode : null;
-            if (existingCode && lookup.isBoxDrawChar(existingCode)) {
-                const ec = lookup.getConnections(existingCode);
-                if (ec) {
-                    conn.up = Math.max(conn.up, ec.up);
-                    conn.down = Math.max(conn.down, ec.down);
-                    conn.left = Math.max(conn.left, ec.left);
-                    conn.right = Math.max(conn.right, ec.right);
-                }
-            }
-        }
-
-        const charCode = lookup.lookupChar(conn.up, conn.down, conn.left, conn.right);
+        const charCode = mergeWithExisting(conn, existingCell, style, lookup);
         if (charCode !== null) {
             result.push({ x, y, charCode });
         }

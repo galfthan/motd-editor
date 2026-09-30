@@ -1,51 +1,59 @@
 // Canvas rendering and interaction
 
+// Cell is 16x32 + 2px border = 18x34 total (2x scale of 8x16 Unifont), holding
+// 2x3 subpixels. style.css hardcodes the same sizes for cells and overlays.
+const CELL_W = 18;
+const CELL_H = 34;
+const SUB_W = CELL_W / 2;
+const SUB_H = CELL_H / 3;
+
+// Normalised rect { x1, y1, x2, y2 } spanning two points
+function normRect(a, b) {
+    return {
+        x1: Math.min(a.x, b.x), y1: Math.min(a.y, b.y),
+        x2: Math.max(a.x, b.x), y2: Math.max(a.y, b.y)
+    };
+}
+
 class CanvasRenderer {
     constructor(containerEl) {
         this.container = containerEl;
         this.canvas = null;
-        this.tool = 'draw'; // 'draw', 'erase', 'char', 'select', 'pick'
+        this.tool = 'draw'; // draw, erase, char, text, box, line, select, select-subpixel, pick
         this.selectedChar = null;
-        this.fgColor = { r: 255, g: 255, b: 255, default: true };
-        this.bgColor = { r: 0, g: 0, b: 0, default: true };
+        this.fgColor = defaultFG();
+        this.bgColor = defaultBG();
         this.isDrawing = false;
         this.lastCell = null;
         this.toolbar = null; // Set by app.js
-        this.fontMode = 'font';
 
         // Selection state (cell-level for 'select' tool)
         this.selection = null;      // { x1, y1, x2, y2 } normalized (x1 <= x2, y1 <= y2)
-        this.selectionStart = null; // Start point during drag
+        this.selectionStart = null; // { x, y } start point during drag
         this.clipboard = null;      // 2D array of cells (char-level)
         this.pasteMode = false;     // Waiting for click to place paste
 
-        // Subpixel selection state (subpixel-level for 'select-subpixel' tool)
-        this.subpixelSelection = null;      // { sx1, sy1, sx2, sy2 } in subpixel coords
-        this.subpixelSelectionStart = null; // Start point during drag
+        // Subpixel selection state (subpixel-level for 'select-subpixel' tool),
+        // same shapes as above but in subpixel coords
+        this.subpixelSelection = null;
+        this.subpixelSelectionStart = null;
         this.subpixelClipboard = null;      // 2D array of {filled, fg, bg} objects
 
         // Text tool state
         this.textCursor = null; // { x, y } cell coordinates, or null
 
-        // Box tool state
-        this.boxStart = null;       // { x, y } drag start
-        this.boxEnd = null;         // { x, y } drag end
+        // Box/line tool state
+        this.dragStart = null;      // { x, y } cell where the drag began
+        this.dragEnd = null;        // { x, y } current cell
         this.boxLineStyle = 1;      // 0=none, 1=light, 2=heavy, 3=double
         this.boxFillMode = 0;       // 0=no fill, 1=fill & clear, 2=recolor only
-
-        // Line tool state
-        this.lineStart = null;      // { x, y } drag start
-        this.lineEnd = null;        // { x, y } drag end
 
         // DOM element cache for O(1) lookups
         this.cellElements = [];     // [y][x] → cell DOM element
 
-        // Decoration tracking sets for O(1) clear operations
-        this._selectedCells = new Set();
-        this._selectedSubpixels = new Set();
-        this._pastePreviewCells = new Set();
-        this._pastePreviewSubpixels = new Set();
-        this._boxPreviewCells = new Set();
+        // Overlay divs per decoration kind (see setOverlay)
+        this._overlays = {};
+        this._pastePreviewKey = null; // Last previewed paste position
         this._textCursorCell = null;
 
         this.setupEventListeners();
@@ -76,6 +84,9 @@ class CanvasRenderer {
     }
 
     setTool(tool) {
+        if (tool !== this.tool) {
+            this.cancelDrag();
+        }
         this.tool = tool;
         if (tool !== 'char') {
             this.selectedChar = null;
@@ -92,17 +103,6 @@ class CanvasRenderer {
         }
         if (tool !== 'text') {
             this.clearTextCursor();
-        }
-        if (tool !== 'box') {
-            this.boxStart = null;
-            this.boxEnd = null;
-        }
-        if (tool !== 'line') {
-            this.lineStart = null;
-            this.lineEnd = null;
-        }
-        if (tool !== 'box' && tool !== 'line') {
-            this.clearBoxPreview();
         }
     }
 
@@ -145,30 +145,35 @@ class CanvasRenderer {
                 return;
             }
 
-            // Ctrl+C - copy
-            if (e.ctrlKey && e.key === 'c') {
-                e.preventDefault();
+            // Ctrl on Windows/Linux, Cmd on macOS
+            const mod = e.ctrlKey || e.metaKey;
+
+            // Ctrl+C - copy (leave the native copy alone when nothing is selected)
+            if (mod && e.key === 'c') {
                 if (this.isSubpixelMode() && this.subpixelSelection) {
+                    e.preventDefault();
                     this.copySelectionSubpixel();
                 } else if (this.selection) {
+                    e.preventDefault();
                     this.copySelection();
                 }
                 return;
             }
 
             // Ctrl+X - cut
-            if (e.ctrlKey && e.key === 'x') {
-                e.preventDefault();
+            if (mod && e.key === 'x') {
                 if (this.isSubpixelMode() && this.subpixelSelection) {
+                    e.preventDefault();
                     this.cutSelectionSubpixel();
                 } else if (this.selection) {
+                    e.preventDefault();
                     this.cutSelection();
                 }
                 return;
             }
 
             // Ctrl+V - paste
-            if (e.ctrlKey && e.key === 'v') {
+            if (mod && e.key === 'v') {
                 e.preventDefault();
                 // Subpixel paste stays internal-only
                 if (this.isSubpixelMode()) {
@@ -183,9 +188,9 @@ class CanvasRenderer {
         });
     }
 
+    // Called from the character palette, which is only shown for the char tool
     setSelectedChar(charCode) {
         this.selectedChar = charCode;
-        this.tool = 'char';
     }
 
     setFgColor(color) {
@@ -194,6 +199,12 @@ class CanvasRenderer {
 
     setBgColor(color) {
         this.bgColor = color;
+    }
+
+    // Give a cell the currently picked colours
+    applyCurrentColors(cell) {
+        cell.fg = { ...this.fgColor };
+        cell.bg = { ...this.bgColor };
     }
 
     loadCanvas() {
@@ -206,18 +217,28 @@ class CanvasRenderer {
         if (!this.canvas) return;
 
         this.container.innerHTML = '';
-        // Cell is 16x32 + 2px border = 18x34 total (2x scale of 8x16 Unifont)
-        this.container.style.width = (this.canvas.width * 18) + 'px';
-        this.container.style.height = (this.canvas.height * 34) + 'px';
+        this.container.style.width = (this.canvas.width * CELL_W) + 'px';
+        this.container.style.height = (this.canvas.height * CELL_H) + 'px';
 
-        // Reset caches
+        // Reset caches (innerHTML = '' removed the overlay divs too)
         this.cellElements = [];
-        this._selectedCells.clear();
-        this._selectedSubpixels.clear();
-        this._pastePreviewCells.clear();
-        this._pastePreviewSubpixels.clear();
-        this._boxPreviewCells.clear();
+        this._overlays = {};
+        this._pastePreviewKey = null;
         this._textCursorCell = null;
+
+        // Cells and overlays each live in their own size-contained layer. With
+        // the cells as direct children of the container, any overlay update
+        // made the browser walk every positioned cell during layout.
+        const makeLayer = (className) => {
+            const layer = document.createElement('div');
+            layer.className = className;
+            layer.style.width = this.container.style.width;
+            layer.style.height = this.container.style.height;
+            this.container.appendChild(layer);
+            return layer;
+        };
+        const cellLayer = makeLayer('cell-layer');
+        this.overlayLayer = makeLayer('overlay-layer');
 
         const fragment = document.createDocumentFragment();
         for (let y = 0; y < this.canvas.height; y++) {
@@ -229,14 +250,16 @@ class CanvasRenderer {
                 this.cellElements[y][x] = cellEl;
             }
         }
-        this.container.appendChild(fragment);
+        cellLayer.appendChild(fragment);
+
+        // Restore selection highlights after re-render (state outlives the DOM)
+        this.updateSelectionDisplay();
+        this.updateSubpixelSelectionDisplay();
 
         // Restore text cursor display after re-render
         if (this.textCursor) {
-            if (this.textCursor.x >= this.canvas.width || this.textCursor.y >= this.canvas.height) {
-                this.textCursor.x = Math.min(this.textCursor.x, this.canvas.width - 1);
-                this.textCursor.y = Math.min(this.textCursor.y, this.canvas.height - 1);
-            }
+            this.textCursor.x = Math.min(this.textCursor.x, this.canvas.width - 1);
+            this.textCursor.y = Math.min(this.textCursor.y, this.canvas.height - 1);
             this.updateTextCursorDisplay();
         }
     }
@@ -246,88 +269,66 @@ class CanvasRenderer {
         cellEl.className = 'cell';
         cellEl.dataset.x = x;
         cellEl.dataset.y = y;
-        cellEl.style.left = (x * 18) + 'px';
-        cellEl.style.top = (y * 34) + 'px';
-
-        // Apply background color
-        if (!cell.bg.default) {
-            cellEl.style.backgroundColor = `rgb(${cell.bg.r}, ${cell.bg.g}, ${cell.bg.b})`;
-        }
-
-        // Determine character code (sextant cells use pattern→char conversion)
-        let charCode;
-        if (cell.type === 'sextant') {
-            const pattern = this.subpixelsToPattern(cell.subpixels);
-            charCode = this.sextantPatternToChar(pattern).codePointAt(0);
-        } else {
-            charCode = cell.charCode || 32;
-        }
-
-        // Empty cell — no content needed
-        if (charCode === 32) return cellEl;
-
-        // Font-based rendering
-        const char = String.fromCodePoint(charCode);
-        const isLegacyTiling = (charCode >= 0x1FB00 && charCode <= 0x1FBAF)
-            || (charCode >= 0x1FBCE && charCode <= 0x1FBDF);
-        const isLegacyMisc = charCode >= 0x1FB00 && !isLegacyTiling;
-        if (isLegacyTiling) {
-            const span = document.createElement('span');
-            span.textContent = char;
-            span.style.fontFamily = "'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace";
-            span.style.fontSize = '16px';
-            span.style.lineHeight = '1';
-            span.style.transform = 'scaleY(2) translateY(1px)';
-            if (!cell.fg.default) {
-                span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
-            }
-            cellEl.appendChild(span);
-        } else if (isLegacyMisc) {
-            const span = document.createElement('span');
-            span.textContent = char;
-            span.style.fontFamily = "'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace";
-            span.style.fontSize = '16px';
-            span.style.lineHeight = '1';
-            if (!cell.fg.default) {
-                span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
-            }
-            cellEl.appendChild(span);
-        } else if (charCode >= 0x2500 && charCode <= 0x259F) {
-            const span = document.createElement('span');
-            span.textContent = char;
-            span.style.fontFamily = "'Cascadia Code', 'Consolas', 'Courier New', monospace";
-            span.style.fontSize = '32px';
-            span.style.lineHeight = '1';
-            span.style.transform = 'scaleX(0.833)';
-            if (!cell.fg.default) {
-                span.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
-            }
-            cellEl.appendChild(span);
-        } else {
-            cellEl.textContent = char;
-            cellEl.style.fontFamily = "'Cascadia Code', 'Consolas', 'Courier New', monospace";
-            cellEl.style.fontSize = '24px';
-            if (!cell.fg.default) {
-                cellEl.style.color = `rgb(${cell.fg.r}, ${cell.fg.g}, ${cell.fg.b})`;
-            }
-        }
-
+        this.paintCellElement(cellEl, x, y, cell);
         return cellEl;
+    }
+
+    // (Re)paint a cell element in place from cell state. Updating the existing
+    // element instead of replacing it keeps layout invalidation local to the
+    // cell and preserves decoration classes such as the text cursor.
+    paintCellElement(cellEl, x, y, cell) {
+        let css = `left:${x * CELL_W}px;top:${y * CELL_H}px`;
+        if (!cell.bg.default) {
+            css += `;background-color:rgb(${cell.bg.r},${cell.bg.g},${cell.bg.b})`;
+        }
+        cellEl.style.cssText = css;
+
+        const char = cellToChar(cell);
+        if (char === ' ') {
+            cellEl.textContent = '';
+            return;
+        }
+
+        const span = document.createElement('span');
+        span.className = glyphClass(char.codePointAt(0));
+        span.textContent = char;
+        if (!cell.fg.default) {
+            span.style.color = `rgb(${cell.fg.r},${cell.fg.g},${cell.fg.b})`;
+        }
+        cellEl.replaceChildren(span);
+    }
+
+    updateCell(x, y) {
+        const cellEl = this.getCellElement(x, y);
+        if (cellEl) this.paintCellElement(cellEl, x, y, this.canvas.cells[y][x]);
+    }
+
+    // Repaint the cells in a rectangle (clipped to the canvas)
+    updateCellRect(x1, y1, x2, y2) {
+        x1 = Math.max(0, x1);
+        y1 = Math.max(0, y1);
+        x2 = Math.min(this.canvas.width - 1, x2);
+        y2 = Math.min(this.canvas.height - 1, y2);
+        for (let y = y1; y <= y2; y++) {
+            for (let x = x1; x <= x2; x++) this.updateCell(x, y);
+        }
+    }
+
+    // Repaint the cells covering a rectangle given in subpixel coords
+    updateSubpixelRect(r) {
+        this.updateCellRect(Math.floor(r.x1 / 2), Math.floor(r.y1 / 3), Math.floor(r.x2 / 2), Math.floor(r.y2 / 3));
     }
 
     handleMouseDown(e) {
         // Paste mode takes priority over any tool
         if (this.pasteMode) {
-            const cellEl = e.target.closest('.cell');
-            if (!cellEl) return;
-            const cellX = parseInt(cellEl.dataset.x);
-            const cellY = parseInt(cellEl.dataset.y);
-
+            // Same hit-testing as showPastePreview, so paste lands where previewed
             if (this.isSubpixelMode() && this.subpixelClipboard) {
-                const sp = this.getSubpixelFromEvent(e);
+                const sp = this.subpixelCoordsFromEvent(e);
                 if (sp) this.pasteAtSubpixel(sp.sx, sp.sy);
             } else if (this.clipboard) {
-                this.pasteAt(cellX, cellY);
+                const c = this.cellCoordsFromEvent(e);
+                if (c) this.pasteAt(c.cellX, c.cellY);
             }
             return;
         }
@@ -338,10 +339,8 @@ class CanvasRenderer {
             this.handlePickTool(e);
         } else if (this.tool === 'text') {
             this.handleTextToolClick(e);
-        } else if (this.tool === 'box') {
-            this.handleBoxToolDown(e);
-        } else if (this.tool === 'line') {
-            this.handleLineToolDown(e);
+        } else if (this.tool === 'box' || this.tool === 'line') {
+            this.handleShapeToolDown(e);
         } else if (this.isSelectTool()) {
             this.handleSelectToolDown(e);
         } else if (this.tool === 'char') {
@@ -361,10 +360,8 @@ class CanvasRenderer {
 
         if (this.isSelectTool()) {
             this.handleSelectToolMove(e);
-        } else if (this.tool === 'box') {
-            this.handleBoxToolMove(e);
-        } else if (this.tool === 'line') {
-            this.handleLineToolMove(e);
+        } else if (this.tool === 'box' || this.tool === 'line') {
+            this.handleShapeToolMove(e);
         } else if (this.tool === 'char') {
             this.handleCharTool(e);
         } else if (this.tool !== 'pick' && this.tool !== 'text') {
@@ -373,23 +370,13 @@ class CanvasRenderer {
     }
 
     handleMouseUp(isLeave = false) {
-        if (this.tool === 'box' && this.boxStart) {
-            if (isLeave) {
-                this.boxStart = null;
-                this.boxEnd = null;
-                this.clearBoxPreview();
-            } else {
-                this.handleBoxToolUp();
+        // Box/line: commit on release, cancel when the pointer leaves the canvas
+        if (this.dragStart) {
+            if (!isLeave) {
+                if (this.tool === 'box') this.commitBox();
+                else this.commitLine();
             }
-        }
-        if (this.tool === 'line' && this.lineStart) {
-            if (isLeave) {
-                this.lineStart = null;
-                this.lineEnd = null;
-                this.clearBoxPreview();
-            } else {
-                this.handleLineToolUp();
-            }
+            this.cancelDrag();
         }
         if (this.isSelectTool() && (this.selectionStart || this.subpixelSelectionStart)) {
             if (isLeave) {
@@ -398,47 +385,27 @@ class CanvasRenderer {
                 // and finalise when the user releases the button anywhere.
                 return;
             }
-            this.handleSelectToolUp();
+            this.selectionStart = null;
+            this.subpixelSelectionStart = null;
         }
         this.isDrawing = false;
         this.lastCell = null;
     }
 
     handlePickTool(e) {
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return;
-
-        const cellX = parseInt(cellEl.dataset.x);
-        const cellY = parseInt(cellEl.dataset.y);
-        const cell = this.canvas.cells[cellY][cellX];
+        const c = this.cellCoordsFromEvent(e);
+        if (!c) return;
+        const cell = this.canvas.cells[c.cellY][c.cellX];
 
         if (this.toolbar) {
             this.toolbar.setColors(cell.fg, cell.bg);
         }
     }
 
-    // Get subpixel coordinates from mouse event
-    getSubpixelFromEvent(e) {
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return null;
-
-        const cellX = parseInt(cellEl.dataset.x);
-        const cellY = parseInt(cellEl.dataset.y);
-        const rect = cellEl.getBoundingClientRect();
-        const relX = (e.clientX - rect.left) / rect.width;
-        const relY = (e.clientY - rect.top) / rect.height;
-
-        // Each cell is 2 subpixels wide, 3 tall
-        const subCol = relX < 0.5 ? 0 : 1;
-        const subRow = Math.min(2, Math.floor(relY * 3));
-
-        return {
-            sx: cellX * 2 + subCol,
-            sy: cellY * 3 + subRow,
-            cellX,
-            cellY
-        };
-    }
+    // All pointer hit-testing uses container-relative coords. Using
+    // e.target.closest('.cell') plus per-cell rects gave inconsistent results at
+    // cell boundaries (the child <span> with scaleY(2) and the 1px cell borders
+    // can flip e.target between adjacent cells before the position crosses).
 
     // Cell coords from a mouse event, clamped to canvas extents.
     // Works whether the pointer is inside the canvas or outside it.
@@ -447,8 +414,8 @@ class CanvasRenderer {
         const rect = this.container.getBoundingClientRect();
         const relX = e.clientX - rect.left;
         const relY = e.clientY - rect.top;
-        const cellX = Math.max(0, Math.min(this.canvas.width  - 1, Math.floor(relX / 18)));
-        const cellY = Math.max(0, Math.min(this.canvas.height - 1, Math.floor(relY / 34)));
+        const cellX = Math.max(0, Math.min(this.canvas.width  - 1, Math.floor(relX / CELL_W)));
+        const cellY = Math.max(0, Math.min(this.canvas.height - 1, Math.floor(relY / CELL_H)));
         return { cellX, cellY };
     }
 
@@ -458,155 +425,130 @@ class CanvasRenderer {
         const rect = this.container.getBoundingClientRect();
         const relX = e.clientX - rect.left;
         const relY = e.clientY - rect.top;
-        const sx = Math.max(0, Math.min(this.canvas.width  * 2 - 1, Math.floor(relX / 9)));
-        const sy = Math.max(0, Math.min(this.canvas.height * 3 - 1, Math.floor(relY * 3 / 34)));
+        const sx = Math.max(0, Math.min(this.canvas.width  * 2 - 1, Math.floor(relX / SUB_W)));
+        const sy = Math.max(0, Math.min(this.canvas.height * 3 - 1, Math.floor(relY / SUB_H)));
         return { sx, sy, cellX: Math.floor(sx / 2), cellY: Math.floor(sy / 3) };
     }
 
-    handleSelectToolDown(e) {
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return;
-
-        const cellX = parseInt(cellEl.dataset.x);
-        const cellY = parseInt(cellEl.dataset.y);
-
-        // Subpixel mode handling
-        if (this.isSubpixelMode()) {
-            const sp = this.getSubpixelFromEvent(e);
-            if (!sp) return;
-
-            // Start new subpixel selection
-            this.clearSubpixelSelection();
-            this.subpixelSelectionStart = { sx: sp.sx, sy: sp.sy };
-            this.subpixelSelection = { sx1: sp.sx, sy1: sp.sy, sx2: sp.sx, sy2: sp.sy };
-            this.updateSubpixelSelectionDisplay();
-            return;
+    // The cell containing subpixel (sx, sy) and the subpixel's row/col within
+    // it, or null when off-canvas
+    subpixelAt(sx, sy) {
+        const cellX = Math.floor(sx / 2);
+        const cellY = Math.floor(sy / 3);
+        if (cellX < 0 || cellX >= this.canvas.width || cellY < 0 || cellY >= this.canvas.height) {
+            return null;
         }
+        return { cell: this.canvas.cells[cellY][cellX], cellX, cellY, row: sy % 3, col: sx % 2 };
+    }
 
-        this.clearSelection();
-        this.selectionStart = { x: cellX, y: cellY };
-        this.selection = { x1: cellX, y1: cellY, x2: cellX, y2: cellY };
-        this.updateSelectionDisplay();
+    // --- Select tools ---
+
+    // Point under the pointer in the active select tool's units (subpixels or cells)
+    selectPointFromEvent(e) {
+        if (this.isSubpixelMode()) {
+            const sp = this.subpixelCoordsFromEvent(e);
+            return sp && { x: sp.sx, y: sp.sy };
+        }
+        const c = this.cellCoordsFromEvent(e);
+        return c && { x: c.cellX, y: c.cellY };
+    }
+
+    handleSelectToolDown(e) {
+        const p = this.selectPointFromEvent(e);
+        if (!p) return;
+        if (this.isSubpixelMode()) {
+            this.subpixelSelectionStart = p;
+        } else {
+            this.selectionStart = p;
+        }
+        this.handleSelectToolMove(e);
     }
 
     handleSelectToolMove(e) {
-        // Subpixel mode
-        if (this.isSubpixelMode()) {
-            if (!this.subpixelSelectionStart) return;
-            const sp = this.subpixelCoordsFromEvent(e);
-            if (!sp) return;
+        const subpixel = this.isSubpixelMode();
+        const start = subpixel ? this.subpixelSelectionStart : this.selectionStart;
+        const p = start && this.selectPointFromEvent(e);
+        if (!p) return;
 
-            this.subpixelSelection = {
-                sx1: Math.min(this.subpixelSelectionStart.sx, sp.sx),
-                sy1: Math.min(this.subpixelSelectionStart.sy, sp.sy),
-                sx2: Math.max(this.subpixelSelectionStart.sx, sp.sx),
-                sy2: Math.max(this.subpixelSelectionStart.sy, sp.sy)
-            };
+        if (subpixel) {
+            this.subpixelSelection = normRect(start, p);
             this.updateSubpixelSelectionDisplay();
-            return;
+        } else {
+            this.selection = normRect(start, p);
+            this.updateSelectionDisplay();
         }
-
-        // Cell-level mode
-        if (!this.selectionStart) return;
-
-        const c = this.cellCoordsFromEvent(e);
-        if (!c) return;
-
-        this.selection = {
-            x1: Math.min(this.selectionStart.x, c.cellX),
-            y1: Math.min(this.selectionStart.y, c.cellY),
-            x2: Math.max(this.selectionStart.x, c.cellX),
-            y2: Math.max(this.selectionStart.y, c.cellY)
-        };
-        this.updateSelectionDisplay();
     }
 
-    handleSelectToolUp() {
-        this.selectionStart = null;
-        this.subpixelSelectionStart = null;
+    // --- Overlays ---
+
+    // Show `rects` (grid coordinates, inclusive) as overlay divs of the given
+    // kind, reusing the kind's existing divs. An empty list hides the overlay.
+    // With `subpixel`, coords are in subpixels (2x3 per cell) rather than cells.
+    setOverlay(kind, rects, subpixel = false) {
+        const els = this._overlays[kind] || (this._overlays[kind] = []);
+        while (els.length > rects.length) els.pop().remove();
+
+        const unitW = subpixel ? SUB_W : CELL_W;
+        const unitH = subpixel ? SUB_H : CELL_H;
+        rects.forEach((r, i) => {
+            let el = els[i];
+            if (!el) {
+                el = document.createElement('div');
+                el.className = `overlay overlay-${kind}` + (subpixel ? ' subpixel' : '');
+                this.overlayLayer.appendChild(el);
+                els.push(el);
+            }
+            const left = r.x1 * unitW;
+            const top = r.y1 * unitH;
+            // Keep the tiled outline pattern aligned to the cell grid when the
+            // region starts mid-cell (subpixel coords)
+            el.style.cssText =
+                `left:${left}px;top:${top}px;` +
+                `width:${(r.x2 - r.x1 + 1) * unitW}px;height:${(r.y2 - r.y1 + 1) * unitH}px;` +
+                `background-position:${-(left % CELL_W)}px ${-(top % CELL_H)}px`;
+        });
+    }
+
+    // Clip a rect to the canvas (in cells, or subpixels); null if nothing is left
+    clipRect(r, subpixel = false) {
+        const w = this.canvas.width * (subpixel ? 2 : 1);
+        const h = this.canvas.height * (subpixel ? 3 : 1);
+        const c = {
+            x1: Math.max(0, r.x1), y1: Math.max(0, r.y1),
+            x2: Math.min(w - 1, r.x2), y2: Math.min(h - 1, r.y2)
+        };
+        return c.x1 <= c.x2 && c.y1 <= c.y2 ? c : null;
     }
 
     updateSelectionDisplay() {
-        // Clear previous selection
-        for (const el of this._selectedCells) el.classList.remove('selected');
-        this._selectedCells.clear();
-
-        if (!this.selection) return;
-
-        // Add selection class to cells in range
-        for (let y = this.selection.y1; y <= this.selection.y2; y++) {
-            for (let x = this.selection.x1; x <= this.selection.x2; x++) {
-                const cellEl = this.getCellElement(x, y);
-                if (cellEl) {
-                    cellEl.classList.add('selected');
-                    this._selectedCells.add(cellEl);
-                }
-            }
-        }
+        this.setOverlay('selection', this.selection ? [this.selection] : []);
     }
 
     clearSelection() {
         this.selection = null;
         this.selectionStart = null;
-        for (const el of this._selectedCells) el.classList.remove('selected');
-        this._selectedCells.clear();
+        this.updateSelectionDisplay();
     }
 
-    // Clear only the visual subpixel selection overlays (not the state)
-    clearSubpixelSelectionDisplay() {
-        for (const el of this._selectedSubpixels) el.remove();
-        this._selectedSubpixels.clear();
-    }
-
-    // Subpixel selection display - highlights individual subpixels
+    // Subpixel selection display - outlines individual subpixels
     updateSubpixelSelectionDisplay() {
-        this.clearSubpixelSelectionDisplay();
-        if (!this.subpixelSelection) return;
-
-        const { sx1, sy1, sx2, sy2 } = this.subpixelSelection;
-
-        // Iterate through subpixel range, creating overlay divs
-        for (let sy = sy1; sy <= sy2; sy++) {
-            for (let sx = sx1; sx <= sx2; sx++) {
-                const cellX = Math.floor(sx / 2);
-                const cellY = Math.floor(sy / 3);
-                const subCol = sx % 2;
-                const subRow = sy % 3;
-
-                const cellEl = this.getCellElement(cellX, cellY);
-                if (!cellEl) continue;
-
-                const overlay = document.createElement('div');
-                overlay.className = 'subpixel-overlay subpixel-selected';
-                overlay.style.left = (subCol * 50) + '%';
-                overlay.style.top = (subRow * 33.333) + '%';
-                cellEl.appendChild(overlay);
-                this._selectedSubpixels.add(overlay);
-            }
-        }
+        this.setOverlay('subpixel-selection', this.subpixelSelection ? [this.subpixelSelection] : [], true);
     }
 
     clearSubpixelSelection() {
         this.subpixelSelection = null;
         this.subpixelSelectionStart = null;
-        for (const el of this._selectedSubpixels) el.remove();
-        this._selectedSubpixels.clear();
+        this.updateSubpixelSelectionDisplay();
     }
+
+    // --- Copy / cut / paste ---
 
     async copySelection() {
         if (!this.selection) return;
 
         const { x1, y1, x2, y2 } = this.selection;
-        this.clipboard = [];
-
-        for (let y = y1; y <= y2; y++) {
-            const row = [];
-            for (let x = x1; x <= x2; x++) {
-                // Deep copy the cell
-                row.push(JSON.parse(JSON.stringify(this.canvas.cells[y][x])));
-            }
-            this.clipboard.push(row);
-        }
+        this.clipboard = this.canvas.cells.slice(y1, y2 + 1)
+            .map(row => structuredClone(row.slice(x1, x2 + 1)));
 
         // Write text representation to system clipboard
         const text = this.cellsToText(this.clipboard);
@@ -625,67 +567,51 @@ class CanvasRenderer {
         const { x1, y1, x2, y2 } = this.selection;
         for (let y = y1; y <= y2; y++) {
             for (let x = x1; x <= x2; x++) {
-                clearCell(this.canvas.cells[y][x]);
-                this.canvas.cells[y][x].fg = { r: 255, g: 255, b: 255, default: true };
-                this.canvas.cells[y][x].bg = { r: 0, g: 0, b: 0, default: true };
+                this.canvas.cells[y][x] = createCell();
             }
         }
 
-        this.render();
+        this.updateCellRect(x1, y1, x2, y2);
         this.clearSelection();
     }
 
     pasteAt(x, y) {
         if (!this.clipboard || this.clipboard.length === 0) return;
 
-        for (let dy = 0; dy < this.clipboard.length; dy++) {
-            for (let dx = 0; dx < this.clipboard[dy].length; dx++) {
+        let maxWidth = 0;
+        this.clipboard.forEach((row, dy) => {
+            maxWidth = Math.max(maxWidth, row.length);
+            row.forEach((cell, dx) => {
                 const tx = x + dx;
                 const ty = y + dy;
                 if (tx >= 0 && tx < this.canvas.width && ty >= 0 && ty < this.canvas.height) {
-                    this.canvas.cells[ty][tx] = JSON.parse(JSON.stringify(this.clipboard[dy][dx]));
+                    this.canvas.cells[ty][tx] = structuredClone(cell);
                 }
-            }
-        }
-        this.render();
+            });
+        });
+        this.updateCellRect(x, y, x + maxWidth - 1, y + this.clipboard.length - 1);
 
         this.pasteMode = false;
         this.clearPastePreview();
     }
 
     showPastePreview(e) {
-        this.clearPastePreview();
-
         // Subpixel mode paste preview
         if (this.isSubpixelMode() && this.subpixelClipboard) {
             const sp = this.subpixelCoordsFromEvent(e);
             if (!sp) return;
 
-            const height = this.subpixelClipboard.length;
-            const width = this.subpixelClipboard[0].length;
+            // Skip when the pointer hasn't moved to a new subpixel
+            const key = `s${sp.sx},${sp.sy}`;
+            if (key === this._pastePreviewKey) return;
+            this._pastePreviewKey = key;
 
-            for (let dy = 0; dy < height; dy++) {
-                for (let dx = 0; dx < width; dx++) {
-                    const targetSx = sp.sx + dx;
-                    const targetSy = sp.sy + dy;
-                    const cellX = Math.floor(targetSx / 2);
-                    const cellY = Math.floor(targetSy / 3);
-                    const subCol = targetSx % 2;
-                    const subRow = targetSy % 3;
-
-                    if (cellX >= this.canvas.width || cellY >= this.canvas.height) continue;
-
-                    const cellEl = this.getCellElement(cellX, cellY);
-                    if (!cellEl) continue;
-
-                    const overlay = document.createElement('div');
-                    overlay.className = 'subpixel-overlay paste-preview-subpixel';
-                    overlay.style.left = (subCol * 50) + '%';
-                    overlay.style.top = (subRow * 33.333) + '%';
-                    cellEl.appendChild(overlay);
-                    this._pastePreviewSubpixels.add(overlay);
-                }
-            }
+            const r = this.clipRect({
+                x1: sp.sx, y1: sp.sy,
+                x2: sp.sx + this.subpixelClipboard[0].length - 1,
+                y2: sp.sy + this.subpixelClipboard.length - 1
+            }, true);
+            this.setOverlay('paste-subpixel', r ? [r] : [], true);
             return;
         }
 
@@ -695,84 +621,35 @@ class CanvasRenderer {
         const c = this.cellCoordsFromEvent(e);
         if (!c) return;
 
-        const x = c.cellX;
-        const y = c.cellY;
+        const key = `c${c.cellX},${c.cellY}`;
+        if (key === this._pastePreviewKey) return;
+        this._pastePreviewKey = key;
 
-        const clipboardHeight = this.clipboard.length;
-        const clipboardWidth = this.clipboard[0].length;
-
-        for (let dy = 0; dy < clipboardHeight; dy++) {
-            for (let dx = 0; dx < clipboardWidth; dx++) {
-                const targetX = x + dx;
-                const targetY = y + dy;
-
-                if (targetX >= this.canvas.width || targetY >= this.canvas.height) continue;
-
-                const targetEl = this.getCellElement(targetX, targetY);
-                if (targetEl) {
-                    targetEl.classList.add('paste-preview');
-                    this._pastePreviewCells.add(targetEl);
-                }
+        // Rows can differ in length (pasted text), so match pasteAt row by row,
+        // merging consecutive rows of equal length into one rect
+        const rects = [];
+        this.clipboard.forEach((row, dy) => {
+            if (row.length === 0) return;
+            const y = c.cellY + dy;
+            const last = rects[rects.length - 1];
+            if (last && last.y2 === y - 1 && last.len === row.length) {
+                last.y2 = y;
+            } else {
+                rects.push({ x1: c.cellX, y1: y, x2: c.cellX + row.length - 1, y2: y, len: row.length });
             }
-        }
+        });
+        this.setOverlay('paste', rects.map(r => this.clipRect(r)).filter(Boolean));
     }
 
     clearPastePreview() {
-        for (const el of this._pastePreviewCells) el.classList.remove('paste-preview');
-        this._pastePreviewCells.clear();
-        for (const el of this._pastePreviewSubpixels) el.remove();
-        this._pastePreviewSubpixels.clear();
-    }
-
-    // Convert a 2D subpixels array to a 6-bit sextant pattern
-    subpixelsToPattern(subpixels) {
-        let pattern = 0;
-        if (subpixels[0][0]) pattern |= 1;
-        if (subpixels[0][1]) pattern |= 2;
-        if (subpixels[1][0]) pattern |= 4;
-        if (subpixels[1][1]) pattern |= 8;
-        if (subpixels[2][0]) pattern |= 16;
-        if (subpixels[2][1]) pattern |= 32;
-        return pattern;
-    }
-
-    // Convert a 6-bit sextant pattern to its Unicode character
-    sextantPatternToChar(pattern) {
-        if (pattern === 0)  return ' ';
-        if (pattern === 63) return '\u2588';  // full block
-        if (pattern === 21) return '\u258C';  // left half
-        if (pattern === 42) return '\u2590';  // right half
-
-        let offset = pattern;
-        if (pattern > 42)      offset -= 3;
-        else if (pattern > 21) offset -= 2;
-        else                   offset -= 1;
-
-        return String.fromCodePoint(0x1FB00 + offset);
-    }
-
-    // Convert a single cell to its Unicode character
-    cellToChar(cell) {
-        if (cell.type === 'sextant') {
-            const pattern = this.subpixelsToPattern(cell.subpixels);
-            return this.sextantPatternToChar(pattern);
-        }
-        if (cell.charCode && cell.charCode !== 0) {
-            return String.fromCodePoint(cell.charCode);
-        }
-        return ' ';
+        this._pastePreviewKey = null;
+        this.setOverlay('paste', []);
+        this.setOverlay('paste-subpixel', [], true);
     }
 
     // Convert a 2D cell array to a multiline text string
     cellsToText(cells) {
-        const lines = [];
-        for (const row of cells) {
-            let line = '';
-            for (const cell of row) {
-                line += this.cellToChar(cell);
-            }
-            lines.push(line.replace(/\s+$/, ''));
-        }
+        const lines = cells.map(row => row.map(cellToChar).join('').replace(/\s+$/, ''));
         while (lines.length > 0 && lines[lines.length - 1] === '') {
             lines.pop();
         }
@@ -814,41 +691,14 @@ class CanvasRenderer {
         }
     }
 
-    // Get subpixel value at subpixel coordinates
-    getSubpixelAt(sx, sy) {
-        const cellX = Math.floor(sx / 2);
-        const cellY = Math.floor(sy / 3);
-        const subCol = sx % 2;
-        const subRow = sy % 3;
-
-        if (cellX < 0 || cellX >= this.canvas.width || cellY < 0 || cellY >= this.canvas.height) {
-            return false;
-        }
-
-        const cell = this.canvas.cells[cellY][cellX];
-        if (cell.type !== 'sextant') {
-            return false; // Extended chars have no subpixels
-        }
-        return cell.subpixels[subRow][subCol];
-    }
-
-    // Get subpixel value and colors at subpixel coordinates
+    // Subpixel value and cell colours at subpixel coordinates
     getSubpixelDataAt(sx, sy) {
-        const cellX = Math.floor(sx / 2);
-        const cellY = Math.floor(sy / 3);
-        const subCol = sx % 2;
-        const subRow = sy % 3;
-
-        if (cellX < 0 || cellX >= this.canvas.width || cellY < 0 || cellY >= this.canvas.height) {
-            return { filled: false, fg: null, bg: null };
-        }
-
-        const cell = this.canvas.cells[cellY][cellX];
-        if (cell.type !== 'sextant') {
-            return { filled: false, fg: { ...cell.fg }, bg: { ...cell.bg } };
-        }
+        const sp = this.subpixelAt(sx, sy);
+        if (!sp) return { filled: false, fg: null, bg: null };
+        const { cell, row, col } = sp;
         return {
-            filled: cell.subpixels[subRow][subCol],
+            // Extended chars have no subpixels
+            filled: cell.type === 'sextant' && cell.subpixels[row][col],
             fg: { ...cell.fg },
             bg: { ...cell.bg }
         };
@@ -858,16 +708,12 @@ class CanvasRenderer {
     copySelectionSubpixel() {
         if (!this.subpixelSelection) return;
 
-        const { sx1, sy1, sx2, sy2 } = this.subpixelSelection;
-        const width = sx2 - sx1 + 1;
-        const height = sy2 - sy1 + 1;
-
-        // Create 2D array of {filled, fg, bg} objects
+        const { x1, y1, x2, y2 } = this.subpixelSelection;
         this.subpixelClipboard = [];
-        for (let dy = 0; dy < height; dy++) {
+        for (let sy = y1; sy <= y2; sy++) {
             const row = [];
-            for (let dx = 0; dx < width; dx++) {
-                row.push(this.getSubpixelDataAt(sx1 + dx, sy1 + dy));
+            for (let sx = x1; sx <= x2; sx++) {
+                row.push(this.getSubpixelDataAt(sx, sy));
             }
             this.subpixelClipboard.push(row);
         }
@@ -879,19 +725,14 @@ class CanvasRenderer {
 
         this.copySelectionSubpixel();
 
-        const { sx1, sy1, sx2, sy2 } = this.subpixelSelection;
-        for (let sy = sy1; sy <= sy2; sy++) {
-            for (let sx = sx1; sx <= sx2; sx++) {
-                const cellX = Math.floor(sx / 2);
-                const cellY = Math.floor(sy / 3);
-                const subCol = sx % 2;
-                const subRow = sy % 3;
-                if (cellX >= 0 && cellX < this.canvas.width && cellY >= 0 && cellY < this.canvas.height) {
-                    setCellSubpixel(this.canvas.cells[cellY][cellX], subRow, subCol, false);
-                }
+        const r = this.subpixelSelection;
+        for (let sy = r.y1; sy <= r.y2; sy++) {
+            for (let sx = r.x1; sx <= r.x2; sx++) {
+                const sp = this.subpixelAt(sx, sy);
+                if (sp) setCellSubpixel(sp.cell, sp.row, sp.col, false);
             }
         }
-        this.render();
+        this.updateSubpixelRect(r);
         this.clearSubpixelSelection();
     }
 
@@ -899,76 +740,57 @@ class CanvasRenderer {
     pasteAtSubpixel(sx, sy) {
         if (!this.subpixelClipboard || this.subpixelClipboard.length === 0) return;
 
-        const height = this.subpixelClipboard.length;
-        const width = this.subpixelClipboard[0].length;
+        this.subpixelClipboard.forEach((row, dy) => {
+            row.forEach((data, dx) => {
+                const sp = this.subpixelAt(sx + dx, sy + dy);
+                if (!sp) return;
+                setCellSubpixel(sp.cell, sp.row, sp.col, data.filled);
+                if (data.fg) sp.cell.fg = { ...data.fg };
+                if (data.bg) sp.cell.bg = { ...data.bg };
+            });
+        });
 
-        for (let dy = 0; dy < height; dy++) {
-            for (let dx = 0; dx < width; dx++) {
-                const targetSx = sx + dx;
-                const targetSy = sy + dy;
-                const cellX = Math.floor(targetSx / 2);
-                const cellY = Math.floor(targetSy / 3);
-                const subCol = targetSx % 2;
-                const subRow = targetSy % 3;
-
-                if (cellX < 0 || cellX >= this.canvas.width || cellY < 0 || cellY >= this.canvas.height) {
-                    continue;
-                }
-
-                const data = this.subpixelClipboard[dy][dx];
-                const cell = this.canvas.cells[cellY][cellX];
-                setCellSubpixel(cell, subRow, subCol, data.filled);
-                if (data.fg) cell.fg = { ...data.fg };
-                if (data.bg) cell.bg = { ...data.bg };
-            }
-        }
-
-        this.render();
+        this.updateSubpixelRect({
+            x1: sx, y1: sy,
+            x2: sx + this.subpixelClipboard[0].length - 1,
+            y2: sy + this.subpixelClipboard.length - 1
+        });
         this.pasteMode = false;
         this.clearPastePreview();
     }
 
-    handleDrawTool(e) {
-        // Use container-relative coords — using e.target.closest('.cell') plus
-        // per-cell rects gave inconsistent subpixels at cell boundaries (the
-        // child <span> with scaleY(2) and the 1px cell borders can flip
-        // e.target between adjacent cells before the position crosses).
-        if (!this.canvas) return;
-        const sp = this.subpixelCoordsFromEvent(e);
-        if (!sp) return;
+    // --- Draw / erase / char tools ---
 
-        const { cellX, cellY, sx, sy } = sp;
-        const subCol = sx % 2;
-        const subRow = sy % 3;
+    handleDrawTool(e) {
+        const p = this.subpixelCoordsFromEvent(e);
+        if (!p) return;
 
         // Avoid re-processing same subpixel while dragging
-        const key = `${cellX},${cellY},${subRow},${subCol}`;
+        const key = `${p.sx},${p.sy}`;
         if (this.lastCell === key) return;
         this.lastCell = key;
 
         const filled = this.tool === 'draw';
+        const { cell, cellX, cellY, row, col } = this.subpixelAt(p.sx, p.sy);
 
-        const cell = this.canvas.cells[cellY][cellX];
-        cell.fg = { ...this.fgColor };
-        cell.bg = { ...this.bgColor };
-        setCellSubpixel(cell, subRow, subCol, filled);
-
-        const cellEl = this.getCellElement(cellX, cellY);
-        if (cellEl) {
-            const newCellEl = this.createCellElement(cellX, cellY, cell);
-            cellEl.replaceWith(newCellEl);
-            this.cellElements[cellY][cellX] = newCellEl;
+        // Nothing to do if the subpixel (and, when drawing, the colours) already match
+        if (cell.type === 'sextant' && cell.subpixels[row][col] === filled &&
+            (!filled || (colorsEqual(cell.fg, this.fgColor) && colorsEqual(cell.bg, this.bgColor)))) {
+            return;
         }
+
+        // Erase keeps the cell's colours so the remaining subpixels are unchanged
+        if (filled) this.applyCurrentColors(cell);
+        setCellSubpixel(cell, row, col, filled);
+        this.updateCell(cellX, cellY);
     }
 
     handleCharTool(e) {
         if (!this.selectedChar) return;
 
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return;
-
-        const cellX = parseInt(cellEl.dataset.x);
-        const cellY = parseInt(cellEl.dataset.y);
+        const c = this.cellCoordsFromEvent(e);
+        if (!c) return;
+        const { cellX, cellY } = c;
 
         // Avoid re-processing same cell while dragging
         const key = `${cellX},${cellY}`;
@@ -976,178 +798,124 @@ class CanvasRenderer {
         this.lastCell = key;
 
         const cell = this.canvas.cells[cellY][cellX];
-        cell.fg = { ...this.fgColor };
-        cell.bg = { ...this.bgColor };
+        this.applyCurrentColors(cell);
         setCellChar(cell, this.selectedChar);
-
-        const newCellEl = this.createCellElement(cellX, cellY, cell);
-        cellEl.replaceWith(newCellEl);
-        this.cellElements[cellY][cellX] = newCellEl;
+        this.updateCell(cellX, cellY);
     }
 
-    // --- Box tool methods ---
+    // --- Box and line tools (drag from dragStart to dragEnd) ---
 
-    handleBoxToolDown(e) {
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return;
-        const x = parseInt(cellEl.dataset.x);
-        const y = parseInt(cellEl.dataset.y);
-        this.boxStart = { x, y };
-        this.boxEnd = { x, y };
-        this.showBoxPreview(x, y, x, y);
+    handleShapeToolDown(e) {
+        const c = this.cellCoordsFromEvent(e);
+        if (!c) return;
+        this.dragStart = { x: c.cellX, y: c.cellY };
+        this.handleShapeToolMove(e);
     }
 
-    handleBoxToolMove(e) {
-        if (!this.boxStart) return;
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return;
-        this.boxEnd = { x: parseInt(cellEl.dataset.x), y: parseInt(cellEl.dataset.y) };
+    handleShapeToolMove(e) {
+        if (!this.dragStart) return;
+        const c = this.cellCoordsFromEvent(e);
+        if (!c) return;
+        this.dragEnd = { x: c.cellX, y: c.cellY };
 
-        const x1 = Math.min(this.boxStart.x, this.boxEnd.x);
-        const y1 = Math.min(this.boxStart.y, this.boxEnd.y);
-        const x2 = Math.max(this.boxStart.x, this.boxEnd.x);
-        const y2 = Math.max(this.boxStart.y, this.boxEnd.y);
-        this.showBoxPreview(x1, y1, x2, y2);
+        if (this.tool === 'box') {
+            this.showBoxPreview(normRect(this.dragStart, this.dragEnd));
+        } else {
+            this.showLinePreview();
+        }
     }
 
-    handleBoxToolUp() {
-        if (!this.boxStart || !this.boxEnd) return;
+    cancelDrag() {
+        this.dragStart = null;
+        this.dragEnd = null;
+        this.setOverlay('box', []);
+    }
 
-        const x1 = Math.min(this.boxStart.x, this.boxEnd.x);
-        const y1 = Math.min(this.boxStart.y, this.boxEnd.y);
-        const x2 = Math.max(this.boxStart.x, this.boxEnd.x);
-        const y2 = Math.max(this.boxStart.y, this.boxEnd.y);
-
-        let changed = false;
+    commitBox() {
+        const { x1, y1, x2, y2 } = normRect(this.dragStart, this.dragEnd);
 
         // Fill: when there is a border, fill the interior only; otherwise fill the whole area
         if (this.boxFillMode > 0) {
-            const hasBorder = this.boxLineStyle > 0;
-            const fx1 = hasBorder ? x1 + 1 : x1;
-            const fy1 = hasBorder ? y1 + 1 : y1;
-            const fx2 = hasBorder ? x2 - 1 : x2;
-            const fy2 = hasBorder ? y2 - 1 : y2;
-            for (let y = fy1; y <= fy2; y++) {
-                for (let x = fx1; x <= fx2; x++) {
+            const inset = this.boxLineStyle > 0 ? 1 : 0;
+            for (let y = y1 + inset; y <= y2 - inset; y++) {
+                for (let x = x1 + inset; x <= x2 - inset; x++) {
                     const cell = this.canvas.cells[y][x];
                     if (this.boxFillMode === 1) {
                         clearCell(cell);
                     }
-                    cell.fg = { ...this.fgColor };
-                    cell.bg = { ...this.bgColor };
-                    changed = true;
+                    this.applyCurrentColors(cell);
                 }
             }
         }
 
-        const chars = computeBoxChars(x1, y1, x2, y2, this.boxLineStyle, this.canvas.cells, boxDrawLookup);
-        for (const c of chars) {
+        for (const c of computeBoxChars(x1, y1, x2, y2, this.boxLineStyle, this.canvas.cells, boxDrawLookup)) {
             const cell = this.canvas.cells[c.y][c.x];
-            cell.fg = { ...this.fgColor };
-            cell.bg = { ...this.bgColor };
+            this.applyCurrentColors(cell);
             setCellChar(cell, c.charCode);
-            changed = true;
         }
 
-        if (changed) {
-            this.render();
+        this.updateCellRect(x1, y1, x2, y2);
+    }
+
+    showBoxPreview({ x1, y1, x2, y2 }) {
+        if (this.boxFillMode > 0) {
+            this.setOverlay('box', [{ x1, y1, x2, y2 }]);
+            return;
         }
-
-        this.boxStart = null;
-        this.boxEnd = null;
-        this.clearBoxPreview();
-    }
-
-    showBoxPreview(x1, y1, x2, y2) {
-        this.clearBoxPreview();
-        const showInterior = this.boxFillMode > 0;
-        for (let y = y1; y <= y2; y++) {
-            for (let x = x1; x <= x2; x++) {
-                const onBorder = (x === x1 || x === x2 || y === y1 || y === y2);
-                if (onBorder || showInterior) {
-                    const cellEl = this.getCellElement(x, y);
-                    if (cellEl) {
-                        cellEl.classList.add('box-preview');
-                        this._boxPreviewCells.add(cellEl);
-                    }
-                }
-            }
+        // Border cells only: top and bottom rows, then the sides between them
+        const rects = [{ x1, y1, x2, y2: y1 }];
+        if (y2 > y1) rects.push({ x1, y1: y2, x2, y2 });
+        if (y2 - y1 > 1) {
+            rects.push({ x1, y1: y1 + 1, x2: x1, y2: y2 - 1 });
+            if (x2 > x1) rects.push({ x1: x2, y1: y1 + 1, x2, y2: y2 - 1 });
         }
+        this.setOverlay('box', rects);
     }
 
-    clearBoxPreview() {
-        for (const el of this._boxPreviewCells) el.classList.remove('box-preview');
-        this._boxPreviewCells.clear();
-    }
-
-    // --- Line tool methods ---
-
-    handleLineToolDown(e) {
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return;
-        const x = parseInt(cellEl.dataset.x);
-        const y = parseInt(cellEl.dataset.y);
-        this.lineStart = { x, y };
-        this.lineEnd = { x, y };
-    }
-
-    handleLineToolMove(e) {
-        if (!this.lineStart) return;
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return;
-        this.lineEnd = { x: parseInt(cellEl.dataset.x), y: parseInt(cellEl.dataset.y) };
-        this.showLinePreview();
-    }
-
-    handleLineToolUp() {
-        if (!this.lineStart || !this.lineEnd) return;
-
+    commitLine() {
         const chars = computeLineChars(
-            this.lineStart.x, this.lineStart.y,
-            this.lineEnd.x, this.lineEnd.y,
+            this.dragStart.x, this.dragStart.y,
+            this.dragEnd.x, this.dragEnd.y,
             this.boxLineStyle, this.canvas.cells, boxDrawLookup
         );
-
         for (const c of chars) {
             const cell = this.canvas.cells[c.y][c.x];
-            cell.fg = { ...this.fgColor };
-            cell.bg = { ...this.bgColor };
+            this.applyCurrentColors(cell);
             setCellChar(cell, c.charCode);
+            this.updateCell(c.x, c.y);
         }
-        if (chars.length > 0) {
-            this.render();
-        }
-
-        this.lineStart = null;
-        this.lineEnd = null;
-        this.clearBoxPreview();
     }
 
     showLinePreview() {
-        this.clearBoxPreview();
-        if (!this.lineStart || !this.lineEnd) return;
         const path = computeLinePath(
-            this.lineStart.x, this.lineStart.y,
-            this.lineEnd.x, this.lineEnd.y
+            this.dragStart.x, this.dragStart.y,
+            this.dragEnd.x, this.dragEnd.y
         );
+        // Merge the path's straight runs into one rect each
+        const rects = [];
         for (const { x, y } of path) {
-            const cellEl = this.getCellElement(x, y);
-            if (cellEl) {
-                cellEl.classList.add('box-preview');
-                this._boxPreviewCells.add(cellEl);
+            const r = rects[rects.length - 1];
+            const extendsRow = r && r.y1 === r.y2 && y === r.y1 && (x === r.x2 + 1 || x === r.x1 - 1);
+            const extendsCol = r && r.x1 === r.x2 && x === r.x1 && (y === r.y2 + 1 || y === r.y1 - 1);
+            if (extendsRow) {
+                r.x1 = Math.min(r.x1, x);
+                r.x2 = Math.max(r.x2, x);
+            } else if (extendsCol) {
+                r.y1 = Math.min(r.y1, y);
+                r.y2 = Math.max(r.y2, y);
+            } else {
+                rects.push({ x1: x, y1: y, x2: x, y2: y });
             }
         }
+        this.setOverlay('box', rects);
     }
 
     // --- Text tool methods ---
 
     handleTextToolClick(e) {
-        const cellEl = e.target.closest('.cell');
-        if (!cellEl) return;
-
-        const cellX = parseInt(cellEl.dataset.x);
-        const cellY = parseInt(cellEl.dataset.y);
-        this.setTextCursor(cellX, cellY);
+        const c = this.cellCoordsFromEvent(e);
+        if (!c) return;
+        this.setTextCursor(c.cellX, c.cellY);
     }
 
     setTextCursor(x, y) {
@@ -1182,100 +950,66 @@ class CanvasRenderer {
         }
     }
 
+    // Previous / next cell in reading order (wrapping across rows), or null
+    // at the start / end of the canvas
+    prevTextPos(x, y) {
+        if (x > 0) return { x: x - 1, y };
+        if (y > 0) return { x: this.canvas.width - 1, y: y - 1 };
+        return null;
+    }
+
+    nextTextPos(x, y) {
+        if (x < this.canvas.width - 1) return { x: x + 1, y };
+        if (y < this.canvas.height - 1) return { x: 0, y: y + 1 };
+        return null;
+    }
+
     handleTextInput(key) {
         if (!this.textCursor || !this.canvas) return;
 
         const { x, y } = this.textCursor;
+        const moveTo = (p) => { if (p) this.setTextCursor(p.x, p.y); };
 
-        if (key === 'Backspace') {
-            let newX = x - 1;
-            let newY = y;
-            if (newX < 0) {
-                if (newY > 0) {
-                    newY--;
-                    newX = this.canvas.width - 1;
-                } else {
-                    return; // At top-left corner
-                }
+        switch (key) {
+            case 'Backspace': {
+                const p = this.prevTextPos(x, y);
+                if (p) this.setTextCell(p.x, p.y, 32); // Clear with space
+                moveTo(p);
+                return;
             }
-            this.setTextCell(newX, newY, 32); // Clear with space
-            this.setTextCursor(newX, newY);
-            return;
+            case 'Delete':
+                this.setTextCell(x, y, 32);
+                return;
+            case 'Enter':
+                this.setTextCursor(0, y + 1);
+                return;
+            case 'ArrowLeft':
+                moveTo(this.prevTextPos(x, y));
+                return;
+            case 'ArrowRight':
+                moveTo(this.nextTextPos(x, y));
+                return;
+            case 'ArrowUp':
+                this.setTextCursor(x, y - 1);
+                return;
+            case 'ArrowDown':
+                this.setTextCursor(x, y + 1);
+                return;
         }
 
-        if (key === 'Enter') {
-            let newY = Math.min(y + 1, this.canvas.height - 1);
-            this.setTextCursor(0, newY);
-            return;
-        }
+        // Only accept single printable characters (count code points, not
+        // UTF-16 units, so astral chars like emoji aren't rejected)
+        if ([...key].length !== 1) return;
 
-        if (key === 'ArrowLeft') {
-            let newX = x - 1, newY = y;
-            if (newX < 0) {
-                if (newY > 0) { newY--; newX = this.canvas.width - 1; }
-                else { newX = 0; }
-            }
-            this.setTextCursor(newX, newY);
-            return;
-        }
-
-        if (key === 'ArrowRight') {
-            let newX = x + 1, newY = y;
-            if (newX >= this.canvas.width) {
-                if (newY < this.canvas.height - 1) { newY++; newX = 0; }
-                else { newX = this.canvas.width - 1; }
-            }
-            this.setTextCursor(newX, newY);
-            return;
-        }
-
-        if (key === 'ArrowUp') {
-            if (y > 0) this.setTextCursor(x, y - 1);
-            return;
-        }
-
-        if (key === 'ArrowDown') {
-            if (y < this.canvas.height - 1) this.setTextCursor(x, y + 1);
-            return;
-        }
-
-        if (key === 'Delete') {
-            this.setTextCell(x, y, 32); // Clear with space
-            this.updateTextCursorDisplay();
-            return;
-        }
-
-        // Only accept single printable characters
-        if (key.length !== 1) return;
-
-        const charCode = key.codePointAt(0);
-        this.setTextCell(x, y, charCode);
-
-        // Advance cursor right with wrapping
-        let newX = x + 1, newY = y;
-        if (newX >= this.canvas.width) {
-            newX = 0;
-            newY++;
-            if (newY >= this.canvas.height) {
-                newY = this.canvas.height - 1;
-                newX = this.canvas.width - 1;
-            }
-        }
-        this.setTextCursor(newX, newY);
+        this.setTextCell(x, y, key.codePointAt(0));
+        moveTo(this.nextTextPos(x, y)); // stays put at the last cell
     }
 
     setTextCell(x, y, charCode) {
         const cell = this.canvas.cells[y][x];
-        cell.fg = { ...this.fgColor };
-        cell.bg = { ...this.bgColor };
+        this.applyCurrentColors(cell);
         setCellChar(cell, charCode);
-
-        const cellEl = this.getCellElement(x, y);
-        if (cellEl) {
-            const newCellEl = this.createCellElement(x, y, cell);
-            cellEl.replaceWith(newCellEl);
-            this.cellElements[y][x] = newCellEl;
-        }
+        this.updateCell(x, y);
     }
 
     updateStatus() {
@@ -1285,7 +1019,19 @@ class CanvasRenderer {
         }
     }
 
+    // Drop selections and in-progress drags; they refer to the old canvas extents.
+    resetInteractionState() {
+        this.clearSelection();
+        this.clearSubpixelSelection();
+        this.pasteMode = false;
+        this.clearPastePreview();
+        this.cancelDrag();
+        this.isDrawing = false;
+        this.lastCell = null;
+    }
+
     resize(width, height) {
+        this.resetInteractionState();
         resizeCanvas(this.canvas, width, height);
         this.render();
         this.updateStatus();
@@ -1297,6 +1043,7 @@ class CanvasRenderer {
     }
 
     createNew(width, height, mode) {
+        this.resetInteractionState();
         this.canvas = createCanvas(width, height);
         this.canvas.mode = mode || 'sextant';
         this.render();
@@ -1304,6 +1051,7 @@ class CanvasRenderer {
     }
 
     setCanvas(canvasData) {
+        this.resetInteractionState();
         this.canvas = canvasData;
         this.render();
         this.updateStatus();

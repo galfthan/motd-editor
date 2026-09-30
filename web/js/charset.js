@@ -1,65 +1,103 @@
-// Hardcoded charset data — replaces server endpoints /api/charset/*
+// Character palette data and sextant/glyph helpers
 
 const DIAGONAL_CHARS = [
-    { char: '\u{1FB3C}', code: 0x1FB3C, direction: 'down-right', fill: 'below', angle: 'shallow', name: 'LOWER LEFT BLOCK DIAGONAL LOWER MIDDLE LEFT TO LOWER CENTRE' },
-    { char: '\u{1FB3D}', code: 0x1FB3D, direction: 'down-right', fill: 'below', angle: 'shallow', name: 'LOWER LEFT BLOCK DIAGONAL LOWER MIDDLE LEFT TO LOWER RIGHT' },
-    { char: '\u{1FB3E}', code: 0x1FB3E, direction: 'down-right', fill: 'below', angle: 'mid', name: 'LOWER LEFT BLOCK DIAGONAL UPPER MIDDLE LEFT TO LOWER CENTRE' },
-    { char: '\u{1FB3F}', code: 0x1FB3F, direction: 'down-right', fill: 'below', angle: 'mid', name: 'LOWER LEFT BLOCK DIAGONAL UPPER MIDDLE LEFT TO LOWER RIGHT' },
-    { char: '\u{1FB40}', code: 0x1FB40, direction: 'down-right', fill: 'below', angle: 'steep', name: 'LOWER LEFT BLOCK DIAGONAL UPPER LEFT TO LOWER CENTRE' },
-    { char: '\u{1FB41}', code: 0x1FB41, direction: 'down-left', fill: 'below', angle: 'shallow', name: 'LOWER RIGHT BLOCK DIAGONAL UPPER MIDDLE LEFT TO UPPER CENTRE' },
-    { char: '\u{1FB42}', code: 0x1FB42, direction: 'down-left', fill: 'below', angle: 'shallow', name: 'LOWER RIGHT BLOCK DIAGONAL UPPER MIDDLE LEFT TO UPPER RIGHT' },
-    { char: '\u{1FB43}', code: 0x1FB43, direction: 'down-left', fill: 'below', angle: 'mid', name: 'LOWER RIGHT BLOCK DIAGONAL LOWER MIDDLE LEFT TO UPPER CENTRE' },
-    { char: '\u{1FB44}', code: 0x1FB44, direction: 'down-left', fill: 'below', angle: 'mid', name: 'LOWER RIGHT BLOCK DIAGONAL LOWER MIDDLE LEFT TO UPPER RIGHT' },
-    { char: '\u{1FB45}', code: 0x1FB45, direction: 'down-left', fill: 'below', angle: 'steep', name: 'LOWER RIGHT BLOCK DIAGONAL LOWER LEFT TO UPPER CENTRE' },
-    { char: '\u{1FB46}', code: 0x1FB46, direction: 'down-left', fill: 'below', angle: 'mid', name: 'LOWER RIGHT BLOCK DIAGONAL LOWER MIDDLE LEFT TO UPPER MIDDLE RIGHT' },
-    { char: '\u{1FB47}', code: 0x1FB47, direction: 'down-left', fill: 'below', angle: 'shallow', name: 'LOWER RIGHT BLOCK DIAGONAL LOWER CENTRE TO LOWER MIDDLE RIGHT' },
-    { char: '\u{1FB48}', code: 0x1FB48, direction: 'down-left', fill: 'below', angle: 'shallow', name: 'LOWER RIGHT BLOCK DIAGONAL LOWER LEFT TO LOWER MIDDLE RIGHT' },
-    { char: '\u{1FB49}', code: 0x1FB49, direction: 'down-left', fill: 'below', angle: 'mid', name: 'LOWER RIGHT BLOCK DIAGONAL LOWER CENTRE TO UPPER MIDDLE RIGHT' },
-    { char: '\u{1FB4A}', code: 0x1FB4A, direction: 'down-left', fill: 'below', angle: 'mid', name: 'LOWER RIGHT BLOCK DIAGONAL LOWER LEFT TO UPPER MIDDLE RIGHT' },
-    { char: '\u{1FB4B}', code: 0x1FB4B, direction: 'down-left', fill: 'below', angle: 'steep', name: 'LOWER RIGHT BLOCK DIAGONAL LOWER CENTRE TO UPPER RIGHT' },
-    { char: '\u{1FB4C}', code: 0x1FB4C, direction: 'down-right', fill: 'below', angle: 'mid', name: 'LOWER LEFT BLOCK DIAGONAL UPPER CENTRE TO UPPER MIDDLE RIGHT' },
-    { char: '\u{1FB4D}', code: 0x1FB4D, direction: 'down-right', fill: 'below', angle: 'mid', name: 'LOWER LEFT BLOCK DIAGONAL UPPER LEFT TO UPPER MIDDLE RIGHT' },
-    { char: '\u{1FB4E}', code: 0x1FB4E, direction: 'down-right', fill: 'below', angle: 'mid', name: 'LOWER LEFT BLOCK DIAGONAL UPPER CENTRE TO LOWER MIDDLE RIGHT' },
-    { char: '\u{1FB4F}', code: 0x1FB4F, direction: 'down-right', fill: 'below', angle: 'mid', name: 'LOWER LEFT BLOCK DIAGONAL UPPER LEFT TO LOWER MIDDLE RIGHT' },
-    { char: '\u{1FB50}', code: 0x1FB50, direction: 'down-right', fill: 'below', angle: 'steep', name: 'LOWER LEFT BLOCK DIAGONAL UPPER CENTRE TO LOWER RIGHT' },
-    { char: '\u{1FB51}', code: 0x1FB51, direction: 'down-right', fill: 'below', angle: 'mid', name: 'LOWER LEFT BLOCK DIAGONAL UPPER MIDDLE LEFT TO LOWER MIDDLE RIGHT' },
-    { char: '\u{1FB52}', code: 0x1FB52, direction: 'down-right', fill: 'above', angle: 'shallow', name: 'UPPER RIGHT BLOCK DIAGONAL LOWER MIDDLE LEFT TO LOWER CENTRE' },
-    { char: '\u{1FB53}', code: 0x1FB53, direction: 'down-right', fill: 'above', angle: 'shallow', name: 'UPPER RIGHT BLOCK DIAGONAL LOWER MIDDLE LEFT TO LOWER RIGHT' },
-    { char: '\u{1FB54}', code: 0x1FB54, direction: 'down-right', fill: 'above', angle: 'mid', name: 'UPPER RIGHT BLOCK DIAGONAL UPPER MIDDLE LEFT TO LOWER CENTRE' },
-    { char: '\u{1FB55}', code: 0x1FB55, direction: 'down-right', fill: 'above', angle: 'mid', name: 'UPPER RIGHT BLOCK DIAGONAL UPPER MIDDLE LEFT TO LOWER RIGHT' },
-    { char: '\u{1FB56}', code: 0x1FB56, direction: 'down-right', fill: 'above', angle: 'steep', name: 'UPPER RIGHT BLOCK DIAGONAL UPPER LEFT TO LOWER CENTRE' },
-    { char: '\u{1FB57}', code: 0x1FB57, direction: 'down-left', fill: 'above', angle: 'shallow', name: 'UPPER LEFT BLOCK DIAGONAL UPPER MIDDLE LEFT TO UPPER CENTRE' },
-    { char: '\u{1FB58}', code: 0x1FB58, direction: 'down-left', fill: 'above', angle: 'shallow', name: 'UPPER LEFT BLOCK DIAGONAL UPPER MIDDLE LEFT TO UPPER RIGHT' },
-    { char: '\u{1FB59}', code: 0x1FB59, direction: 'down-left', fill: 'above', angle: 'mid', name: 'UPPER LEFT BLOCK DIAGONAL LOWER MIDDLE LEFT TO UPPER CENTRE' },
-    { char: '\u{1FB5A}', code: 0x1FB5A, direction: 'down-left', fill: 'above', angle: 'mid', name: 'UPPER LEFT BLOCK DIAGONAL LOWER MIDDLE LEFT TO UPPER RIGHT' },
-    { char: '\u{1FB5B}', code: 0x1FB5B, direction: 'down-left', fill: 'above', angle: 'steep', name: 'UPPER LEFT BLOCK DIAGONAL LOWER LEFT TO UPPER CENTRE' },
-    { char: '\u{1FB5C}', code: 0x1FB5C, direction: 'down-left', fill: 'above', angle: 'mid', name: 'UPPER LEFT BLOCK DIAGONAL LOWER MIDDLE LEFT TO UPPER MIDDLE RIGHT' },
-    { char: '\u{1FB5D}', code: 0x1FB5D, direction: 'down-left', fill: 'above', angle: 'shallow', name: 'UPPER LEFT BLOCK DIAGONAL LOWER CENTRE TO LOWER MIDDLE RIGHT' },
-    { char: '\u{1FB5E}', code: 0x1FB5E, direction: 'down-left', fill: 'above', angle: 'shallow', name: 'UPPER LEFT BLOCK DIAGONAL LOWER LEFT TO LOWER MIDDLE RIGHT' },
-    { char: '\u{1FB5F}', code: 0x1FB5F, direction: 'down-left', fill: 'above', angle: 'mid', name: 'UPPER LEFT BLOCK DIAGONAL LOWER CENTRE TO UPPER MIDDLE RIGHT' },
-    { char: '\u{1FB60}', code: 0x1FB60, direction: 'down-left', fill: 'above', angle: 'mid', name: 'UPPER LEFT BLOCK DIAGONAL LOWER LEFT TO UPPER MIDDLE RIGHT' },
-    { char: '\u{1FB61}', code: 0x1FB61, direction: 'down-left', fill: 'above', angle: 'steep', name: 'UPPER LEFT BLOCK DIAGONAL LOWER CENTRE TO UPPER RIGHT' },
-    { char: '\u{1FB62}', code: 0x1FB62, direction: 'down-right', fill: 'above', angle: 'mid', name: 'UPPER RIGHT BLOCK DIAGONAL UPPER CENTRE TO UPPER MIDDLE RIGHT' },
-    { char: '\u{1FB63}', code: 0x1FB63, direction: 'down-right', fill: 'above', angle: 'mid', name: 'UPPER RIGHT BLOCK DIAGONAL UPPER LEFT TO UPPER MIDDLE RIGHT' },
-    { char: '\u{1FB64}', code: 0x1FB64, direction: 'down-right', fill: 'above', angle: 'mid', name: 'UPPER RIGHT BLOCK DIAGONAL UPPER CENTRE TO LOWER MIDDLE RIGHT' },
-    { char: '\u{1FB65}', code: 0x1FB65, direction: 'down-right', fill: 'above', angle: 'mid', name: 'UPPER RIGHT BLOCK DIAGONAL UPPER LEFT TO LOWER MIDDLE RIGHT' },
-    { char: '\u{1FB66}', code: 0x1FB66, direction: 'down-right', fill: 'above', angle: 'steep', name: 'UPPER RIGHT BLOCK DIAGONAL UPPER CENTRE TO LOWER RIGHT' },
-    { char: '\u{1FB67}', code: 0x1FB67, direction: 'down-right', fill: 'above', angle: 'mid', name: 'UPPER RIGHT BLOCK DIAGONAL UPPER MIDDLE LEFT TO LOWER MIDDLE RIGHT' },
+    { code: 0x1FB3C, name: 'LOWER LEFT BLOCK DIAGONAL LOWER MIDDLE LEFT TO LOWER CENTRE' },
+    { code: 0x1FB3D, name: 'LOWER LEFT BLOCK DIAGONAL LOWER MIDDLE LEFT TO LOWER RIGHT' },
+    { code: 0x1FB3E, name: 'LOWER LEFT BLOCK DIAGONAL UPPER MIDDLE LEFT TO LOWER CENTRE' },
+    { code: 0x1FB3F, name: 'LOWER LEFT BLOCK DIAGONAL UPPER MIDDLE LEFT TO LOWER RIGHT' },
+    { code: 0x1FB40, name: 'LOWER LEFT BLOCK DIAGONAL UPPER LEFT TO LOWER CENTRE' },
+    { code: 0x1FB41, name: 'LOWER RIGHT BLOCK DIAGONAL UPPER MIDDLE LEFT TO UPPER CENTRE' },
+    { code: 0x1FB42, name: 'LOWER RIGHT BLOCK DIAGONAL UPPER MIDDLE LEFT TO UPPER RIGHT' },
+    { code: 0x1FB43, name: 'LOWER RIGHT BLOCK DIAGONAL LOWER MIDDLE LEFT TO UPPER CENTRE' },
+    { code: 0x1FB44, name: 'LOWER RIGHT BLOCK DIAGONAL LOWER MIDDLE LEFT TO UPPER RIGHT' },
+    { code: 0x1FB45, name: 'LOWER RIGHT BLOCK DIAGONAL LOWER LEFT TO UPPER CENTRE' },
+    { code: 0x1FB46, name: 'LOWER RIGHT BLOCK DIAGONAL LOWER MIDDLE LEFT TO UPPER MIDDLE RIGHT' },
+    { code: 0x1FB47, name: 'LOWER RIGHT BLOCK DIAGONAL LOWER CENTRE TO LOWER MIDDLE RIGHT' },
+    { code: 0x1FB48, name: 'LOWER RIGHT BLOCK DIAGONAL LOWER LEFT TO LOWER MIDDLE RIGHT' },
+    { code: 0x1FB49, name: 'LOWER RIGHT BLOCK DIAGONAL LOWER CENTRE TO UPPER MIDDLE RIGHT' },
+    { code: 0x1FB4A, name: 'LOWER RIGHT BLOCK DIAGONAL LOWER LEFT TO UPPER MIDDLE RIGHT' },
+    { code: 0x1FB4B, name: 'LOWER RIGHT BLOCK DIAGONAL LOWER CENTRE TO UPPER RIGHT' },
+    { code: 0x1FB4C, name: 'LOWER LEFT BLOCK DIAGONAL UPPER CENTRE TO UPPER MIDDLE RIGHT' },
+    { code: 0x1FB4D, name: 'LOWER LEFT BLOCK DIAGONAL UPPER LEFT TO UPPER MIDDLE RIGHT' },
+    { code: 0x1FB4E, name: 'LOWER LEFT BLOCK DIAGONAL UPPER CENTRE TO LOWER MIDDLE RIGHT' },
+    { code: 0x1FB4F, name: 'LOWER LEFT BLOCK DIAGONAL UPPER LEFT TO LOWER MIDDLE RIGHT' },
+    { code: 0x1FB50, name: 'LOWER LEFT BLOCK DIAGONAL UPPER CENTRE TO LOWER RIGHT' },
+    { code: 0x1FB51, name: 'LOWER LEFT BLOCK DIAGONAL UPPER MIDDLE LEFT TO LOWER MIDDLE RIGHT' },
+    { code: 0x1FB52, name: 'UPPER RIGHT BLOCK DIAGONAL LOWER MIDDLE LEFT TO LOWER CENTRE' },
+    { code: 0x1FB53, name: 'UPPER RIGHT BLOCK DIAGONAL LOWER MIDDLE LEFT TO LOWER RIGHT' },
+    { code: 0x1FB54, name: 'UPPER RIGHT BLOCK DIAGONAL UPPER MIDDLE LEFT TO LOWER CENTRE' },
+    { code: 0x1FB55, name: 'UPPER RIGHT BLOCK DIAGONAL UPPER MIDDLE LEFT TO LOWER RIGHT' },
+    { code: 0x1FB56, name: 'UPPER RIGHT BLOCK DIAGONAL UPPER LEFT TO LOWER CENTRE' },
+    { code: 0x1FB57, name: 'UPPER LEFT BLOCK DIAGONAL UPPER MIDDLE LEFT TO UPPER CENTRE' },
+    { code: 0x1FB58, name: 'UPPER LEFT BLOCK DIAGONAL UPPER MIDDLE LEFT TO UPPER RIGHT' },
+    { code: 0x1FB59, name: 'UPPER LEFT BLOCK DIAGONAL LOWER MIDDLE LEFT TO UPPER CENTRE' },
+    { code: 0x1FB5A, name: 'UPPER LEFT BLOCK DIAGONAL LOWER MIDDLE LEFT TO UPPER RIGHT' },
+    { code: 0x1FB5B, name: 'UPPER LEFT BLOCK DIAGONAL LOWER LEFT TO UPPER CENTRE' },
+    { code: 0x1FB5C, name: 'UPPER LEFT BLOCK DIAGONAL LOWER MIDDLE LEFT TO UPPER MIDDLE RIGHT' },
+    { code: 0x1FB5D, name: 'UPPER LEFT BLOCK DIAGONAL LOWER CENTRE TO LOWER MIDDLE RIGHT' },
+    { code: 0x1FB5E, name: 'UPPER LEFT BLOCK DIAGONAL LOWER LEFT TO LOWER MIDDLE RIGHT' },
+    { code: 0x1FB5F, name: 'UPPER LEFT BLOCK DIAGONAL LOWER CENTRE TO UPPER MIDDLE RIGHT' },
+    { code: 0x1FB60, name: 'UPPER LEFT BLOCK DIAGONAL LOWER LEFT TO UPPER MIDDLE RIGHT' },
+    { code: 0x1FB61, name: 'UPPER LEFT BLOCK DIAGONAL LOWER CENTRE TO UPPER RIGHT' },
+    { code: 0x1FB62, name: 'UPPER RIGHT BLOCK DIAGONAL UPPER CENTRE TO UPPER MIDDLE RIGHT' },
+    { code: 0x1FB63, name: 'UPPER RIGHT BLOCK DIAGONAL UPPER LEFT TO UPPER MIDDLE RIGHT' },
+    { code: 0x1FB64, name: 'UPPER RIGHT BLOCK DIAGONAL UPPER CENTRE TO LOWER MIDDLE RIGHT' },
+    { code: 0x1FB65, name: 'UPPER RIGHT BLOCK DIAGONAL UPPER LEFT TO LOWER MIDDLE RIGHT' },
+    { code: 0x1FB66, name: 'UPPER RIGHT BLOCK DIAGONAL UPPER CENTRE TO LOWER RIGHT' },
+    { code: 0x1FB67, name: 'UPPER RIGHT BLOCK DIAGONAL UPPER MIDDLE LEFT TO LOWER MIDDLE RIGHT' },
 ];
 
 const TRIANGLE_CHARS = [
-    { char: '\u{1FB68}', code: 0x1FB68, corner: 'lower-left', inverted: true, name: 'UPPER LEFT LOWER RIGHT DIAGONAL HALF FILL' },
-    { char: '\u{1FB69}', code: 0x1FB69, corner: 'lower-right', inverted: true, name: 'UPPER RIGHT LOWER LEFT DIAGONAL HALF FILL' },
-    { char: '\u{1FB6A}', code: 0x1FB6A, corner: 'upper-right', inverted: true, name: 'UPPER LEFT LOWER RIGHT DIAGONAL HALF FILL' },
-    { char: '\u{1FB6B}', code: 0x1FB6B, corner: 'upper-left', inverted: true, name: 'UPPER RIGHT LOWER LEFT DIAGONAL HALF FILL' },
-    { char: '\u{1FB6C}', code: 0x1FB6C, corner: 'lower-left', inverted: false, name: 'LEFT TRIANGULAR ONE QUARTER BLOCK' },
-    { char: '\u{1FB6D}', code: 0x1FB6D, corner: 'lower-right', inverted: false, name: 'LOWER TRIANGULAR ONE QUARTER BLOCK' },
-    { char: '\u{1FB6E}', code: 0x1FB6E, corner: 'upper-right', inverted: false, name: 'RIGHT TRIANGULAR ONE QUARTER BLOCK' },
-    { char: '\u{1FB6F}', code: 0x1FB6F, corner: 'upper-left', inverted: false, name: 'UPPER TRIANGULAR ONE QUARTER BLOCK' },
+    { code: 0x1FB68, name: 'UPPER LEFT LOWER RIGHT DIAGONAL HALF FILL' },
+    { code: 0x1FB69, name: 'UPPER RIGHT LOWER LEFT DIAGONAL HALF FILL' },
+    { code: 0x1FB6A, name: 'UPPER LEFT LOWER RIGHT DIAGONAL HALF FILL' },
+    { code: 0x1FB6B, name: 'UPPER RIGHT LOWER LEFT DIAGONAL HALF FILL' },
+    { code: 0x1FB6C, name: 'LEFT TRIANGULAR ONE QUARTER BLOCK' },
+    { code: 0x1FB6D, name: 'LOWER TRIANGULAR ONE QUARTER BLOCK' },
+    { code: 0x1FB6E, name: 'RIGHT TRIANGULAR ONE QUARTER BLOCK' },
+    { code: 0x1FB6F, name: 'UPPER TRIANGULAR ONE QUARTER BLOCK' },
 ];
 
+// Sextant patterns are 6 bits, one per subpixel in reading order:
+// bit (row * 2 + col) for the 2x3 grid, so 1 = top-left ... 32 = bottom-right.
+
+// Convert a subpixels array ([row][col]) to its 6-bit pattern
+function subpixelsToPattern(subpixels) {
+    let pattern = 0;
+    for (let row = 0; row < 3; row++) {
+        for (let col = 0; col < 2; col++) {
+            if (subpixels[row][col]) pattern |= 1 << (row * 2 + col);
+        }
+    }
+    return pattern;
+}
+
+// Convert a 6-bit pattern to its subpixels array
+function patternToSubpixels(pattern) {
+    return [
+        [!!(pattern & 1), !!(pattern & 2)],
+        [!!(pattern & 4), !!(pattern & 8)],
+        [!!(pattern & 16), !!(pattern & 32)]
+    ];
+}
+
+// Convert a 6-bit pattern to its Unicode character. The sextant block
+// U+1FB00-1FB3B omits the patterns that already exist as block elements.
+function sextantPatternToChar(pattern) {
+    if (pattern === 0)  return ' ';
+    if (pattern === 63) return '\u2588';  // full block
+    if (pattern === 21) return '\u258C';  // left half
+    if (pattern === 42) return '\u2590';  // right half
+
+    let offset = pattern;
+    if (pattern > 42)      offset -= 3;
+    else if (pattern > 21) offset -= 2;
+    else                   offset -= 1;
+
+    return String.fromCodePoint(0x1FB00 + offset);
+}
+
 // Reverse lookup: Unicode char → sextant 6-bit pattern
-// Used by ANSI import to detect sextant characters
 function runeToSextantPattern(code) {
     if (code === 32) return { pattern: 0, ok: true };        // Space
     if (code === 0x2588) return { pattern: 63, ok: true };   // Full block
@@ -74,11 +112,14 @@ function runeToSextantPattern(code) {
     return { pattern, ok: true };
 }
 
-// Convert 6-bit pattern to subpixels array
-function patternToSubpixels(pattern) {
-    return [
-        [!!(pattern & 1), !!(pattern & 2)],
-        [!!(pattern & 4), !!(pattern & 8)],
-        [!!(pattern & 16), !!(pattern & 32)]
-    ];
+// CSS class with the font styles for a glyph (see .glyph-* in style.css).
+// Legacy-computing "tiling" chars (sextants, diagonals, lines) are drawn from a
+// half-height font and stretched to fill the cell.
+function glyphClass(code) {
+    const isLegacyTiling = (code >= 0x1FB00 && code <= 0x1FBAF)
+        || (code >= 0x1FBCE && code <= 0x1FBDF);
+    if (isLegacyTiling) return 'glyph-tiling';
+    if (code >= 0x1FB00) return 'glyph-legacy';
+    if (code >= 0x2500 && code <= 0x259F) return 'glyph-box';
+    return 'glyph-text';
 }
