@@ -38,14 +38,6 @@ function color256ToRGB(index) {
     return { r: gray, g: gray, b: gray, default: false };
 }
 
-function defaultFG() {
-    return { r: 255, g: 255, b: 255, default: true };
-}
-
-function defaultBG() {
-    return { r: 0, g: 0, b: 0, default: true };
-}
-
 // Any CSI sequence (params, intermediates, final byte). Only SGR ('m') is
 // interpreted; cursor moves, erase-line, mode switches etc. are dropped.
 const ansiRegex = /\x1b\[([0-?]*)([ -\/]*)([@-~])/g;
@@ -88,6 +80,28 @@ function parseLine(line) {
     return cells;
 }
 
+// Parse the arguments of an extended colour code at parts[i] (38 or 48):
+// "2;r;g;b" (truecolor) or "5;n" (256-colour). Returns the colour and how
+// many extra parts it consumed, or null if malformed.
+function parseExtendedColor(parts, i) {
+    const mode = parseInt(parts[i + 1], 10);
+    if (mode === 2 && i + 4 < parts.length) {
+        return {
+            color: {
+                r: parseInt(parts[i + 2], 10) || 0,
+                g: parseInt(parts[i + 3], 10) || 0,
+                b: parseInt(parts[i + 4], 10) || 0,
+                default: false
+            },
+            skip: 4
+        };
+    }
+    if (mode === 5 && i + 2 < parts.length) {
+        return { color: color256ToRGB(parseInt(parts[i + 2], 10) || 0), skip: 2 };
+    }
+    return null;
+}
+
 function parseCodes(codes, fg, bg) {
     fg = { ...fg };
     bg = { ...bg };
@@ -114,39 +128,15 @@ function parseCodes(codes, fg, bg) {
                 bg = defaultBG();
                 break;
             case 38: // Extended FG
-                if (i + 1 < parts.length) {
-                    const mode = parseInt(parts[i + 1], 10);
-                    if (mode === 2 && i + 4 < parts.length) {
-                        fg = {
-                            r: parseInt(parts[i + 2], 10) || 0,
-                            g: parseInt(parts[i + 3], 10) || 0,
-                            b: parseInt(parts[i + 4], 10) || 0,
-                            default: false
-                        };
-                        i += 4;
-                    } else if (mode === 5 && i + 2 < parts.length) {
-                        fg = color256ToRGB(parseInt(parts[i + 2], 10) || 0);
-                        i += 2;
-                    }
+            case 48: { // Extended BG
+                const ext = parseExtendedColor(parts, i);
+                if (ext) {
+                    if (code === 38) fg = ext.color;
+                    else bg = ext.color;
+                    i += ext.skip;
                 }
                 break;
-            case 48: // Extended BG
-                if (i + 1 < parts.length) {
-                    const mode = parseInt(parts[i + 1], 10);
-                    if (mode === 2 && i + 4 < parts.length) {
-                        bg = {
-                            r: parseInt(parts[i + 2], 10) || 0,
-                            g: parseInt(parts[i + 3], 10) || 0,
-                            b: parseInt(parts[i + 4], 10) || 0,
-                            default: false
-                        };
-                        i += 4;
-                    } else if (mode === 5 && i + 2 < parts.length) {
-                        bg = color256ToRGB(parseInt(parts[i + 2], 10) || 0);
-                        i += 2;
-                    }
-                }
-                break;
+            }
             default:
                 if (code >= 30 && code <= 37) {
                     fg = { ...BASIC_COLORS[code - 30], default: false };
@@ -190,23 +180,7 @@ function parseANSIText(text) {
 
             cell.fg = pc.fg;
             cell.bg = pc.bg;
-
-            const code = pc.char;
-            const sextant = runeToSextantPattern(code);
-            if (sextant.ok) {
-                cell.type = 'sextant';
-                cell.subpixels = patternToSubpixels(sextant.pattern);
-                cell.charCode = 0;
-            } else if (isDiagonalChar(code)) {
-                cell.type = 'diagonal';
-                cell.charCode = code;
-            } else if (isTriangleChar(code)) {
-                cell.type = 'triangle';
-                cell.charCode = code;
-            } else if (code !== 32) {
-                cell.type = 'custom';
-                cell.charCode = code;
-            }
+            setCellChar(cell, pc.char);
         }
     }
 

@@ -91,11 +91,34 @@ const LEGACY_CHARS = {
     ],
 };
 
+// Single-key tool shortcuts (Shift+S is handled separately)
+const TOOL_SHORTCUTS = {
+    d: 'draw', e: 'erase', c: 'char', t: 'text',
+    b: 'box', l: 'line', s: 'select', p: 'pick'
+};
+
+const toHex = ({ r, g, b }) => '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+
+const hexToRgb = (hex) => ({
+    r: parseInt(hex.slice(1, 3), 16),
+    g: parseInt(hex.slice(3, 5), 16),
+    b: parseInt(hex.slice(5, 7), 16)
+});
+
+// Wire a group of mutually exclusive buttons: clicking one marks it active
+// and calls onPick with it
+function bindButtonGroup(buttons, onPick) {
+    buttons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            buttons.forEach(b => b.classList.toggle('active', b === btn));
+            onPick(btn);
+        });
+    });
+}
+
 class Toolbar {
     constructor(canvasRenderer) {
         this.renderer = canvasRenderer;
-        this.diagonalChars = [];
-        this.triangleChars = [];
         this.currentTab = 'diagonal';
         this.openMenu = null;
         this.saveFilename = 'motd.txt';
@@ -104,10 +127,9 @@ class Toolbar {
         this.setupMenuBar();
         this.setupToolButtons();
         this.setupColorPickers();
-        this.setupRenderToggle();
         this.setupFileInputs();
         this.setupCharPalette();
-        this.loadCharsets();
+        this.renderCharPalette();
     }
 
     // --- Menu Bar ---
@@ -198,10 +220,9 @@ class Toolbar {
     // --- Save / Save As ---
 
     doSave() {
-        const cellToCharFn = (cell) => this.renderer.cellToChar(cell);
         const text = this.saveFormat === 'ansi'
-            ? canvasToANSI(this.renderer.canvas, cellToCharFn)
-            : canvasToPlain(this.renderer.canvas, cellToCharFn);
+            ? canvasToANSI(this.renderer.canvas)
+            : canvasToPlain(this.renderer.canvas);
         this.downloadText(text, this.saveFilename);
     }
 
@@ -260,81 +281,40 @@ class Toolbar {
     // --- Tool Buttons ---
 
     setupToolButtons() {
-        const toolDraw = document.getElementById('tool-draw');
-        const toolErase = document.getElementById('tool-erase');
-        const toolChar = document.getElementById('tool-char');
-        const toolText = document.getElementById('tool-text');
-        const toolSelect = document.getElementById('tool-select');
-        const toolSelectSubpixel = document.getElementById('tool-select-subpixel');
-        const toolBox = document.getElementById('tool-box');
-        const toolLine = document.getElementById('tool-line');
-        const toolPick = document.getElementById('tool-pick');
+        // Tool buttons have ids "tool-<name>"
+        const toolBtns = [...document.querySelectorAll('.tool-btn[id^="tool-"]')];
         const charPaletteSection = document.getElementById('char-palette-section');
         const boxStyleSection = document.getElementById('box-style-section');
         const boxFillSection = document.getElementById('box-fill-section');
+        const noneStyleBtn = document.querySelector('.box-style-btn[data-style="0"]');
+        const lightStyleBtn = document.querySelector('.box-style-btn[data-style="1"]');
 
         this.setTool = (tool) => {
-            toolDraw.classList.toggle('active', tool === 'draw');
-            toolErase.classList.toggle('active', tool === 'erase');
-            toolChar.classList.toggle('active', tool === 'char');
-            toolText.classList.toggle('active', tool === 'text');
-            toolBox.classList.toggle('active', tool === 'box');
-            toolLine.classList.toggle('active', tool === 'line');
-            toolSelect.classList.toggle('active', tool === 'select');
-            toolSelectSubpixel.classList.toggle('active', tool === 'select-subpixel');
-            toolPick.classList.toggle('active', tool === 'pick');
+            toolBtns.forEach(btn => btn.classList.toggle('active', btn.id === `tool-${tool}`));
 
-            const showCharPalette = tool === 'char';
-            const showBoxStyle = tool === 'box' || tool === 'line';
-            const showBoxFill = tool === 'box';
-            charPaletteSection.style.display = showCharPalette ? 'block' : 'none';
-            boxStyleSection.style.display = showBoxStyle ? 'block' : 'none';
-            boxFillSection.style.display = showBoxFill ? 'block' : 'none';
+            charPaletteSection.style.display = tool === 'char' ? 'block' : 'none';
+            boxStyleSection.style.display = (tool === 'box' || tool === 'line') ? 'block' : 'none';
+            boxFillSection.style.display = tool === 'box' ? 'block' : 'none';
 
             // "None" line style is a no-op for the line tool, so hide it there.
             // If it was selected, fall back to Light.
-            const noneBtn = document.querySelector('.box-style-btn[data-style="0"]');
-            if (noneBtn) {
-                noneBtn.style.display = (tool === 'line') ? 'none' : '';
-                if (tool === 'line' && this.renderer.boxLineStyle === 0) {
-                    const lightBtn = document.querySelector('.box-style-btn[data-style="1"]');
-                    document.querySelectorAll('.box-style-btn').forEach(b => b.classList.remove('active'));
-                    if (lightBtn) lightBtn.classList.add('active');
-                    this.renderer.boxLineStyle = 1;
-                }
+            noneStyleBtn.style.display = (tool === 'line') ? 'none' : '';
+            if (tool === 'line' && this.renderer.boxLineStyle === 0) {
+                lightStyleBtn.click();
             }
 
             this.renderer.setTool(tool);
         };
 
-        toolDraw.addEventListener('click', () => this.setTool('draw'));
-        toolErase.addEventListener('click', () => this.setTool('erase'));
-        toolChar.addEventListener('click', () => this.setTool('char'));
-        toolText.addEventListener('click', () => this.setTool('text'));
-        toolBox.addEventListener('click', () => this.setTool('box'));
-        toolLine.addEventListener('click', () => this.setTool('line'));
-        toolSelect.addEventListener('click', () => this.setTool('select'));
-        toolSelectSubpixel.addEventListener('click', () => this.setTool('select-subpixel'));
-        toolPick.addEventListener('click', () => this.setTool('pick'));
-
-        // Box line style buttons
-        const boxStyleBtns = document.querySelectorAll('.box-style-btn');
-        boxStyleBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                boxStyleBtns.forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                this.renderer.boxLineStyle = parseInt(btn.dataset.style);
-            });
+        toolBtns.forEach(btn => {
+            btn.addEventListener('click', () => this.setTool(btn.id.slice('tool-'.length)));
         });
 
-        // Box fill mode buttons
-        const boxFillBtns = document.querySelectorAll('.box-fill-btn');
-        boxFillBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                boxFillBtns.forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                this.renderer.boxFillMode = parseInt(btn.dataset.fill);
-            });
+        bindButtonGroup(document.querySelectorAll('.box-style-btn'), btn => {
+            this.renderer.boxLineStyle = parseInt(btn.dataset.style);
+        });
+        bindButtonGroup(document.querySelectorAll('.box-fill-btn'), btn => {
+            this.renderer.boxFillMode = parseInt(btn.dataset.fill);
         });
 
         // Keyboard shortcuts
@@ -353,83 +333,52 @@ class Toolbar {
             }
 
             // Escape: close menus first
-            if (e.key === 'Escape') {
-                if (this.openMenu) {
-                    this.closeMenus();
-                    return;
-                }
+            if (e.key === 'Escape' && this.openMenu) {
+                this.closeMenus();
+                return;
             }
 
             // Skip tool shortcuts when modifier keys are held (Ctrl+C, etc.)
             if (e.ctrlKey || e.metaKey || e.altKey) return;
             // Skip tool shortcuts when text cursor is active (typing goes to canvas)
             if (this.renderer.tool === 'text' && this.renderer.textCursor) return;
-            if (e.shiftKey && e.key.toLowerCase() === 's') {
-                this.setTool('select-subpixel');
-                return;
-            }
-            switch (e.key.toLowerCase()) {
-                case 'd': this.setTool('draw'); break;
-                case 'e': this.setTool('erase'); break;
-                case 'c': this.setTool('char'); break;
-                case 't': this.setTool('text'); break;
-                case 'b': this.setTool('box'); break;
-                case 'l': this.setTool('line'); break;
-                case 's': this.setTool('select'); break;
-                case 'p': this.setTool('pick'); break;
-            }
+
+            const key = e.key.toLowerCase();
+            const tool = (e.shiftKey && key === 's') ? 'select-subpixel' : TOOL_SHORTCUTS[key];
+            if (tool) this.setTool(tool);
         });
     }
 
     // --- Color Pickers ---
 
     setupColorPickers() {
-        const fgColor = document.getElementById('fg-color');
-        const bgColor = document.getElementById('bg-color');
-        const fgDefault = document.getElementById('fg-default');
-        const bgDefault = document.getElementById('bg-default');
-
-        const fgRow = document.getElementById('fg-color-row');
-        const bgRow = document.getElementById('bg-color-row');
-
-        const updateFg = () => {
-            const hex = fgColor.value;
-            const r = parseInt(hex.substr(1, 2), 16);
-            const g = parseInt(hex.substr(3, 2), 16);
-            const b = parseInt(hex.substr(5, 2), 16);
-            fgRow.classList.toggle('color-inactive', fgDefault.checked);
-            this.renderer.setFgColor({
-                r, g, b,
-                default: fgDefault.checked
-            });
-        };
-
-        const updateBg = () => {
-            const hex = bgColor.value;
-            const r = parseInt(hex.substr(1, 2), 16);
-            const g = parseInt(hex.substr(3, 2), 16);
-            const b = parseInt(hex.substr(5, 2), 16);
-            bgRow.classList.toggle('color-inactive', bgDefault.checked);
-            this.renderer.setBgColor({
-                r, g, b,
-                default: bgDefault.checked
-            });
-        };
-
-        // Set initial inactive state
-        fgRow.classList.toggle('color-inactive', fgDefault.checked);
-        bgRow.classList.toggle('color-inactive', bgDefault.checked);
-
-        fgColor.addEventListener('input', updateFg);
-        fgDefault.addEventListener('change', updateFg);
-        bgColor.addEventListener('input', updateBg);
-        bgDefault.addEventListener('change', updateBg);
+        for (const which of ['fg', 'bg']) {
+            const input = document.getElementById(`${which}-color`);
+            const isDefault = document.getElementById(`${which}-default`);
+            const update = () => this.setColor(which, { ...hexToRgb(input.value), default: isDefault.checked });
+            input.addEventListener('input', update);
+            isDefault.addEventListener('change', update);
+            update();
+        }
     }
 
-    // --- Render Toggle ---
+    // Make `color` the current fg/bg colour ("Def" colours grey out the picker)
+    setColor(which, color) {
+        document.getElementById(`${which}-color-row`).classList.toggle('color-inactive', color.default);
+        if (which === 'fg') {
+            this.renderer.setFgColor(color);
+        } else {
+            this.renderer.setBgColor(color);
+        }
+    }
 
-    setupRenderToggle() {
-        // Render toggle removed — font-only rendering
+    // Set both colours, updating the pickers to match (used by the pick tool)
+    setColors(fg, bg) {
+        for (const [which, color] of [['fg', fg], ['bg', bg]]) {
+            document.getElementById(`${which}-color`).value = toHex(color);
+            document.getElementById(`${which}-default`).checked = color.default;
+            this.setColor(which, color);
+        }
     }
 
     // --- File Inputs ---
@@ -472,24 +421,11 @@ class Toolbar {
         });
     }
 
-    loadCharsets() {
-        this.diagonalChars = DIAGONAL_CHARS;
-        this.triangleChars = TRIANGLE_CHARS;
-        this.renderCharPalette();
-    }
-
+    // Palette entries { code, name } for a tab
     getCharsForTab(tab) {
-        if (tab === 'diagonal') return this.diagonalChars;
-        if (tab === 'triangle') return this.triangleChars;
-        const legacy = LEGACY_CHARS[tab];
-        if (legacy) {
-            return legacy.map(([code, name]) => ({
-                char: String.fromCodePoint(code),
-                code,
-                name,
-            }));
-        }
-        return [];
+        if (tab === 'diagonal') return DIAGONAL_CHARS;
+        if (tab === 'triangle') return TRIANGLE_CHARS;
+        return (LEGACY_CHARS[tab] || []).map(([code, name]) => ({ code, name }));
     }
 
     renderCharPalette() {
@@ -502,17 +438,9 @@ class Toolbar {
             const btn = document.createElement('button');
             btn.title = charInfo.name || `U+${charInfo.code.toString(16).toUpperCase()}`;
 
-            const code = charInfo.code;
-            const isTiling = (code >= 0x1FB00 && code <= 0x1FBAF)
-                || (code >= 0x1FBCE && code <= 0x1FBDF);
             const span = document.createElement('span');
-            span.textContent = charInfo.char;
-            span.style.fontFamily = "'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace";
-            span.style.fontSize = '16px';
-            span.style.lineHeight = '1';
-            if (isTiling) {
-                span.style.transform = 'scaleY(2) translateY(1px)';
-            }
+            span.className = glyphClass(charInfo.code);
+            span.textContent = String.fromCodePoint(charInfo.code);
             btn.appendChild(span);
 
             btn.addEventListener('click', () => {
@@ -534,24 +462,5 @@ class Toolbar {
         a.download = filename;
         a.click();
         URL.revokeObjectURL(url);
-    }
-
-    setColors(fg, bg) {
-        const fgColor = document.getElementById('fg-color');
-        const bgColor = document.getElementById('bg-color');
-        const fgDefault = document.getElementById('fg-default');
-        const bgDefault = document.getElementById('bg-default');
-
-        const toHex = (r, g, b) => '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
-
-        fgColor.value = toHex(fg.r, fg.g, fg.b);
-        fgDefault.checked = fg.default;
-        document.getElementById('fg-color-row').classList.toggle('color-inactive', fg.default);
-        this.renderer.setFgColor(fg);
-
-        bgColor.value = toHex(bg.r, bg.g, bg.b);
-        bgDefault.checked = bg.default;
-        document.getElementById('bg-color-row').classList.toggle('color-inactive', bg.default);
-        this.renderer.setBgColor(bg);
     }
 }

@@ -12,10 +12,6 @@ class BoxDrawLookup {
         return up | (down << 2) | (left << 4) | (right << 6);
     }
 
-    isBoxDrawChar(code) {
-        return this.charToConn.has(code);
-    }
-
     getConnections(code) {
         return this.charToConn.get(code) || null;
     }
@@ -233,49 +229,29 @@ function computeBoxChars(x1, y1, x2, y2, style, canvasCells, lookup) {
 }
 
 // Compute the cell path for a line from (x1,y1) to (x2,y2).
-// Straight for H/V, S-shaped for diagonal (H-V-H or V-H-V).
+// Straight for H/V, S-shaped for diagonal: H-V-H when at least as wide as
+// tall, else V-H-V, with the middle leg at the midpoint.
 function computeLinePath(x1, y1, x2, y2) {
-    if (x1 === x2 && y1 === y2) return [{ x: x1, y: y1 }];
+    let corners;
+    if (Math.abs(x2 - x1) >= Math.abs(y2 - y1)) {
+        const midX = Math.round((x1 + x2) / 2);
+        corners = [[x1, y1], [midX, y1], [midX, y2], [x2, y2]];
+    } else {
+        const midY = Math.round((y1 + y2) / 2);
+        corners = [[x1, y1], [x1, midY], [x2, midY], [x2, y2]];
+    }
 
-    const dx = Math.abs(x2 - x1);
-    const dy = Math.abs(y2 - y1);
-    const path = [];
-    const visited = new Set();
-
-    function add(x, y) {
-        const key = `${x},${y}`;
-        if (!visited.has(key)) {
-            visited.add(key);
+    // Walk each (axis-aligned) leg one cell at a time
+    const path = [{ x: x1, y: y1 }];
+    for (let i = 1; i < corners.length; i++) {
+        let [x, y] = corners[i - 1];
+        const [tx, ty] = corners[i];
+        while (x !== tx || y !== ty) {
+            x += Math.sign(tx - x);
+            y += Math.sign(ty - y);
             path.push({ x, y });
         }
     }
-
-    if (dy === 0) {
-        // Pure horizontal
-        const step = x1 < x2 ? 1 : -1;
-        for (let x = x1; step > 0 ? x <= x2 : x >= x2; x += step) add(x, y1);
-    } else if (dx === 0) {
-        // Pure vertical
-        const step = y1 < y2 ? 1 : -1;
-        for (let y = y1; step > 0 ? y <= y2 : y >= y2; y += step) add(x1, y);
-    } else if (dx >= dy) {
-        // S-shape: H-V-H (split horizontal, single vertical)
-        const midX = Math.round((x1 + x2) / 2);
-        const stepX = x1 < x2 ? 1 : -1;
-        const stepY = y1 < y2 ? 1 : -1;
-        for (let x = x1; stepX > 0 ? x <= midX : x >= midX; x += stepX) add(x, y1);
-        for (let y = y1; stepY > 0 ? y <= y2 : y >= y2; y += stepY) add(midX, y);
-        for (let x = midX; stepX > 0 ? x <= x2 : x >= x2; x += stepX) add(x, y2);
-    } else {
-        // S-shape: V-H-V (split vertical, single horizontal)
-        const midY = Math.round((y1 + y2) / 2);
-        const stepX = x1 < x2 ? 1 : -1;
-        const stepY = y1 < y2 ? 1 : -1;
-        for (let y = y1; stepY > 0 ? y <= midY : y >= midY; y += stepY) add(x1, y);
-        for (let x = x1; stepX > 0 ? x <= x2 : x >= x2; x += stepX) add(x, midY);
-        for (let y = midY; stepY > 0 ? y <= y2 : y >= y2; y += stepY) add(x2, y);
-    }
-
     return path;
 }
 
