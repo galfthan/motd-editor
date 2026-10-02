@@ -324,6 +324,42 @@ main {
     border-color: var(--accent);
 }
 
+/* Emoji tab: emoji are two cells wide, so square buttons in fewer columns,
+   with a title row per Unicode group */
+.char-grid.emoji-grid {
+    grid-template-columns: repeat(6, 1fr);
+}
+
+/* Fixed height rather than aspect-ratio: the emoji list overflows the
+   scrolling grid, and aspect-ratio rows (with overflow: hidden buttons)
+   would be squeezed to fit it */
+.char-grid.emoji-grid button {
+    aspect-ratio: auto;
+    height: 28px;
+}
+
+.char-grid.emoji-grid .glyph-text {
+    font-size: 20px;
+}
+
+.char-group-title {
+    grid-column: 1 / -1;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    padding: 0.375rem 0 0.125rem;
+}
+
+.emoji-search {
+    width: 100%;
+    margin-bottom: 0.5rem;
+    padding: 0.25rem 0.5rem;
+    background-color: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-radius: 4px;
+    font-size: 0.8rem;
+}
+
 /* Box line style buttons */
 .box-style-buttons {
     display: flex;

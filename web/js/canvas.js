@@ -825,7 +825,16 @@ class CanvasRenderer {
         if (this.lastCell === key) return;
         this.lastCell = key;
 
-        this.applyCurrentColors(this.canvas.cells[cellY][cellX]);
+        // A wide char (emoji) needs two cells: skip the last column, where it
+        // can't fit, and the tail of the copy just placed while dragging
+        const row = this.canvas.cells[cellY];
+        if (charWidth(this.selectedChar) === 2 &&
+            (cellX === this.canvas.width - 1 ||
+             (row[cellX].type === 'wide-tail' && row[cellX - 1].charCode === this.selectedChar))) {
+            return;
+        }
+
+        this.applyCurrentColors(row[cellX]);
         setGridChar(this.canvas.cells, cellX, cellY, this.selectedChar);
         this.updateCell(cellX, cellY);
     }
