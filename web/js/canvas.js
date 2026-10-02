@@ -4,8 +4,16 @@
 // 2x3 subpixels. style.css hardcodes the same sizes for cells and overlays.
 const CELL_W = 18;
 const CELL_H = 34;
-const SUB_W = CELL_W / 2;
-const SUB_H = CELL_H / 3;
+
+// Subpixel edges within a cell, in CSS px from its top-left corner: the
+// cell's 16x32 inside (within the 1px border) split into 2x3 equal parts.
+// Drawing, hit-testing and the subpixel selection overlay all use these.
+const SUB_X_EDGES = [0, CELL_W / 2, CELL_W];
+const SUB_Y_EDGES = [0, 1 + (CELL_H - 2) / 3, 1 + 2 * (CELL_H - 2) / 3, CELL_H];
+
+// Left / top edge (CSS px) of subpixel column sx / row sy
+function subpixelEdgeX(sx) { return Math.floor(sx / 2) * CELL_W + SUB_X_EDGES[sx % 2]; }
+function subpixelEdgeY(sy) { return Math.floor(sy / 3) * CELL_H + SUB_Y_EDGES[sy % 3]; }
 
 // Cap on the grid canvas's backing store, in device pixels (see render)
 const MAX_CANVAS_PIXELS = 16 * 1024 * 1024;
@@ -356,10 +364,11 @@ class CanvasRenderer {
         return style;
     }
 
-    // Draw one cell on the grid canvas, matching the old DOM cells: a 1px
-    // border, the background inside it, and the glyph centred and clipped to
-    // the inside. A wide char is drawn two cells wide from its head; drawing
-    // its tail draws the head.
+    // Draw one cell on the grid canvas: a 1px border, the background inside
+    // it, and the content clipped to the inside. Sextants, block elements,
+    // legacy diagonals/triangles and box drawing are drawn as shapes (see
+    // glyph-shapes.js); everything else is a font glyph. A wide char is drawn
+    // two cells wide from its head; drawing its tail draws the head.
     drawCell(x, y) {
         const row = this.canvas.cells[y];
         let cell = row[x];
@@ -371,47 +380,236 @@ class CanvasRenderer {
             }
         }
         const ctx = this.ctx;
-        const kx = this._scaleX;
-        const ky = this._scaleY;
-        const w = isWideHead(cell) ? 2 * CELL_W : CELL_W;
-        const left = x * CELL_W;
-        const top = y * CELL_H;
+        const g = this.cellGeometry(x, y, isWideHead(cell) ? 2 * CELL_W : CELL_W);
 
-        // Border and background are drawn in device pixels, snapped to whole
-        // pixels (like DOM borders), so they stay sharp at fractional pixel
-        // ratios such as 125% display scaling
-        const dx0 = Math.round(left * kx), dx1 = Math.round((left + w) * kx);
-        const dy0 = Math.round(top * ky), dy1 = Math.round((top + CELL_H) * ky);
-        const bx = Math.max(1, Math.floor(kx)), by = Math.max(1, Math.floor(ky)); // 1 CSS px
-        const inner = [dx0 + bx, dy0 + by, dx1 - dx0 - 2 * bx, dy1 - dy0 - 2 * by];
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.fillStyle = this.theme.border;
-        ctx.fillRect(dx0, dy0, dx1 - dx0, dy1 - dy0);
+        ctx.fillRect(g.X(0), g.Y(0), g.X(g.w) - g.X(0), g.Y(CELL_H) - g.Y(0));
         ctx.fillStyle = cell.bg.default ? this.theme.cellBg : `rgb(${cell.bg.r},${cell.bg.g},${cell.bg.b})`;
-        ctx.fillRect(...inner);
+        ctx.fillRect(...g.inner);
 
+        const fg = cell.fg.default ? this.theme.fg : `rgb(${cell.fg.r},${cell.fg.g},${cell.fg.b})`;
         const char = cellToChar(cell);
         if (char === ' ') return;
-
-        const style = this.glyphStyle(glyphClass(char.codePointAt(0)));
-        this.ensureFontLoaded(style.font, char);
+        const code = char.codePointAt(0);
 
         ctx.save();
         ctx.beginPath();
-        ctx.rect(...inner);
+        ctx.rect(...g.inner);
         ctx.clip();
+        ctx.fillStyle = fg;
+        ctx.strokeStyle = fg;
+        if (cell.type === 'sextant') {
+            this.drawSextant(cell, g);
+        } else if (hasGlyphShape(code)) {
+            this.drawShape(code, g);
+        } else {
+            this.drawGlyph(char, g);
+        }
+        ctx.restore();
+    }
+
+    // Where a cell (w CSS px wide) is on the canvas. X / Y map a position in
+    // CSS px from the cell's top-left corner to whole device pixels: every
+    // edge goes through them, so edges shared between cells and shapes line
+    // up exactly and stay sharp at fractional pixel ratios. `inner` is the
+    // inside (within the 1px border) as a device-pixel rect.
+    cellGeometry(x, y, w) {
+        const kx = this._scaleX;
+        const ky = this._scaleY;
+        const left = x * CELL_W;
+        const top = y * CELL_H;
+        const X = (px) => Math.round((left + px) * kx);
+        const Y = (py) => Math.round((top + py) * ky);
+        const bx = Math.max(1, Math.floor(kx)); // the 1 CSS px border
+        const by = Math.max(1, Math.floor(ky));
+        const inner = [X(0) + bx, Y(0) + by, X(w) - X(0) - 2 * bx, Y(CELL_H) - Y(0) - 2 * by];
+        return { left, top, w, kx, ky, X, Y, inner };
+    }
+
+    // Font glyph, styled by its .glyph-* class and centred like the old DOM cells
+    drawGlyph(char, g) {
+        const ctx = this.ctx;
+        const style = this.glyphStyle(glyphClass(char.codePointAt(0)));
+        this.ensureFontLoaded(style.font, char);
         // The glyph is laid out in CSS px; CSS transforms apply around its
         // centre (transform-origin)
-        ctx.setTransform(kx, 0, 0, ky, 0, 0);
-        ctx.translate(left + w / 2, top + CELL_H / 2);
+        ctx.setTransform(g.kx, 0, 0, g.ky, 0, 0);
+        ctx.translate(g.left + g.w / 2, g.top + CELL_H / 2);
         const t = style.transform;
         ctx.transform(t.a, t.b, t.c, t.d, t.e, t.f);
         ctx.font = style.font;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'alphabetic';
-        ctx.fillStyle = cell.fg.default ? this.theme.fg : `rgb(${cell.fg.r},${cell.fg.g},${cell.fg.b})`;
         ctx.fillText(char, 0, style.baseline);
-        ctx.restore();
+    }
+
+    // Sextant cells (incl. the block chars they cover: █ ▌ ▐): the 2x3
+    // subpixels as rectangles on the shared subpixel edges, so they exactly
+    // fill the inside and line up with hit-testing and the selection overlay
+    drawSextant(cell, g) {
+        for (let row = 0; row < 3; row++) {
+            for (let col = 0; col < 2; col++) {
+                if (!cell.subpixels[row][col]) continue;
+                const x0 = g.X(SUB_X_EDGES[col]), y0 = g.Y(SUB_Y_EDGES[row]);
+                this.ctx.fillRect(x0, y0, g.X(SUB_X_EDGES[col + 1]) - x0, g.Y(SUB_Y_EDGES[row + 1]) - y0);
+            }
+        }
+    }
+
+    // Block elements, legacy blocks/diagonals/triangles and box drawing
+    drawShape(code, g) {
+        const ctx = this.ctx;
+        // Unit coords of the inside → CSS px in the cell. 0 and 1 map to the
+        // cell's outer edges (the clip trims the border off), so shapes reach
+        // the inside's edges exactly; interior thirds match the sextant rows.
+        const ux = (u) => u <= 0 ? 0 : u >= 1 ? g.w : 1 + u * (g.w - 2);
+        const uy = (v) => v <= 0 ? 0 : v >= 1 ? CELL_H : 1 + v * (CELL_H - 2);
+
+        const rects = BLOCK_SHAPES.get(code);
+        if (rects) {
+            for (const [x0, y0, x1, y1, alpha = 1] of rects) {
+                ctx.globalAlpha = alpha;
+                const l = g.X(ux(x0)), t = g.Y(uy(y0));
+                ctx.fillRect(l, t, g.X(ux(x1)) - l, g.Y(uy(y1)) - t);
+            }
+            return;
+        }
+
+        const polygons = LEGACY_POLYGONS.get(code);
+        if (polygons) {
+            const [alpha, ...polys] = polygons;
+            ctx.globalAlpha = alpha;
+            ctx.beginPath();
+            for (const poly of polys) {
+                poly.forEach(([u, v], i) => {
+                    const px = g.X(ux(u)), py = g.Y(uy(v));
+                    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                });
+                ctx.closePath();
+            }
+            ctx.fill();
+            return;
+        }
+
+        this.drawBoxChar(code, g);
+    }
+
+    // Box drawing (U+2500-257F): lines run from the cell centre to the edges
+    // of the inside, so they join seamlessly with the next cell's lines.
+    // Light lines are 2 CSS px, heavy 4, double two light lines 3 px either
+    // side of the centre.
+    drawBoxChar(code, g) {
+        const ctx = this.ctx;
+        const LIGHT = 2, HEAVY = 4, GAP = 3;
+        const cx = g.w / 2, cy = CELL_H / 2;
+        const thickness = (style) => style === 2 ? HEAVY : LIGHT;
+
+        // Line from a to b along its axis, centred on c across it (CSS px in
+        // the cell); the thickness is a whole number of device pixels so
+        // parallel lines look the same in every cell
+        const hLine = (a, b, c, t) => {
+            const td = Math.max(1, Math.round(t * g.ky));
+            const y0 = Math.round((g.top + c) * g.ky - td / 2);
+            const x0 = g.X(Math.min(a, b));
+            ctx.fillRect(x0, y0, g.X(Math.max(a, b)) - x0, td);
+            return y0 + td / 2; // device y of the line's centre
+        };
+        const vLine = (a, b, c, t) => {
+            const td = Math.max(1, Math.round(t * g.kx));
+            const x0 = Math.round((g.left + c) * g.kx - td / 2);
+            const y0 = g.Y(Math.min(a, b));
+            ctx.fillRect(x0, y0, td, g.Y(Math.max(a, b)) - y0);
+            return x0 + td / 2;
+        };
+
+        const arms = boxArms(code);
+        if (arms) {
+            const OPPOSITE = { up: 'down', down: 'up', left: 'right', right: 'left' };
+            const half = (style) => style === 2 ? HEAVY / 2 : style === 1 ? LIGHT / 2 : 0;
+            const outer = (style) => style === 3 ? GAP + LIGHT / 2 : half(style);
+            for (const dir of ['up', 'down', 'left', 'right']) {
+                const style = arms[dir];
+                if (!style) continue;
+                const horiz = dir === 'left' || dir === 'right';
+                const sign = dir === 'right' || dir === 'down' ? 1 : -1;
+                const along = horiz ? cx : cy;
+                const across = horiz ? cy : cx;
+                const edge = sign > 0 ? (horiz ? g.w : CELL_H) : 0;
+                const sideA = horiz ? arms.up : arms.left;    // perpendicular arm on the - side
+                const sideB = horiz ? arms.down : arms.right;  // and on the + side
+                const opposite = arms[OPPOSITE[dir]];
+                // Segment from `start` px past the centre (negative: reaching
+                // back beyond it) out to the edge, `offset` px off-centre
+                const segment = (start, offset, t) => horiz
+                    ? hLine(along + sign * start, edge, across + offset, t)
+                    : vLine(along + sign * start, edge, across + offset, t);
+
+                if (style !== 3) {
+                    let start = 0; // straight through, or a stub to the centre
+                    if (!opposite) {
+                        if (sideA === 3 && sideB === 3) start = GAP;          // stop at a double crossbar's near line
+                        else if (sideA === 3 || sideB === 3) start = -outer(3); // double corner: reach its far line
+                        else start = -Math.max(half(sideA), half(sideB));      // cover the joint
+                    }
+                    segment(start, 0, thickness(style));
+                } else {
+                    // Each of the two lines stops where it meets a perpendicular
+                    // arm on its own side, or else wraps round the outer corner
+                    for (const [side, other, offset] of [[sideA, sideB, -GAP], [sideB, sideA, GAP]]) {
+                        let start = 0;
+                        if (side) start = side === 3 ? GAP : half(side);
+                        else if (other) start = -outer(other);
+                        segment(start, offset, LIGHT);
+                    }
+                }
+            }
+            return;
+        }
+
+        const dash = BOX_DASHES.get(code);
+        if (dash) {
+            const [horiz, count, style] = dash;
+            const len = horiz ? g.w : CELL_H;
+            const gap = len / count * 0.35;
+            for (let i = 0; i < count; i++) {
+                const a = i * len / count + gap / 2, b = (i + 1) * len / count - gap / 2;
+                if (horiz) hLine(a, b, cy, thickness(style)); else vLine(a, b, cx, thickness(style));
+            }
+            return;
+        }
+
+        ctx.lineWidth = Math.max(1, Math.round(LIGHT * Math.min(g.kx, g.ky)));
+        const arc = BOX_ARCS.get(code);
+        if (arc) {
+            // Straight light lines that turn the corner along a quarter circle
+            const [vDir, hDir] = arc;
+            const td = Math.max(1, Math.round(LIGHT * g.ky));
+            const hc = Math.round((g.top + cy) * g.ky - td / 2) + td / 2;
+            const tdx = Math.max(1, Math.round(LIGHT * g.kx));
+            const vc = Math.round((g.left + cx) * g.kx - tdx / 2) + tdx / 2;
+            const hEnd = hDir === 'right' ? g.X(g.w) : g.X(0);
+            const vEnd = vDir === 'down' ? g.Y(CELL_H) : g.Y(0);
+            const r = 6 * Math.min(g.kx, g.ky);
+            ctx.beginPath();
+            ctx.moveTo(hEnd, hc);
+            ctx.arcTo(vc, hc, vc, vEnd, r);
+            ctx.lineTo(vc, vEnd);
+            ctx.stroke();
+            return;
+        }
+
+        // ╱ ╲ ╳: diagonals corner to corner
+        ctx.beginPath();
+        if (code === 0x2571 || code === 0x2573) {
+            ctx.moveTo(g.X(0), g.Y(CELL_H));
+            ctx.lineTo(g.X(g.w), g.Y(0));
+        }
+        if (code === 0x2572 || code === 0x2573) {
+            ctx.moveTo(g.X(0), g.Y(0));
+            ctx.lineTo(g.X(g.w), g.Y(CELL_H));
+        }
+        ctx.stroke();
     }
 
     // Unlike DOM text, canvas text doesn't make the browser fetch a web font
@@ -556,11 +754,18 @@ class CanvasRenderer {
     subpixelCoordsFromEvent(e) {
         if (!this.canvas) return null;
         const rect = this.container.getBoundingClientRect();
-        const relX = e.clientX - rect.left;
-        const relY = e.clientY - rect.top;
-        const sx = Math.max(0, Math.min(this.canvas.width  * 2 - 1, Math.floor(relX / SUB_W)));
-        const sy = Math.max(0, Math.min(this.canvas.height * 3 - 1, Math.floor(relY / SUB_H)));
-        return { sx, sy, cellX: Math.floor(sx / 2), cellY: Math.floor(sy / 3) };
+        const relX = Math.max(0, Math.min(this.canvas.width  * CELL_W - 0.01, e.clientX - rect.left));
+        const relY = Math.max(0, Math.min(this.canvas.height * CELL_H - 0.01, e.clientY - rect.top));
+        const cellX = Math.floor(relX / CELL_W);
+        const cellY = Math.floor(relY / CELL_H);
+        // Compare in device pixels against the same rounded edges drawCell
+        // uses, so a click lands in exactly the subpixel drawn under it
+        const g = this.cellGeometry(cellX, cellY, CELL_W);
+        const devX = relX * g.kx;
+        const devY = relY * g.ky;
+        const col = devX < g.X(SUB_X_EDGES[1]) ? 0 : 1;
+        const row = devY < g.Y(SUB_Y_EDGES[1]) ? 0 : devY < g.Y(SUB_Y_EDGES[2]) ? 1 : 2;
+        return { sx: cellX * 2 + col, sy: cellY * 3 + row, cellX, cellY };
     }
 
     // The cell containing subpixel (sx, sy) and the subpixel's row/col within
@@ -621,8 +826,8 @@ class CanvasRenderer {
         const els = this._overlays[kind] || (this._overlays[kind] = []);
         while (els.length > rects.length) els.pop().remove();
 
-        const unitW = subpixel ? SUB_W : CELL_W;
-        const unitH = subpixel ? SUB_H : CELL_H;
+        const edgeX = subpixel ? subpixelEdgeX : (x) => x * CELL_W;
+        const edgeY = subpixel ? subpixelEdgeY : (y) => y * CELL_H;
         rects.forEach((r, i) => {
             let el = els[i];
             if (!el) {
@@ -631,13 +836,13 @@ class CanvasRenderer {
                 this.overlayLayer.appendChild(el);
                 els.push(el);
             }
-            const left = r.x1 * unitW;
-            const top = r.y1 * unitH;
+            const left = edgeX(r.x1);
+            const top = edgeY(r.y1);
             // Keep the tiled outline pattern aligned to the cell grid when the
             // region starts mid-cell (subpixel coords)
             el.style.cssText =
                 `left:${left}px;top:${top}px;` +
-                `width:${(r.x2 - r.x1 + 1) * unitW}px;height:${(r.y2 - r.y1 + 1) * unitH}px;` +
+                `width:${edgeX(r.x2 + 1) - left}px;height:${edgeY(r.y2 + 1) - top}px;` +
                 `background-position:${-(left % CELL_W)}px ${-(top % CELL_H)}px`;
         });
     }
