@@ -12,6 +12,9 @@ const CELL_H = 34;
 const SUB_X_EDGES = [0, CELL_W / 2, CELL_W];
 const SUB_Y_EDGES = [0, CELL_H / 3, 2 * CELL_H / 3, CELL_H];
 
+// Overlays on the overlay canvas, bottom to top (see setOverlay)
+const OVERLAY_ORDER = ['hover', 'paste', 'paste-subpixel', 'box', 'selection', 'subpixel-selection'];
+
 // Left / top edge (CSS px) of subpixel column sx / row sy
 function subpixelEdgeX(sx) { return Math.floor(sx / 2) * CELL_W + SUB_X_EDGES[sx % 2]; }
 function subpixelEdgeY(sy) { return Math.floor(sy / 3) * CELL_H + SUB_Y_EDGES[sy % 3]; }
@@ -33,6 +36,18 @@ function linePoints(x0, y0, x1, y1) {
         if (e2 >= dy) { err += dy; x0 += stepX; }
         if (e2 <= dx) { err += dx; y0 += stepY; }
     }
+}
+
+// Parts of rect a (inclusive grid coords) not in rect b: up to 4 rects
+function rectMinus(a, b) {
+    if (b.x1 > a.x2 || b.x2 < a.x1 || b.y1 > a.y2 || b.y2 < a.y1) return [a];
+    const parts = [];
+    if (a.y1 < b.y1) parts.push({ x1: a.x1, y1: a.y1, x2: a.x2, y2: b.y1 - 1 });
+    if (a.y2 > b.y2) parts.push({ x1: a.x1, y1: b.y2 + 1, x2: a.x2, y2: a.y2 });
+    const y1 = Math.max(a.y1, b.y1), y2 = Math.min(a.y2, b.y2);
+    if (a.x1 < b.x1) parts.push({ x1: a.x1, y1, x2: b.x1 - 1, y2 });
+    if (a.x2 > b.x2) parts.push({ x1: b.x2 + 1, y1, x2: a.x2, y2 });
+    return parts;
 }
 
 // Normalised rect { x1, y1, x2, y2 } spanning two points
@@ -87,8 +102,12 @@ class CanvasRenderer {
         this._shadePatterns = new Map(); // shade + colour → CanvasPattern (see fillShape)
         this._requestedFonts = new Set();
 
-        // Overlay divs per decoration kind (see setOverlay)
-        this._overlays = {};
+        // Selection / preview outlines and the hover box (see setOverlay)
+        this.overlayCtx = null;         // 2D context of the overlay canvas
+        this._overlayRects = {};        // kind → { rects, subpixel }
+        this._overlayDrawn = {};        // kind → device-pixel rects drawing it
+        this._hover = null;             // hover box rect, or null
+        this._cursorEl = null;          // the text cursor's element
         this._pastePreviewKey = null; // Last previewed paste position
 
         // Undo/redo (see history.js). strokeOpen: a mouse stroke's step is open.
@@ -101,6 +120,7 @@ class CanvasRenderer {
 
     setupEventListeners() {
         this.container.addEventListener('mousedown', (e) => this.handleMouseDown(e));
+        this.container.addEventListener('mouseleave', () => this.updateHover(null));
 
         // Moves and releases are handled at window level, so a drag keeps
         // going when the pointer leaves the canvas: select, box and line drags
@@ -338,8 +358,11 @@ class CanvasRenderer {
         this.container.style.width = width + 'px';
         this.container.style.height = height + 'px';
 
-        // Reset caches (innerHTML = '' removed the overlay divs too)
-        this._overlays = {};
+        // Reset caches (innerHTML = '' removed the overlays too)
+        this._overlayRects = {};
+        this._overlayDrawn = {};
+        this._hover = null;
+        this._cursorEl = null;
         this._pastePreviewKey = null;
 
         // The grid is drawn on one <canvas>, sharp on high-DPI screens. The
@@ -365,8 +388,19 @@ class CanvasRenderer {
         this._scaleX = gridCanvas.width / width;
         this._scaleY = gridCanvas.height / height;
 
-        // Selections, previews and the text cursor are HTML overlays on top,
-        // in their own size-contained layer
+        // Selection / preview outlines and the hover box go on a transparent
+        // canvas on top, drawn the same way as the grid lines
+        const overlayCanvas = document.createElement('canvas');
+        overlayCanvas.className = 'overlay-canvas';
+        overlayCanvas.width = gridCanvas.width;
+        overlayCanvas.height = gridCanvas.height;
+        overlayCanvas.style.width = width + 'px';
+        overlayCanvas.style.height = height + 'px';
+        this.container.appendChild(overlayCanvas);
+        this.overlayCtx = overlayCanvas.getContext('2d');
+        overlayCanvas.addEventListener('contextrestored', () => this.repaintOverlay());
+
+        // The blinking text cursor is an HTML element in a layer above that
         this.overlayLayer = document.createElement('div');
         this.overlayLayer.className = 'overlay-layer';
         this.overlayLayer.style.width = width + 'px';
@@ -413,18 +447,58 @@ class CanvasRenderer {
         this.theme = {
             border: style.getPropertyValue('--border').trim(),
             cellBg: style.getPropertyValue('--cell-bg').trim(),
-            fg: style.color
+            fg: style.color,
+            overlay: {
+                hover: { line: style.getPropertyValue('--overlay-hover').trim() },
+                paste: { line: style.getPropertyValue('--overlay-paste').trim(),
+                         fill: style.getPropertyValue('--overlay-paste-fill').trim() },
+                'paste-subpixel': { line: style.getPropertyValue('--overlay-paste').trim() },
+                box: { line: style.getPropertyValue('--overlay-preview').trim() },
+                selection: { line: style.getPropertyValue('--overlay-selection').trim() },
+                'subpixel-selection': { line: style.getPropertyValue('--overlay-selection').trim() }
+            }
         };
     }
 
     drawAll() {
         if (!this.ctx) return;
         this.readTheme();
+        const wide = [];
         for (let y = 0; y < this.canvas.height; y++) {
             for (let x = 0; x < this.canvas.width; x++) {
+                const cell = this.canvas.cells[y][x];
                 // A wide char's tail is drawn along with its head
-                if (this.canvas.cells[y][x].type !== 'wide-tail') this.drawCell(x, y);
+                if (cell.type === 'wide-tail') continue;
+                if (isWideHead(cell)) wide.push([x, y]);
+                this.drawCell(x, y, false);
             }
+        }
+        if (this.showGrid) {
+            this.drawGridLines();
+            // A wide char has no grid line between its halves
+            for (const [x, y] of wide) this.drawCell(x, y);
+        }
+    }
+
+    // All the cells' grid rings at once, as one line per cell edge across the
+    // whole canvas: the same pixels as drawCell's per-cell rings
+    drawGridLines() {
+        const ctx = this.ctx;
+        const kx = this._scaleX, ky = this._scaleY;
+        const bx = Math.max(1, Math.floor(kx)), by = Math.max(1, Math.floor(ky));
+        const width = Math.round(this.canvas.width * CELL_W * kx);
+        const height = Math.round(this.canvas.height * CELL_H * ky);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = this.theme.border;
+        for (let x = 0; x <= this.canvas.width; x++) {
+            const dx = Math.round(x * CELL_W * kx);
+            if (x > 0) ctx.fillRect(dx - bx, 0, bx, height);                // right edge of column x - 1
+            if (x < this.canvas.width) ctx.fillRect(dx, 0, bx, height);     // left edge of column x
+        }
+        for (let y = 0; y <= this.canvas.height; y++) {
+            const dy = Math.round(y * CELL_H * ky);
+            if (y > 0) ctx.fillRect(0, dy - by, width, by);
+            if (y < this.canvas.height) ctx.fillRect(0, dy, width, by);
         }
     }
 
@@ -467,7 +541,7 @@ class CanvasRenderer {
     // legacy diagonals/triangles and box drawing are drawn as shapes (see
     // glyph-shapes.js); everything else is a font glyph. A wide char is drawn
     // two cells wide from its head; drawing its tail draws the head.
-    drawCell(x, y) {
+    drawCell(x, y, gridRing = true) {
         const row = this.canvas.cells[y];
         let cell = row[x];
         if (cell.type === 'wide-tail') {
@@ -505,7 +579,8 @@ class CanvasRenderer {
         }
 
         // Grid lines: a 1 CSS px ring painted over the cell's outermost pixels
-        if (this.showGrid) {
+        // (drawAll draws them for all cells at once instead)
+        if (this.showGrid && gridRing) {
             const [x0, y0, w, h] = g.rect;
             const bx = Math.max(1, Math.floor(g.kx)), by = Math.max(1, Math.floor(g.ky));
             ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -821,8 +896,10 @@ class CanvasRenderer {
         for (let y = y1; y <= y2; y++) {
             for (let x = x1; x <= x2; x++) this.drawCell(x, y);
         }
-        // The edit may have turned the char under the text cursor wide or narrow
+        // The edit may have turned the char under the text cursor or the
+        // hover box wide or narrow
         if (this.textCursor) this.updateTextCursorDisplay();
+        if (this._hoverEvent) this.updateHover(this._hoverEvent);
     }
 
     // Repaint the cells covering a rectangle given in subpixel coords
@@ -870,6 +947,7 @@ class CanvasRenderer {
     }
 
     handleMouseMove(e) {
+        this.updateHover(e);
         if (this.pasteMode) {
             this.showPastePreview(e);
             return;
@@ -1021,32 +1099,122 @@ class CanvasRenderer {
 
     // --- Overlays ---
 
-    // Show `rects` (grid coordinates, inclusive) as overlay divs of the given
-    // kind, reusing the kind's existing divs. An empty list hides the overlay.
-    // With `subpixel`, coords are in subpixels (2x3 per cell) rather than cells.
+    // Show `rects` (grid coordinates, inclusive; in subpixels, 2x3 per cell,
+    // with `subpixel`) as the given kind of overlay: outlines of every cell or
+    // subpixel in them, drawn exactly like the grid lines but in the kind's
+    // colour (see OVERLAY_ORDER and the --overlay-* CSS variables). A rect
+    // with `whole` gets one outline around all of it (a wide char). An empty
+    // list hides the overlay.
     setOverlay(kind, rects, subpixel = false) {
-        const els = this._overlays[kind] || (this._overlays[kind] = []);
-        while (els.length > rects.length) els.pop().remove();
+        const entry = rects.length ? { rects, subpixel } : null;
+        const old = this._overlayRects[kind] || null;
+        if (!entry && !old) return;
+        this._overlayRects[kind] = entry;
+        if (!this.overlayCtx) return;
+        this._overlayDrawn[kind] = entry ? this.overlayDeviceRects(kind, entry) : [];
+        this.repaintOverlay(this.overlayChangedAreas(old, entry));
+    }
 
+    // Where an overlay kind changed from `a` to `b`, as device-pixel rects.
+    // Outlines are drawn per cell (or subpixel), so units in both look the
+    // same before and after: for single rects (selections, the hover box,
+    // filled box previews) only the units in one but not the other change,
+    // e.g. the new row when a selection grows by one.
+    overlayChangedAreas(a, b) {
+        const subpixel = (a || b).subpixel;
+        const single = (e) => e && e.rects.length === 1 && !e.rects[0].whole;
+        const units = single(a) && single(b)
+            ? [...rectMinus(a.rects[0], b.rects[0]), ...rectMinus(b.rects[0], a.rects[0])]
+            : [...(a ? a.rects : []), ...(b ? b.rects : [])];
         const edgeX = subpixel ? subpixelEdgeX : (x) => x * CELL_W;
         const edgeY = subpixel ? subpixelEdgeY : (y) => y * CELL_H;
-        rects.forEach((r, i) => {
-            let el = els[i];
-            if (!el) {
-                el = document.createElement('div');
-                el.className = `overlay overlay-${kind}` + (subpixel ? ' subpixel' : '');
-                this.overlayLayer.appendChild(el);
-                els.push(el);
-            }
-            const left = edgeX(r.x1);
-            const top = edgeY(r.y1);
-            // Keep the tiled outline pattern aligned to the cell grid when the
-            // region starts mid-cell (subpixel coords)
-            el.style.cssText =
-                `left:${left}px;top:${top}px;` +
-                `width:${edgeX(r.x2 + 1) - left}px;height:${edgeY(r.y2 + 1) - top}px;` +
-                `background-position:${-(left % CELL_W)}px ${-(top % CELL_H)}px`;
+        return units.map(r => {
+            const x = Math.round(edgeX(r.x1) * this._scaleX), y = Math.round(edgeY(r.y1) * this._scaleY);
+            return [x, y, Math.round(edgeX(r.x2 + 1) * this._scaleX) - x, Math.round(edgeY(r.y2 + 1) * this._scaleY) - y];
         });
+    }
+
+    // Repaint the overlay canvas within each of `areas` (device-pixel rects),
+    // or all of it (after a render or context loss: rebuilds every kind)
+    repaintOverlay(areas = null) {
+        const ctx = this.overlayCtx;
+        if (!ctx) return;
+        if (!areas) {
+            for (const kind of OVERLAY_ORDER) {
+                const entry = this._overlayRects[kind];
+                this._overlayDrawn[kind] = entry ? this.overlayDeviceRects(kind, entry) : [];
+            }
+            areas = [[0, 0, ctx.canvas.width, ctx.canvas.height]];
+        }
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        for (const [ax, ay, aw, ah] of areas) {
+            if (aw <= 0 || ah <= 0) continue;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(ax, ay, aw, ah);
+            ctx.clip();
+            ctx.clearRect(ax, ay, aw, ah);
+            for (const kind of OVERLAY_ORDER) {
+                for (const [x, y, w, h, colour] of this._overlayDrawn[kind] || []) {
+                    if (x >= ax + aw || y >= ay + ah || x + w <= ax || y + h <= ay) continue;
+                    ctx.fillStyle = colour;
+                    ctx.fillRect(x, y, w, h);
+                }
+            }
+            ctx.restore();
+        }
+    }
+
+    // The device-pixel rects [x, y, w, h, colour] that draw one overlay kind:
+    // each cell's (or subpixel's) outermost device pixels, exactly as drawCell
+    // draws the grid, as one line per unit edge so large selections stay
+    // cheap; plus a fill under it for kinds that have one (paste)
+    overlayDeviceRects(kind, { rects, subpixel }) {
+        const style = this.theme.overlay[kind];
+        const kx = this._scaleX, ky = this._scaleY;
+        const edgeX = subpixel ? subpixelEdgeX : (x) => x * CELL_W;
+        const edgeY = subpixel ? subpixelEdgeY : (y) => y * CELL_H;
+        const DX = (x) => Math.round(edgeX(x) * kx);
+        const DY = (y) => Math.round(edgeY(y) * ky);
+        const bx = Math.max(1, Math.floor(kx)), by = Math.max(1, Math.floor(ky)); // as the grid
+        const out = [];
+        for (const r of rects) {
+            const left = DX(r.x1), right = DX(r.x2 + 1);
+            const top = DY(r.y1), bottom = DY(r.y2 + 1);
+            if (style.fill) out.push([left, top, right - left, bottom - top, style.fill]);
+            // Unit spans along each axis: every cell/subpixel, or the whole
+            // rect as one unit (a wide char's hover box)
+            const spans = (a, b) => r.whole ? [[a, b]] : Array.from({ length: b - a + 1 }, (_, i) => [a + i, a + i]);
+            for (const [a, b] of spans(r.x1, r.x2)) {
+                out.push([DX(a), top, bx, bottom - top, style.line]);
+                out.push([DX(b + 1) - bx, top, bx, bottom - top, style.line]);
+            }
+            for (const [a, b] of spans(r.y1, r.y2)) {
+                out.push([left, DY(a), right - left, by, style.line]);
+                out.push([left, DY(b + 1) - by, right - left, by, style.line]);
+            }
+        }
+        return out;
+    }
+
+    // Outline the cell under the pointer (both halves of a wide char) so it's
+    // clear which cell a tool acts on; hidden off the canvas and while placing
+    // a paste (the paste preview shows where it goes)
+    updateHover(e) {
+        let rect = null;
+        if (e && this.canvas && !this.pasteMode && this.container.contains(e.target)) {
+            const c = this.cellCoordsFromEvent(e);
+            const row = this.canvas.cells[c.cellY];
+            let x = c.cellX;
+            if (row[x].type === 'wide-tail' && x > 0) x--;
+            rect = { x1: x, y1: c.cellY, x2: isWideHead(row[x]) ? x + 1 : x, y2: c.cellY, whole: true };
+        }
+        this._hoverEvent = rect ? e : null;
+        const cur = this._hover;
+        if (rect && cur && rect.x1 === cur.x1 && rect.x2 === cur.x2 && rect.y1 === cur.y1) return;
+        if (!rect && !cur) return;
+        this._hover = rect;
+        this.setOverlay('hover', rect ? [rect] : []);
     }
 
     // Clip a rect to the canvas (in cells, or subpixels); null if nothing is left
@@ -1540,11 +1708,20 @@ class CanvasRenderer {
         }
         const { x, y } = this.textCursor;
         const x2 = isWideHead(this.canvas.cells[y][x]) ? x + 1 : x;
-        this.setOverlay('cursor', [{ x1: x, y1: y, x2, y2: y }]);
+        if (!this._cursorEl) {
+            this._cursorEl = document.createElement('div');
+            this._cursorEl.className = 'text-cursor';
+            this.overlayLayer.appendChild(this._cursorEl);
+        }
+        this._cursorEl.style.cssText = `left:${x * CELL_W}px;top:${y * CELL_H}px;` +
+            `width:${(x2 - x + 1) * CELL_W}px;height:${CELL_H}px`;
     }
 
     clearTextCursorDisplay() {
-        this.setOverlay('cursor', []);
+        if (this._cursorEl) {
+            this._cursorEl.remove();
+            this._cursorEl = null;
+        }
     }
 
     // Previous / next character position in reading order (wrapping across
