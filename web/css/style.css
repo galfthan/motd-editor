@@ -379,7 +379,8 @@ main {
 }
 
 .box-style-btn,
-.box-fill-btn {
+.box-fill-btn,
+.brush-btn {
     padding: 0.375rem 0.75rem;
     background-color: var(--bg-tertiary);
     border: 1px solid var(--border);
@@ -392,12 +393,14 @@ main {
 }
 
 .box-style-btn:hover,
-.box-fill-btn:hover {
+.box-fill-btn:hover,
+.brush-btn:hover {
     background-color: #454545;
 }
 
 .box-style-btn.active,
-.box-fill-btn.active {
+.box-fill-btn.active,
+.brush-btn.active {
     background-color: var(--accent);
     border-color: var(--accent);
 }

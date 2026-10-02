@@ -75,6 +75,9 @@ class CanvasRenderer {
         this.boxLineStyle = 1;      // 0=none, 1=light, 2=heavy, 3=double
         this.boxFillMode = 0;       // 0=no fill, 1=fill & clear, 2=recolor only
 
+        // Draw/erase tool state
+        this.brushCell = false;     // Paint whole cells instead of subpixels
+
         // Grid canvas drawing state (see render / drawCell)
         this.ctx = null;                // 2D context of the grid canvas
         this._onPixelRatioChange = () => this.render();
@@ -1298,28 +1301,40 @@ class CanvasRenderer {
 
         // Repaint each touched cell once, after all its subpixels are set
         const changed = new Map();
-        this.strokeTo(p.sx, p.sy, (sx, sy) => {
+        const paint = (sx, sy) => {
             const sp = this.paintSubpixel(sx, sy, this.tool === 'draw');
             if (sp) changed.set(`${sp.cellX},${sp.cellY}`, sp);
-        });
+        };
+        if (this.brushCell) {
+            // All six subpixels of each cell along the stroke
+            this.strokeTo(p.cellX, p.cellY, (x, y) => {
+                for (let sy = y * 3; sy < y * 3 + 3; sy++) {
+                    for (let sx = x * 2; sx < x * 2 + 2; sx++) paint(sx, sy);
+                }
+            });
+        } else {
+            this.strokeTo(p.sx, p.sy, paint);
+        }
         for (const { cellX, cellY } of changed.values()) this.updateCell(cellX, cellY);
     }
 
     // Set (draw) or clear (erase) one subpixel; returns its subpixelAt() info
-    // if anything changed
+    // if anything changed. Drawing gives the cell the current colours; erasing
+    // gives it the current background (with "Def", the terminal's own) and
+    // keeps the foreground of its remaining subpixels.
     paintSubpixel(sx, sy, filled) {
         const sp = this.subpixelAt(sx, sy);
         const { cell, cellX, cellY, row, col } = sp;
 
-        // Nothing to do if the subpixel (and, when drawing, the colours) already match
+        // Nothing to do if the subpixel and the colours it sets already match
         if (cell.type === 'sextant' && cell.subpixels[row][col] === filled &&
-            (!filled || (colorsEqual(cell.fg, this.fgColor) && colorsEqual(cell.bg, this.bgColor)))) {
+            colorsEqual(cell.bg, this.bgColor) && (!filled || colorsEqual(cell.fg, this.fgColor))) {
             return null;
         }
 
         this.beforeChange(cellX, cellY, cellX, cellY);
-        // Erase keeps the cell's colours so the remaining subpixels are unchanged
         if (filled) this.applyCurrentColors(cell);
+        else cell.bg = { ...this.bgColor };
         detachWide(this.canvas.cells, cellX, cellY);
         setCellSubpixel(cell, row, col, filled);
         return sp;

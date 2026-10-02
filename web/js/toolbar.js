@@ -312,6 +312,7 @@ class Toolbar {
         const charPaletteSection = document.getElementById('char-palette-section');
         const boxStyleSection = document.getElementById('box-style-section');
         const boxFillSection = document.getElementById('box-fill-section');
+        const brushSection = document.getElementById('brush-section');
         const noneStyleBtn = document.querySelector('.box-style-btn[data-style="0"]');
         const lightStyleBtn = document.querySelector('.box-style-btn[data-style="1"]');
 
@@ -321,6 +322,7 @@ class Toolbar {
             charPaletteSection.style.display = tool === 'char' ? 'block' : 'none';
             boxStyleSection.style.display = (tool === 'box' || tool === 'line') ? 'block' : 'none';
             boxFillSection.style.display = tool === 'box' ? 'block' : 'none';
+            brushSection.style.display = (tool === 'draw' || tool === 'erase') ? 'block' : 'none';
 
             // "None" line style is a no-op for the line tool, so hide it there.
             // If it was selected, fall back to Light.
@@ -341,6 +343,9 @@ class Toolbar {
         });
         bindButtonGroup(document.querySelectorAll('.box-fill-btn'), btn => {
             this.renderer.boxFillMode = parseInt(btn.dataset.fill);
+        });
+        bindButtonGroup(document.querySelectorAll('.brush-btn'), btn => {
+            this.renderer.brushCell = btn.dataset.brush === 'cell';
         });
 
         // Keyboard shortcuts
