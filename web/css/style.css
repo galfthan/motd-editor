@@ -417,33 +417,18 @@ main {
     user-select: none;
 }
 
-.cell {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    background-color: var(--cell-bg);
-    width: 16px;
-    height: 32px;
+/* The grid is drawn on this canvas (CanvasRenderer.drawCell), as 18x34px
+   cells: a 1px var(--border) border around a 16x32 var(--cell-bg) inside */
+.grid-canvas {
     position: absolute;
+    left: 0;
+    top: 0;
+    display: block;
     cursor: crosshair;
-    border: 1px solid var(--border);
-    box-sizing: content-box;
-    /* Fixed-size cell: content changes never affect layout outside it */
-    contain: strict;
 }
 
-/* A wide char (CJK, emoji) spans two cells: its element covers the next
-   cell's position, and that cell (the tail) is hidden */
-.cell.wide {
-    width: calc(16px + 18px);
-}
-
-.cell.wide-tail {
-    display: none;
-}
-
-/* Glyph styles by character range (see CanvasRenderer.paintCellElement) */
+/* Glyph styles by character range, for the symbol palette and (read via a
+   probe element) the grid canvas; see CanvasRenderer.glyphStyle */
 .glyph-tiling,
 .glyph-legacy {
     font-family: 'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace;
@@ -475,17 +460,12 @@ main {
  * --c: line colour, --w: line width. Tiles are one 18x34px cell.
  */
 /* Layers sized to the canvas (see CanvasRenderer.render) */
-.cell-layer,
 .overlay-layer {
     position: absolute;
     left: 0;
     top: 0;
     contain: strict;
-}
-
-.overlay-layer {
     pointer-events: none;
-    z-index: 1;
 }
 
 .overlay {
@@ -497,13 +477,14 @@ main {
         linear-gradient(to bottom, var(--c) var(--w), transparent var(--w) calc(34px - var(--w)), var(--c) calc(34px - var(--w)));
 }
 
-/* Subpixel variant: 1px outline around each of the 2x3 subpixels per cell */
+/* Subpixel variant: 1px outline around each of the 2x3 subpixels per cell,
+   on the subpixel edges in canvas.js (SUB_X_EDGES / SUB_Y_EDGES) */
 .overlay.subpixel {
     --w: 1px;
     background-image:
         linear-gradient(to right, var(--c) 1px, transparent 1px 8px, var(--c) 8px 10px, transparent 10px 17px, var(--c) 17px),
-        linear-gradient(to bottom, var(--c) 1px, transparent 1px 10.333px, var(--c) 10.333px 12.333px,
-            transparent 12.333px 21.667px, var(--c) 21.667px 23.667px, transparent 23.667px 33px, var(--c) 33px);
+        linear-gradient(to bottom, var(--c) 1px, transparent 1px 10.667px, var(--c) 10.667px 12.667px,
+            transparent 12.667px 21.333px, var(--c) 21.333px 23.333px, transparent 23.333px 33px, var(--c) 33px);
 }
 
 /* Selection styles */
@@ -528,7 +509,8 @@ main {
 }
 
 /* Text cursor */
-.cell.text-cursor {
+.overlay.overlay-cursor {
+    background-image: none;
     outline: 2px solid #ffcc00;
     outline-offset: -2px;
     animation: text-cursor-blink 1s step-end infinite;

@@ -4,6 +4,10 @@
 // Grouped by category for the character palette tabs
 const LEGACY_CHARS = {
     blocks: [
+        [0x2588, 'Full Block'], [0x2580, 'Upper Half Block'],
+        [0x2584, 'Lower Half Block'], [0x258C, 'Left Half Block'],
+        [0x2590, 'Right Half Block'], [0x2591, 'Light Shade'],
+        [0x2592, 'Medium Shade'], [0x2593, 'Dark Shade'],
         [0x1FB70, 'Vertical 1/8 Block-2'], [0x1FB71, 'Vertical 1/8 Block-3'],
         [0x1FB72, 'Vertical 1/8 Block-4'], [0x1FB73, 'Vertical 1/8 Block-5'],
         [0x1FB74, 'Vertical 1/8 Block-6'], [0x1FB75, 'Vertical 1/8 Block-7'],

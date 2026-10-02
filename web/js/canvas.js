@@ -4,8 +4,19 @@
 // 2x3 subpixels. style.css hardcodes the same sizes for cells and overlays.
 const CELL_W = 18;
 const CELL_H = 34;
-const SUB_W = CELL_W / 2;
-const SUB_H = CELL_H / 3;
+
+// Subpixel edges within a cell, in CSS px from its top-left corner: the
+// cell's 16x32 inside (within the 1px border) split into 2x3 equal parts.
+// Drawing, hit-testing and the subpixel selection overlay all use these.
+const SUB_X_EDGES = [0, CELL_W / 2, CELL_W];
+const SUB_Y_EDGES = [0, 1 + (CELL_H - 2) / 3, 1 + 2 * (CELL_H - 2) / 3, CELL_H];
+
+// Left / top edge (CSS px) of subpixel column sx / row sy
+function subpixelEdgeX(sx) { return Math.floor(sx / 2) * CELL_W + SUB_X_EDGES[sx % 2]; }
+function subpixelEdgeY(sy) { return Math.floor(sy / 3) * CELL_H + SUB_Y_EDGES[sy % 3]; }
+
+// Cap on the grid canvas's backing store, in device pixels (see render)
+const MAX_CANVAS_PIXELS = 16 * 1024 * 1024;
 
 // Grid points on the straight line from (x0, y0) to (x1, y1), both ends
 // included, stepping one point at a time (Bresenham)
@@ -64,13 +75,15 @@ class CanvasRenderer {
         this.boxLineStyle = 1;      // 0=none, 1=light, 2=heavy, 3=double
         this.boxFillMode = 0;       // 0=no fill, 1=fill & clear, 2=recolor only
 
-        // DOM element cache for O(1) lookups
-        this.cellElements = [];     // [y][x] → cell DOM element
+        // Grid canvas drawing state (see render / drawCell)
+        this.ctx = null;                // 2D context of the grid canvas
+        this._onPixelRatioChange = () => this.render();
+        this._glyphStyles = new Map();  // .glyph-* class → { font, transform, baseline }
+        this._requestedFonts = new Set();
 
         // Overlay divs per decoration kind (see setOverlay)
         this._overlays = {};
         this._pastePreviewKey = null; // Last previewed paste position
-        this._textCursorCell = null;
 
         this.setupEventListeners();
         this.setupKeyboardShortcuts();
@@ -88,6 +101,15 @@ class CanvasRenderer {
         window.addEventListener('mouseup', () => {
             if (this.isDrawing) this.handleMouseUp();
         });
+
+        // Canvas text doesn't redraw by itself like DOM text: redraw when web
+        // fonts finish loading (see also watchPixelRatio)
+        if (document.fonts) {
+            document.fonts.addEventListener('loadingdone', () => {
+                this._glyphStyles.clear(); // font metrics may have changed
+                this.drawAll();
+            });
+        }
 
         // Prevent context menu on right-click
         this.container.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -122,12 +144,6 @@ class CanvasRenderer {
 
     isSubpixelMode() {
         return this.tool === 'select-subpixel';
-    }
-
-    getCellElement(x, y) {
-        if (y >= 0 && y < this.cellElements.length && x >= 0 && x < this.cellElements[y].length)
-            return this.cellElements[y][x];
-        return null;
     }
 
     setupKeyboardShortcuts() {
@@ -227,41 +243,47 @@ class CanvasRenderer {
     render() {
         if (!this.canvas) return;
 
+        const width = this.canvas.width * CELL_W;
+        const height = this.canvas.height * CELL_H;
         this.container.innerHTML = '';
-        this.container.style.width = (this.canvas.width * CELL_W) + 'px';
-        this.container.style.height = (this.canvas.height * CELL_H) + 'px';
+        this.container.style.width = width + 'px';
+        this.container.style.height = height + 'px';
 
         // Reset caches (innerHTML = '' removed the overlay divs too)
-        this.cellElements = [];
         this._overlays = {};
         this._pastePreviewKey = null;
-        this._textCursorCell = null;
 
-        // Cells and overlays each live in their own size-contained layer. With
-        // the cells as direct children of the container, any overlay update
-        // made the browser walk every positioned cell during layout.
-        const makeLayer = (className) => {
-            const layer = document.createElement('div');
-            layer.className = className;
-            layer.style.width = this.container.style.width;
-            layer.style.height = this.container.style.height;
-            this.container.appendChild(layer);
-            return layer;
-        };
-        const cellLayer = makeLayer('cell-layer');
-        this.overlayLayer = makeLayer('overlay-layer');
+        // The grid is drawn on one <canvas>, sharp on high-DPI screens. The
+        // backing store is capped: browsers limit canvas area (iOS Safari to
+        // 16.7M pixels), so very large grids get a lower resolution instead.
+        this._dpr = window.devicePixelRatio || 1;
+        this.watchPixelRatio();
+        const scale = Math.min(this._dpr, Math.sqrt(MAX_CANVAS_PIXELS / (width * height)));
+        const gridCanvas = document.createElement('canvas');
+        gridCanvas.className = 'grid-canvas';
+        gridCanvas.width = Math.round(width * scale);
+        gridCanvas.height = Math.round(height * scale);
+        gridCanvas.style.width = width + 'px';
+        gridCanvas.style.height = height + 'px';
+        // After a GPU reset the browser restores a blank canvas
+        gridCanvas.addEventListener('contextrestored', () => this.drawAll());
+        this.container.appendChild(gridCanvas);
+        // Opaque (every pixel is drawn), which also lets the browser use
+        // subpixel antialiasing for text, like the DOM did
+        this.ctx = gridCanvas.getContext('2d', { alpha: false });
+        // CSS px → device px (drawCell snaps rects to whole device pixels)
+        this._scaleX = gridCanvas.width / width;
+        this._scaleY = gridCanvas.height / height;
 
-        const fragment = document.createDocumentFragment();
-        for (let y = 0; y < this.canvas.height; y++) {
-            this.cellElements[y] = [];
-            for (let x = 0; x < this.canvas.width; x++) {
-                const cell = this.canvas.cells[y][x];
-                const cellEl = this.createCellElement(x, y, cell);
-                fragment.appendChild(cellEl);
-                this.cellElements[y][x] = cellEl;
-            }
-        }
-        cellLayer.appendChild(fragment);
+        // Selections, previews and the text cursor are HTML overlays on top,
+        // in their own size-contained layer
+        this.overlayLayer = document.createElement('div');
+        this.overlayLayer.className = 'overlay-layer';
+        this.overlayLayer.style.width = width + 'px';
+        this.overlayLayer.style.height = height + 'px';
+        this.container.appendChild(this.overlayLayer);
+
+        this.drawAll();
 
         // Restore selection highlights after re-render (state outlives the DOM)
         this.updateSelectionDisplay();
@@ -275,73 +297,349 @@ class CanvasRenderer {
         }
     }
 
-    createCellElement(x, y, cell) {
-        const cellEl = document.createElement('div');
-        cellEl.className = 'cell';
-        cellEl.dataset.x = x;
-        cellEl.dataset.y = y;
-        this.paintCellElement(cellEl, x, y, cell);
-        return cellEl;
+    // Re-render at the new resolution when the device pixel ratio changes
+    // (browser zoom, moving the window to a screen with another density)
+    watchPixelRatio() {
+        if (!window.matchMedia) return;
+        if (this._pixelRatioQuery) {
+            this._pixelRatioQuery.removeEventListener('change', this._onPixelRatioChange);
+        }
+        this._pixelRatioQuery = window.matchMedia(`(resolution: ${this._dpr}dppx)`);
+        this._pixelRatioQuery.addEventListener('change', this._onPixelRatioChange);
     }
 
-    // (Re)paint a cell element in place from cell state. Updating the existing
-    // element instead of replacing it keeps layout invalidation local to the
-    // cell and preserves decoration classes such as the text cursor.
-    // A wide char's element is drawn two cells wide, covering its (hidden) tail.
-    paintCellElement(cellEl, x, y, cell) {
-        let css = `left:${x * CELL_W}px;top:${y * CELL_H}px`;
-        if (!cell.bg.default) {
-            css += `;background-color:rgb(${cell.bg.r},${cell.bg.g},${cell.bg.b})`;
-        }
-        cellEl.style.cssText = css;
-        cellEl.classList.toggle('wide', isWideHead(cell));
-        cellEl.classList.toggle('wide-tail', cell.type === 'wide-tail');
+    // Colours the grid is drawn with, from the page's CSS. Read on full
+    // redraws only; the CSS variables are static (no theme switching).
+    readTheme() {
+        const style = getComputedStyle(this.container);
+        this.theme = {
+            border: style.getPropertyValue('--border').trim(),
+            cellBg: style.getPropertyValue('--cell-bg').trim(),
+            fg: style.color
+        };
+    }
 
+    drawAll() {
+        if (!this.ctx) return;
+        this.readTheme();
+        for (let y = 0; y < this.canvas.height; y++) {
+            for (let x = 0; x < this.canvas.width; x++) {
+                // A wide char's tail is drawn along with its head
+                if (this.canvas.cells[y][x].type !== 'wide-tail') this.drawCell(x, y);
+            }
+        }
+    }
+
+    // Font, transform and vertical text offset for a .glyph-* class. These are
+    // read from the CSS (via a hidden probe element) so style.css stays the
+    // one place they are defined; the symbol palette uses the same classes.
+    glyphStyle(cls) {
+        let style = this._glyphStyles.get(cls);
+        if (style) return style;
+
+        const probe = document.createElement('span');
+        probe.className = cls;
+        probe.style.cssText = 'position:absolute;visibility:hidden;display:block';
+        document.body.appendChild(probe);
+        const cs = getComputedStyle(probe);
+        const font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+        const transform = cs.transform === 'none' ? new DOMMatrix() : new DOMMatrix(cs.transform);
+        const lineHeightCss = cs.lineHeight;
+        probe.remove();
+
+        // Place the baseline as CSS layout does: the line box is centred in
+        // the cell, and the leading (line height minus the primary font's
+        // ascent + descent, often negative here) is split with the floor of
+        // half of it above the text
+        this.ctx.font = font;
+        const m = this.ctx.measureText('M');
+        const ascent = m.fontBoundingBoxAscent;
+        const descent = m.fontBoundingBoxDescent;
+        const lineHeight = lineHeightCss === 'normal' ? ascent + descent
+            : lineHeightCss.endsWith('px') ? parseFloat(lineHeightCss)
+            : parseFloat(lineHeightCss) * parseFloat(cs.fontSize); // bare multiplier
+        const baseline = -lineHeight / 2 + ascent + Math.floor((lineHeight - ascent - descent) / 2);
+        style = { font, transform, baseline };
+        this._glyphStyles.set(cls, style);
+        return style;
+    }
+
+    // Draw one cell on the grid canvas: a 1px border, the background inside
+    // it, and the content clipped to the inside. Sextants, block elements,
+    // legacy diagonals/triangles and box drawing are drawn as shapes (see
+    // glyph-shapes.js); everything else is a font glyph. A wide char is drawn
+    // two cells wide from its head; drawing its tail draws the head.
+    drawCell(x, y) {
+        const row = this.canvas.cells[y];
+        let cell = row[x];
+        if (cell.type === 'wide-tail') {
+            if (x > 0 && isWideHead(row[x - 1])) {
+                cell = row[--x];
+            } else {
+                cell = createCell(); // orphan tail (shouldn't happen): draw blank
+            }
+        }
+        const ctx = this.ctx;
+        const g = this.cellGeometry(x, y, isWideHead(cell) ? 2 * CELL_W : CELL_W);
+
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = this.theme.border;
+        ctx.fillRect(g.X(0), g.Y(0), g.X(g.w) - g.X(0), g.Y(CELL_H) - g.Y(0));
+        ctx.fillStyle = cell.bg.default ? this.theme.cellBg : `rgb(${cell.bg.r},${cell.bg.g},${cell.bg.b})`;
+        ctx.fillRect(...g.inner);
+
+        const fg = cell.fg.default ? this.theme.fg : `rgb(${cell.fg.r},${cell.fg.g},${cell.fg.b})`;
         const char = cellToChar(cell);
-        if (char === ' ' || char === '') {
-            cellEl.textContent = '';
+        if (char === ' ') return;
+        const code = char.codePointAt(0);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(...g.inner);
+        ctx.clip();
+        ctx.fillStyle = fg;
+        ctx.strokeStyle = fg;
+        if (cell.type === 'sextant') {
+            this.drawSextant(cell, g);
+        } else if (hasGlyphShape(code)) {
+            this.drawShape(code, g);
+        } else {
+            this.drawGlyph(char, g);
+        }
+        ctx.restore();
+    }
+
+    // Where a cell (w CSS px wide) is on the canvas. X / Y map a position in
+    // CSS px from the cell's top-left corner to whole device pixels: every
+    // edge goes through them, so edges shared between cells and shapes line
+    // up exactly and stay sharp at fractional pixel ratios. `inner` is the
+    // inside (within the 1px border) as a device-pixel rect.
+    cellGeometry(x, y, w) {
+        const kx = this._scaleX;
+        const ky = this._scaleY;
+        const left = x * CELL_W;
+        const top = y * CELL_H;
+        const X = (px) => Math.round((left + px) * kx);
+        const Y = (py) => Math.round((top + py) * ky);
+        const bx = Math.max(1, Math.floor(kx)); // the 1 CSS px border
+        const by = Math.max(1, Math.floor(ky));
+        const inner = [X(0) + bx, Y(0) + by, X(w) - X(0) - 2 * bx, Y(CELL_H) - Y(0) - 2 * by];
+        return { left, top, w, kx, ky, X, Y, inner };
+    }
+
+    // Font glyph, styled by its .glyph-* class and centred like the old DOM cells
+    drawGlyph(char, g) {
+        const ctx = this.ctx;
+        const style = this.glyphStyle(glyphClass(char.codePointAt(0)));
+        this.ensureFontLoaded(style.font, char);
+        // The glyph is laid out in CSS px; CSS transforms apply around its
+        // centre (transform-origin)
+        ctx.setTransform(g.kx, 0, 0, g.ky, 0, 0);
+        ctx.translate(g.left + g.w / 2, g.top + CELL_H / 2);
+        const t = style.transform;
+        ctx.transform(t.a, t.b, t.c, t.d, t.e, t.f);
+        ctx.font = style.font;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(char, 0, style.baseline);
+    }
+
+    // Sextant cells (incl. the block chars they cover: █ ▌ ▐): the 2x3
+    // subpixels as rectangles on the shared subpixel edges, so they exactly
+    // fill the inside and line up with hit-testing and the selection overlay
+    drawSextant(cell, g) {
+        for (let row = 0; row < 3; row++) {
+            for (let col = 0; col < 2; col++) {
+                if (!cell.subpixels[row][col]) continue;
+                const x0 = g.X(SUB_X_EDGES[col]), y0 = g.Y(SUB_Y_EDGES[row]);
+                this.ctx.fillRect(x0, y0, g.X(SUB_X_EDGES[col + 1]) - x0, g.Y(SUB_Y_EDGES[row + 1]) - y0);
+            }
+        }
+    }
+
+    // Block elements, legacy blocks/diagonals/triangles and box drawing
+    drawShape(code, g) {
+        const ctx = this.ctx;
+        // Unit coords of the inside → CSS px in the cell. 0 and 1 map to the
+        // cell's outer edges (the clip trims the border off), so shapes reach
+        // the inside's edges exactly; interior thirds match the sextant rows.
+        const ux = (u) => u <= 0 ? 0 : u >= 1 ? g.w : 1 + u * (g.w - 2);
+        const uy = (v) => v <= 0 ? 0 : v >= 1 ? CELL_H : 1 + v * (CELL_H - 2);
+
+        const rects = BLOCK_SHAPES.get(code);
+        if (rects) {
+            for (const [x0, y0, x1, y1, alpha = 1] of rects) {
+                ctx.globalAlpha = alpha;
+                const l = g.X(ux(x0)), t = g.Y(uy(y0));
+                ctx.fillRect(l, t, g.X(ux(x1)) - l, g.Y(uy(y1)) - t);
+            }
             return;
         }
 
-        const span = document.createElement('span');
-        span.className = glyphClass(char.codePointAt(0));
-        span.textContent = char;
-        if (!cell.fg.default) {
-            span.style.color = `rgb(${cell.fg.r},${cell.fg.g},${cell.fg.b})`;
+        const polygons = LEGACY_POLYGONS.get(code);
+        if (polygons) {
+            const [alpha, ...polys] = polygons;
+            ctx.globalAlpha = alpha;
+            ctx.beginPath();
+            for (const poly of polys) {
+                poly.forEach(([u, v], i) => {
+                    const px = g.X(ux(u)), py = g.Y(uy(v));
+                    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                });
+                ctx.closePath();
+            }
+            ctx.fill();
+            return;
         }
-        cellEl.replaceChildren(span);
+
+        this.drawBoxChar(code, g);
+    }
+
+    // Box drawing (U+2500-257F): lines run from the cell centre to the edges
+    // of the inside, so they join seamlessly with the next cell's lines.
+    // Light lines are 2 CSS px, heavy 4, double two light lines 3 px either
+    // side of the centre.
+    drawBoxChar(code, g) {
+        const ctx = this.ctx;
+        const LIGHT = 2, HEAVY = 4, GAP = 3;
+        const cx = g.w / 2, cy = CELL_H / 2;
+        const thickness = (style) => style === 2 ? HEAVY : LIGHT;
+
+        // Line from a to b along its axis, centred on c across it (CSS px in
+        // the cell); the thickness is a whole number of device pixels so
+        // parallel lines look the same in every cell
+        const hLine = (a, b, c, t) => {
+            const td = Math.max(1, Math.round(t * g.ky));
+            const y0 = Math.round((g.top + c) * g.ky - td / 2);
+            const x0 = g.X(Math.min(a, b));
+            ctx.fillRect(x0, y0, g.X(Math.max(a, b)) - x0, td);
+            return y0 + td / 2; // device y of the line's centre
+        };
+        const vLine = (a, b, c, t) => {
+            const td = Math.max(1, Math.round(t * g.kx));
+            const x0 = Math.round((g.left + c) * g.kx - td / 2);
+            const y0 = g.Y(Math.min(a, b));
+            ctx.fillRect(x0, y0, td, g.Y(Math.max(a, b)) - y0);
+            return x0 + td / 2;
+        };
+
+        const arms = boxArms(code);
+        if (arms) {
+            const OPPOSITE = { up: 'down', down: 'up', left: 'right', right: 'left' };
+            const half = (style) => style === 2 ? HEAVY / 2 : style === 1 ? LIGHT / 2 : 0;
+            const outer = (style) => style === 3 ? GAP + LIGHT / 2 : half(style);
+            for (const dir of ['up', 'down', 'left', 'right']) {
+                const style = arms[dir];
+                if (!style) continue;
+                const horiz = dir === 'left' || dir === 'right';
+                const sign = dir === 'right' || dir === 'down' ? 1 : -1;
+                const along = horiz ? cx : cy;
+                const across = horiz ? cy : cx;
+                const edge = sign > 0 ? (horiz ? g.w : CELL_H) : 0;
+                const sideA = horiz ? arms.up : arms.left;    // perpendicular arm on the - side
+                const sideB = horiz ? arms.down : arms.right;  // and on the + side
+                const opposite = arms[OPPOSITE[dir]];
+                // Segment from `start` px past the centre (negative: reaching
+                // back beyond it) out to the edge, `offset` px off-centre
+                const segment = (start, offset, t) => horiz
+                    ? hLine(along + sign * start, edge, across + offset, t)
+                    : vLine(along + sign * start, edge, across + offset, t);
+
+                if (style !== 3) {
+                    let start = 0; // straight through, or a stub to the centre
+                    if (!opposite) {
+                        if (sideA === 3 && sideB === 3) start = GAP;          // stop at a double crossbar's near line
+                        else if (sideA === 3 || sideB === 3) start = -outer(3); // double corner: reach its far line
+                        else start = -Math.max(half(sideA), half(sideB));      // cover the joint
+                    }
+                    segment(start, 0, thickness(style));
+                } else {
+                    // Each of the two lines stops where it meets a perpendicular
+                    // arm on its own side, or else wraps round the outer corner
+                    for (const [side, other, offset] of [[sideA, sideB, -GAP], [sideB, sideA, GAP]]) {
+                        let start = 0;
+                        if (side) start = side === 3 ? GAP : half(side);
+                        else if (other) start = -outer(other);
+                        segment(start, offset, LIGHT);
+                    }
+                }
+            }
+            return;
+        }
+
+        const dash = BOX_DASHES.get(code);
+        if (dash) {
+            const [horiz, count, style] = dash;
+            const len = horiz ? g.w : CELL_H;
+            const gap = len / count * 0.35;
+            for (let i = 0; i < count; i++) {
+                const a = i * len / count + gap / 2, b = (i + 1) * len / count - gap / 2;
+                if (horiz) hLine(a, b, cy, thickness(style)); else vLine(a, b, cx, thickness(style));
+            }
+            return;
+        }
+
+        ctx.lineWidth = Math.max(1, Math.round(LIGHT * Math.min(g.kx, g.ky)));
+        const arc = BOX_ARCS.get(code);
+        if (arc) {
+            // Straight light lines that turn the corner along a quarter circle
+            const [vDir, hDir] = arc;
+            const td = Math.max(1, Math.round(LIGHT * g.ky));
+            const hc = Math.round((g.top + cy) * g.ky - td / 2) + td / 2;
+            const tdx = Math.max(1, Math.round(LIGHT * g.kx));
+            const vc = Math.round((g.left + cx) * g.kx - tdx / 2) + tdx / 2;
+            const hEnd = hDir === 'right' ? g.X(g.w) : g.X(0);
+            const vEnd = vDir === 'down' ? g.Y(CELL_H) : g.Y(0);
+            const r = 6 * Math.min(g.kx, g.ky);
+            ctx.beginPath();
+            ctx.moveTo(hEnd, hc);
+            ctx.arcTo(vc, hc, vc, vEnd, r);
+            ctx.lineTo(vc, vEnd);
+            ctx.stroke();
+            return;
+        }
+
+        // ╱ ╲ ╳: diagonals corner to corner
+        ctx.beginPath();
+        if (code === 0x2571 || code === 0x2573) {
+            ctx.moveTo(g.X(0), g.Y(CELL_H));
+            ctx.lineTo(g.X(g.w), g.Y(0));
+        }
+        if (code === 0x2572 || code === 0x2573) {
+            ctx.moveTo(g.X(0), g.Y(0));
+            ctx.lineTo(g.X(g.w), g.Y(CELL_H));
+        }
+        ctx.stroke();
+    }
+
+    // Unlike DOM text, canvas text doesn't make the browser fetch a web font
+    // (or the unicode-range subset holding a char), so ask for it; the
+    // 'loadingdone' listener in setupEventListeners redraws once it arrives.
+    ensureFontLoaded(font, char) {
+        const key = font + char;
+        if (this._requestedFonts.has(key) || !document.fonts) return;
+        this._requestedFonts.add(key);
+        document.fonts.load(font, char).catch(() => {});
     }
 
     updateCell(x, y) {
         this.updateCellRect(x, y, x, y);
     }
 
-    // Repaint the cells in a rectangle (clipped to the canvas)
+    // Redraw the cells in a rectangle (clipped to the canvas). An edit can
+    // also change cells just outside it, by claiming or blanking the other
+    // half of a wide char: one cell to the left, two to the right.
     updateCellRect(x1, y1, x2, y2) {
-        x1 = Math.max(0, x1);
+        if (!this.ctx) return;
+        x1 = Math.max(0, x1 - 1);
         y1 = Math.max(0, y1);
-        x2 = Math.min(this.canvas.width - 1, x2);
+        x2 = Math.min(this.canvas.width - 1, x2 + 2);
         y2 = Math.min(this.canvas.height - 1, y2);
         for (let y = y1; y <= y2; y++) {
-            for (let x = x1; x <= x2; x++) this.repaintCell(x, y);
-            // An edit may have claimed or blanked the other half of a wide
-            // char just outside the rect
-            this.repaintCell(x1 - 1, y, true);
-            this.repaintCell(x2 + 1, y, true);
+            for (let x = x1; x <= x2; x++) this.drawCell(x, y);
         }
-    }
-
-    // Repaint one cell; with onlyIfWide, only when it is (or was painted as)
-    // half of a wide char
-    repaintCell(x, y, onlyIfWide = false) {
-        const cellEl = this.getCellElement(x, y);
-        if (!cellEl) return;
-        const cell = this.canvas.cells[y][x];
-        if (onlyIfWide && !isWideHead(cell) && cell.type !== 'wide-tail' &&
-            !cellEl.classList.contains('wide') && !cellEl.classList.contains('wide-tail')) {
-            return;
-        }
-        this.paintCellElement(cellEl, x, y, cell);
+        // The edit may have turned the char under the text cursor wide or narrow
+        if (this.textCursor) this.updateTextCursorDisplay();
     }
 
     // Repaint the cells covering a rectangle given in subpixel coords
@@ -436,10 +734,9 @@ class CanvasRenderer {
         }
     }
 
-    // All pointer hit-testing uses container-relative coords. Using
-    // e.target.closest('.cell') plus per-cell rects gave inconsistent results at
-    // cell boundaries (the child <span> with scaleY(2) and the 1px cell borders
-    // can flip e.target between adjacent cells before the position crosses).
+    // All pointer hit-testing uses container-relative coords: grid positions
+    // follow directly from CELL_W / CELL_H, and they work for events outside
+    // the canvas too.
 
     // Cell coords from a mouse event, clamped to canvas extents.
     // Works whether the pointer is inside the canvas or outside it.
@@ -457,11 +754,18 @@ class CanvasRenderer {
     subpixelCoordsFromEvent(e) {
         if (!this.canvas) return null;
         const rect = this.container.getBoundingClientRect();
-        const relX = e.clientX - rect.left;
-        const relY = e.clientY - rect.top;
-        const sx = Math.max(0, Math.min(this.canvas.width  * 2 - 1, Math.floor(relX / SUB_W)));
-        const sy = Math.max(0, Math.min(this.canvas.height * 3 - 1, Math.floor(relY / SUB_H)));
-        return { sx, sy, cellX: Math.floor(sx / 2), cellY: Math.floor(sy / 3) };
+        const relX = Math.max(0, Math.min(this.canvas.width  * CELL_W - 0.01, e.clientX - rect.left));
+        const relY = Math.max(0, Math.min(this.canvas.height * CELL_H - 0.01, e.clientY - rect.top));
+        const cellX = Math.floor(relX / CELL_W);
+        const cellY = Math.floor(relY / CELL_H);
+        // Compare in device pixels against the same rounded edges drawCell
+        // uses, so a click lands in exactly the subpixel drawn under it
+        const g = this.cellGeometry(cellX, cellY, CELL_W);
+        const devX = relX * g.kx;
+        const devY = relY * g.ky;
+        const col = devX < g.X(SUB_X_EDGES[1]) ? 0 : 1;
+        const row = devY < g.Y(SUB_Y_EDGES[1]) ? 0 : devY < g.Y(SUB_Y_EDGES[2]) ? 1 : 2;
+        return { sx: cellX * 2 + col, sy: cellY * 3 + row, cellX, cellY };
     }
 
     // The cell containing subpixel (sx, sy) and the subpixel's row/col within
@@ -522,8 +826,8 @@ class CanvasRenderer {
         const els = this._overlays[kind] || (this._overlays[kind] = []);
         while (els.length > rects.length) els.pop().remove();
 
-        const unitW = subpixel ? SUB_W : CELL_W;
-        const unitH = subpixel ? SUB_H : CELL_H;
+        const edgeX = subpixel ? subpixelEdgeX : (x) => x * CELL_W;
+        const edgeY = subpixel ? subpixelEdgeY : (y) => y * CELL_H;
         rects.forEach((r, i) => {
             let el = els[i];
             if (!el) {
@@ -532,13 +836,13 @@ class CanvasRenderer {
                 this.overlayLayer.appendChild(el);
                 els.push(el);
             }
-            const left = r.x1 * unitW;
-            const top = r.y1 * unitH;
+            const left = edgeX(r.x1);
+            const top = edgeY(r.y1);
             // Keep the tiled outline pattern aligned to the cell grid when the
             // region starts mid-cell (subpixel coords)
             el.style.cssText =
                 `left:${left}px;top:${top}px;` +
-                `width:${(r.x2 - r.x1 + 1) * unitW}px;height:${(r.y2 - r.y1 + 1) * unitH}px;` +
+                `width:${edgeX(r.x2 + 1) - left}px;height:${edgeY(r.y2 + 1) - top}px;` +
                 `background-position:${-(left % CELL_W)}px ${-(top % CELL_H)}px`;
         });
     }
@@ -998,21 +1302,23 @@ class CanvasRenderer {
         this.textCursor = null;
     }
 
+    // The text cursor is a blinking overlay, two cells wide on a wide char
     updateTextCursorDisplay() {
-        if (!this.textCursor) return;
-        const { x, y } = this.textCursor;
-        const cellEl = this.getCellElement(x, y);
-        if (cellEl) {
-            cellEl.classList.add('text-cursor');
-            this._textCursorCell = cellEl;
+        if (!this.textCursor) {
+            this.clearTextCursorDisplay();
+            return;
         }
+        // Stay on a wide char's head if an edit put a tail under the cursor
+        if (this.canvas.cells[this.textCursor.y][this.textCursor.x].type === 'wide-tail') {
+            this.textCursor.x--;
+        }
+        const { x, y } = this.textCursor;
+        const x2 = isWideHead(this.canvas.cells[y][x]) ? x + 1 : x;
+        this.setOverlay('cursor', [{ x1: x, y1: y, x2, y2: y }]);
     }
 
     clearTextCursorDisplay() {
-        if (this._textCursorCell) {
-            this._textCursorCell.classList.remove('text-cursor');
-            this._textCursorCell = null;
-        }
+        this.setOverlay('cursor', []);
     }
 
     // Previous / next character position in reading order (wrapping across
@@ -1116,7 +1422,7 @@ class CanvasRenderer {
 
     clear() {
         clearCanvas(this.canvas);
-        this.render();
+        this.drawAll();
     }
 
     createNew(width, height, mode) {
