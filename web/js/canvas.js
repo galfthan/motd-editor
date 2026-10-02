@@ -99,7 +99,10 @@ class CanvasRenderer {
         this.showGrid = true;           // 1px grid lines over the cells (see setShowGrid)
         this._onPixelRatioChange = () => this.render();
         this._glyphStyles = new Map();  // .glyph-* class → { font, transform, baseline }
-        this._shadePatterns = new Map(); // shade + colour → CanvasPattern (see fillShape)
+        this._shadePatterns = new WeakMap(); // context → shade + colour → CanvasPattern (see fillShape)
+        this._origin = [0, 0];          // device origin of the canvas being drawn on (see drawCellsImage)
+        this._pasteImages = new Map();  // cached cell paste preview images (see pastePreviewImage)
+        this._pasteImagesFor = null;    // ... for this clipboard
         this._requestedFonts = new Set();
 
         // Selection / preview outlines and the hover box (see setOverlay)
@@ -383,7 +386,7 @@ class CanvasRenderer {
         // Opaque (every pixel is drawn), which also lets the browser use
         // subpixel antialiasing for text, like the DOM did
         this.ctx = gridCanvas.getContext('2d', { alpha: false });
-        this._shadePatterns.clear(); // patterns belong to the old context
+        this._pasteImages.clear();   // drawn at the old scale / with the old theme
         // CSS px → device px (drawCell snaps rects to whole device pixels)
         this._scaleX = gridCanvas.width / width;
         this._scaleY = gridCanvas.height / height;
@@ -437,6 +440,8 @@ class CanvasRenderer {
     // without it the cells run together as they will there.
     setShowGrid(show) {
         this.showGrid = show;
+        this._pasteImages.clear();
+        this._pastePreviewKey = null; // redraw the paste preview on the next move
         this.drawAll();
     }
 
@@ -450,8 +455,7 @@ class CanvasRenderer {
             fg: style.color,
             overlay: {
                 hover: { line: style.getPropertyValue('--overlay-hover').trim() },
-                paste: { line: style.getPropertyValue('--overlay-paste').trim(),
-                         fill: style.getPropertyValue('--overlay-paste-fill').trim() },
+                paste: { line: style.getPropertyValue('--overlay-paste').trim() },
                 'paste-subpixel': { line: style.getPropertyValue('--overlay-paste').trim() },
                 box: { line: style.getPropertyValue('--overlay-preview').trim() },
                 selection: { line: style.getPropertyValue('--overlay-selection').trim() },
@@ -551,6 +555,12 @@ class CanvasRenderer {
                 cell = createCell(); // orphan tail (shouldn't happen): draw blank
             }
         }
+        this.paintCell(cell, x, y, gridRing);
+    }
+
+    // Draw `cell` at grid position (x, y) on the current target (see
+    // drawCellsImage), two cells wide if it is a wide char
+    paintCell(cell, x, y, gridRing = true) {
         const ctx = this.ctx;
         const g = this.cellGeometry(x, y, isWideHead(cell) ? 2 * CELL_W : CELL_W);
 
@@ -592,6 +602,30 @@ class CanvasRenderer {
         }
     }
 
+    // Draw cells ({ x, y, cell }, at grid positions) onto an offscreen canvas
+    // covering the cell rect `bounds`, exactly as they would be drawn on the
+    // grid canvas there (the same device-pixel rounding), for previews.
+    // Returns { image, x, y }: the canvas and its device position. With
+    // `opaque` (the cells cover all of `bounds`) text gets the same subpixel
+    // antialiasing as on the opaque grid canvas; otherwise the gaps between
+    // cells stay transparent.
+    drawCellsImage(cells, bounds, image = document.createElement('canvas'), opaque = false) {
+        const kx = this._scaleX, ky = this._scaleY;
+        const x0 = Math.round(bounds.x1 * CELL_W * kx), y0 = Math.round(bounds.y1 * CELL_H * ky);
+        image.width = Math.round((bounds.x2 + 1) * CELL_W * kx) - x0;
+        image.height = Math.round((bounds.y2 + 1) * CELL_H * ky) - y0;
+        const main = this.ctx, origin = this._origin;
+        this.ctx = image.getContext('2d', { alpha: !opaque });
+        this._origin = [x0, y0];
+        try {
+            for (const { x, y, cell } of cells) this.paintCell(cell, x, y);
+        } finally {
+            this.ctx = main;
+            this._origin = origin;
+        }
+        return { image, x: x0, y: y0 };
+    }
+
     // Where a cell (w CSS px wide) is on the canvas. X / Y map a position in
     // CSS px from the cell's top-left corner to whole device pixels: every
     // edge goes through them, so edges shared between cells and shapes line
@@ -602,10 +636,12 @@ class CanvasRenderer {
         const ky = this._scaleY;
         const left = x * CELL_W;
         const top = y * CELL_H;
-        const X = (px) => Math.round((left + px) * kx);
-        const Y = (py) => Math.round((top + py) * ky);
+        // Device-pixel origin of the canvas being drawn on (see drawCellsImage)
+        const [ox, oy] = this._origin;
+        const X = (px) => Math.round((left + px) * kx) - ox;
+        const Y = (py) => Math.round((top + py) * ky) - oy;
         const rect = [X(0), Y(0), X(w) - X(0), Y(CELL_H) - Y(0)];
-        return { left, top, w, kx, ky, X, Y, rect };
+        return { left, top, w, kx, ky, ox, oy, X, Y, rect };
     }
 
     // Font glyph, styled by its .glyph-* class and centred like the old DOM cells
@@ -615,7 +651,7 @@ class CanvasRenderer {
         this.ensureFontLoaded(style.font, char);
         // The glyph is laid out in CSS px; CSS transforms apply around its
         // centre (transform-origin)
-        ctx.setTransform(g.kx, 0, 0, g.ky, 0, 0);
+        ctx.setTransform(g.kx, 0, 0, g.ky, -g.ox, -g.oy);
         ctx.translate(g.left + g.w / 2, g.top + CELL_H / 2);
         const t = style.transform;
         ctx.transform(t.a, t.b, t.c, t.d, t.e, t.f);
@@ -680,7 +716,7 @@ class CanvasRenderer {
             const PERIOD = 4, WIDTH = 2;
             const y0 = g.top, y1 = g.top + CELL_H;
             const shift = (y) => stripes * y / 2; // x offset of a stripe at height y
-            ctx.setTransform(g.kx, 0, 0, g.ky, 0, 0);
+            ctx.setTransform(g.kx, 0, 0, g.ky, -g.ox, -g.oy);
             ctx.beginPath();
             const kMin = Math.floor((g.left - Math.max(shift(y0), shift(y1))) / PERIOD) - 1;
             const kMax = Math.ceil((g.left + g.w - Math.min(shift(y0), shift(y1))) / PERIOD) + 1;
@@ -729,8 +765,11 @@ class CanvasRenderer {
             ctx.fill();
             return;
         }
+        // Patterns are cached per context (the grid canvas, or a paste preview's)
+        let patterns = this._shadePatterns.get(ctx);
+        if (!patterns) this._shadePatterns.set(ctx, patterns = new Map());
         const key = shade + '|' + ctx.fillStyle;
-        let pattern = this._shadePatterns.get(key);
+        let pattern = patterns.get(key);
         if (!pattern) {
             const tile = document.createElement('canvas');
             tile.width = tile.height = 4;
@@ -742,11 +781,11 @@ class CanvasRenderer {
                 }
             }
             pattern = ctx.createPattern(tile, 'repeat');
-            this._shadePatterns.set(key, pattern);
+            patterns.set(key, pattern);
         }
         ctx.save();
         ctx.clip();
-        ctx.setTransform(g.kx, 0, 0, g.ky, 0, 0);
+        ctx.setTransform(g.kx, 0, 0, g.ky, -g.ox, -g.oy);
         ctx.imageSmoothingEnabled = false;
         ctx.fillStyle = pattern;
         ctx.fillRect(g.left, g.top, g.w, CELL_H);
@@ -768,14 +807,14 @@ class CanvasRenderer {
         // parallel lines look the same in every cell
         const hLine = (a, b, c, t) => {
             const td = Math.max(1, Math.round(t * g.ky));
-            const y0 = Math.round((g.top + c) * g.ky - td / 2);
+            const y0 = Math.round((g.top + c) * g.ky - td / 2) - g.oy;
             const x0 = g.X(Math.min(a, b));
             ctx.fillRect(x0, y0, g.X(Math.max(a, b)) - x0, td);
             return y0 + td / 2; // device y of the line's centre
         };
         const vLine = (a, b, c, t) => {
             const td = Math.max(1, Math.round(t * g.kx));
-            const x0 = Math.round((g.left + c) * g.kx - td / 2);
+            const x0 = Math.round((g.left + c) * g.kx - td / 2) - g.ox;
             const y0 = g.Y(Math.min(a, b));
             ctx.fillRect(x0, y0, td, g.Y(Math.max(a, b)) - y0);
             return x0 + td / 2;
@@ -843,9 +882,9 @@ class CanvasRenderer {
             // Straight light lines that turn the corner along a quarter circle
             const [vDir, hDir] = arc;
             const td = Math.max(1, Math.round(LIGHT * g.ky));
-            const hc = Math.round((g.top + cy) * g.ky - td / 2) + td / 2;
+            const hc = Math.round((g.top + cy) * g.ky - td / 2) + td / 2 - g.oy;
             const tdx = Math.max(1, Math.round(LIGHT * g.kx));
-            const vc = Math.round((g.left + cx) * g.kx - tdx / 2) + tdx / 2;
+            const vc = Math.round((g.left + cx) * g.kx - tdx / 2) + tdx / 2 - g.ox;
             const hEnd = hDir === 'right' ? g.X(g.w) : g.X(0);
             const vEnd = vDir === 'down' ? g.Y(CELL_H) : g.Y(0);
             const r = 6 * Math.min(g.kx, g.ky);
@@ -1105,14 +1144,21 @@ class CanvasRenderer {
     // colour (see OVERLAY_ORDER and the --overlay-* CSS variables). A rect
     // with `whole` gets one outline around all of it (a wide char). An empty
     // list hides the overlay.
-    setOverlay(kind, rects, subpixel = false) {
-        const entry = rects.length ? { rects, subpixel } : null;
+    // `images` ({ image, x, y } at device positions, from drawCellsImage) are
+    // drawn under the outlines (the paste preview's content).
+    setOverlay(kind, rects, subpixel = false, images = []) {
+        const entry = rects.length || images.length ? { rects, subpixel, images } : null;
         const old = this._overlayRects[kind] || null;
         if (!entry && !old) return;
         this._overlayRects[kind] = entry;
         if (!this.overlayCtx) return;
-        this._overlayDrawn[kind] = entry ? this.overlayDeviceRects(kind, entry) : [];
-        this.repaintOverlay(this.overlayChangedAreas(old, entry));
+        const oldDrawn = this._overlayDrawn[kind] || [];
+        const drawn = entry ? this.overlayDeviceRects(kind, entry) : [];
+        this._overlayDrawn[kind] = drawn;
+        const withImages = images.length || (old && old.images.length);
+        this.repaintOverlay(withImages
+            ? [...oldDrawn, ...drawn].map(item => item.image ? [item.x, item.y, item.image.width, item.image.height] : item)
+            : this.overlayChangedAreas(old, entry));
     }
 
     // Where an overlay kind changed from `a` to `b`, as device-pixel rects.
@@ -1122,7 +1168,7 @@ class CanvasRenderer {
     // e.g. the new row when a selection grows by one.
     overlayChangedAreas(a, b) {
         const subpixel = (a || b).subpixel;
-        const single = (e) => e && e.rects.length === 1 && !e.rects[0].whole;
+        const single = (e) => e && e.rects.length === 1 && !e.rects[0].whole && !e.images.length;
         const units = single(a) && single(b)
             ? [...rectMinus(a.rects[0], b.rects[0]), ...rectMinus(b.rects[0], a.rects[0])]
             : [...(a ? a.rects : []), ...(b ? b.rects : [])];
@@ -1155,7 +1201,12 @@ class CanvasRenderer {
             ctx.clip();
             ctx.clearRect(ax, ay, aw, ah);
             for (const kind of OVERLAY_ORDER) {
-                for (const [x, y, w, h, colour] of this._overlayDrawn[kind] || []) {
+                for (const item of this._overlayDrawn[kind] || []) {
+                    if (item.image) {
+                        ctx.drawImage(item.image, item.x, item.y);
+                        continue;
+                    }
+                    const [x, y, w, h, colour] = item;
                     if (x >= ax + aw || y >= ay + ah || x + w <= ax || y + h <= ay) continue;
                     ctx.fillStyle = colour;
                     ctx.fillRect(x, y, w, h);
@@ -1169,7 +1220,7 @@ class CanvasRenderer {
     // each cell's (or subpixel's) outermost device pixels, exactly as drawCell
     // draws the grid, as one line per unit edge so large selections stay
     // cheap; plus a fill under it for kinds that have one (paste)
-    overlayDeviceRects(kind, { rects, subpixel }) {
+    overlayDeviceRects(kind, { rects, subpixel, images = [] }) {
         const style = this.theme.overlay[kind];
         const kx = this._scaleX, ky = this._scaleY;
         const edgeX = subpixel ? subpixelEdgeX : (x) => x * CELL_W;
@@ -1177,7 +1228,7 @@ class CanvasRenderer {
         const DX = (x) => Math.round(edgeX(x) * kx);
         const DY = (y) => Math.round(edgeY(y) * ky);
         const bx = Math.max(1, Math.floor(kx)), by = Math.max(1, Math.floor(ky)); // as the grid
-        const out = [];
+        const out = [...images];
         for (const r of rects) {
             const left = DX(r.x1), right = DX(r.x2 + 1);
             const top = DY(r.y1), bottom = DY(r.y2 + 1);
@@ -1308,6 +1359,9 @@ class CanvasRenderer {
         this.clearPastePreview();
     }
 
+    // Paste preview: the content as it will look once pasted at the pointer,
+    // with a box in the paste colour around it (and the grid inside it when
+    // the grid is shown, as the cells are drawn just like on the canvas)
     showPastePreview(e) {
         // Subpixel mode paste preview
         if (this.isSubpixelMode() && this.subpixelClipboard) {
@@ -1324,7 +1378,16 @@ class CanvasRenderer {
                 x2: sp.sx + this.subpixelClipboard[0].length - 1,
                 y2: sp.sy + this.subpixelClipboard.length - 1
             }, true);
-            this.setOverlay('paste-subpixel', r ? [r] : [], true);
+            if (!r) {
+                this.setOverlay('paste-subpixel', [], true);
+                return;
+            }
+            this._subpixelPasteImage = this._subpixelPasteImage || document.createElement('canvas');
+            const image = this.drawCellsImage(this.subpixelPasteResult(sp.sx, sp.sy, r), {
+                x1: Math.floor(r.x1 / 2), y1: Math.floor(r.y1 / 3),
+                x2: Math.floor(r.x2 / 2), y2: Math.floor(r.y2 / 3)
+            }, this._subpixelPasteImage, true);
+            this.setOverlay('paste-subpixel', [{ ...r, whole: true }], true, [image]);
             return;
         }
 
@@ -1338,20 +1401,73 @@ class CanvasRenderer {
         if (key === this._pastePreviewKey) return;
         this._pastePreviewKey = key;
 
-        // Rows can differ in length (pasted text), so match pasteAt row by row,
-        // merging consecutive rows of equal length into one rect
-        const rects = [];
-        this.clipboard.forEach((row, dy) => {
-            if (row.length === 0) return;
-            const y = c.cellY + dy;
-            const last = rects[rects.length - 1];
-            if (last && last.y2 === y - 1 && last.len === row.length) {
-                last.y2 = y;
-            } else {
-                rects.push({ x1: c.cellX, y1: y, x2: c.cellX + row.length - 1, y2: y, len: row.length });
-            }
+        const width = Math.max(...this.clipboard.map(row => row.length));
+        const box = this.clipRect({
+            x1: c.cellX, y1: c.cellY,
+            x2: c.cellX + width - 1, y2: c.cellY + this.clipboard.length - 1
         });
-        this.setOverlay('paste', rects.map(r => this.clipRect(r)).filter(Boolean));
+        this.setOverlay('paste', box ? [{ ...box, whole: true }] : [], false,
+            box ? [this.pastePreviewImage(c.cellX, c.cellY)] : []);
+    }
+
+    // The clipboard drawn as it pastes at cell (x, y). Drawing depends only
+    // on where (x, y) falls between device pixels, so images are cached per
+    // rounding phase and moved by whole device pixels: moving a big paste
+    // preview is just an image copy.
+    pastePreviewImage(x, y) {
+        if (this._pasteImagesFor !== this.clipboard) {
+            this._pasteImages.clear();
+            this._pasteImagesFor = this.clipboard;
+        }
+        const fx = x * CELL_W * this._scaleX, fy = y * CELL_H * this._scaleY;
+        const key = Math.round((fx - Math.floor(fx)) * 1000) + ',' + Math.round((fy - Math.floor(fy)) * 1000);
+        let cached = this._pasteImages.get(key);
+        if (!cached) {
+            // As pasteAt places them: a wide char's tail goes with its head,
+            // and a tail without its head becomes a blank cell
+            const cells = [];
+            this.clipboard.forEach((row, dy) => row.forEach((cell, dx) => {
+                if (cell.type === 'wide-tail' && dx > 0 && isWideHead(row[dx - 1])) return;
+                const placed = cell.type === 'wide-tail' ? { ...cell, type: 'sextant' } : cell;
+                if (placed !== cell) clearCell(placed);
+                cells.push({ x: x + dx, y: y + dy, cell: placed });
+            }));
+            const width = Math.max(...this.clipboard.map(row => row.length));
+            const rectangular = this.clipboard.every(row => row.length === width); // not ragged pasted text
+            cached = this.drawCellsImage(cells, { x1: x, y1: y, x2: x + width - 1, y2: y + this.clipboard.length - 1 },
+                undefined, rectangular);
+            this._pasteImages.set(key, cached);
+        }
+        return { image: cached.image, x: Math.round(fx), y: Math.round(fy) };
+    }
+
+    // The cells covering subpixel rect r as they will look after pasting the
+    // subpixel clipboard at (sx, sy): copies of the canvas cells with the
+    // clipboard's subpixels and colours applied, as pasteAtSubpixel does
+    subpixelPasteResult(sx, sy, r) {
+        const cells = new Map();
+        for (let py = r.y1; py <= r.y2; py++) {
+            for (let px = r.x1; px <= r.x2; px++) {
+                const sp = this.subpixelAt(px, py);
+                if (!sp) continue;
+                const key = sp.cellX + ',' + sp.cellY;
+                let cell = cells.get(key);
+                if (!cell) {
+                    cell = structuredClone(sp.cell);
+                    // Painting over half of a wide char blanks it
+                    if (cell.type === 'wide-tail' || isWideHead(cell)) clearCell(cell);
+                    cells.set(key, cell);
+                }
+                const data = this.subpixelClipboard[py - sy][px - sx];
+                setCellSubpixel(cell, sp.row, sp.col, data.filled);
+                if (data.fg) cell.fg = { ...data.fg };
+                if (data.bg) cell.bg = { ...data.bg };
+            }
+        }
+        return [...cells].map(([key, cell]) => {
+            const [x, y] = key.split(',').map(Number);
+            return { x, y, cell };
+        });
     }
 
     clearPastePreview() {

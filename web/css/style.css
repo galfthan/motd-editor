@@ -475,7 +475,6 @@ main {
 .canvas {
     --overlay-selection: var(--accent);
     --overlay-paste: var(--success);
-    --overlay-paste-fill: rgba(0, 0, 0, 0.3); /* dims the cells a paste covers */
     --overlay-preview: #ff9800;               /* box / line tool */
     --overlay-hover: #c678dd;                 /* the cell under the pointer */
 }
