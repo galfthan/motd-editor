@@ -79,6 +79,7 @@ class CanvasRenderer {
         this.ctx = null;                // 2D context of the grid canvas
         this._onPixelRatioChange = () => this.render();
         this._glyphStyles = new Map();  // .glyph-* class → { font, transform, baseline }
+        this._shadePatterns = new Map(); // shade + colour → CanvasPattern (see fillShape)
         this._requestedFonts = new Set();
 
         // Overlay divs per decoration kind (see setOverlay)
@@ -271,6 +272,7 @@ class CanvasRenderer {
         // Opaque (every pixel is drawn), which also lets the browser use
         // subpixel antialiasing for text, like the DOM did
         this.ctx = gridCanvas.getContext('2d', { alpha: false });
+        this._shadePatterns.clear(); // patterns belong to the old context
         // CSS px → device px (drawCell snaps rects to whole device pixels)
         this._scaleX = gridCanvas.width / width;
         this._scaleY = gridCanvas.height / height;
@@ -468,18 +470,18 @@ class CanvasRenderer {
 
         const rects = BLOCK_SHAPES.get(code);
         if (rects) {
-            for (const [x0, y0, x1, y1, alpha = 1] of rects) {
-                ctx.globalAlpha = alpha;
+            for (const [x0, y0, x1, y1, shade] of rects) {
                 const l = g.X(ux(x0)), t = g.Y(uy(y0));
-                ctx.fillRect(l, t, g.X(ux(x1)) - l, g.Y(uy(y1)) - t);
+                ctx.beginPath();
+                ctx.rect(l, t, g.X(ux(x1)) - l, g.Y(uy(y1)) - t);
+                this.fillShape(shade, g);
             }
             return;
         }
 
         const polygons = LEGACY_POLYGONS.get(code);
         if (polygons) {
-            const [alpha, ...polys] = polygons;
-            ctx.globalAlpha = alpha;
+            const [shade, ...polys] = polygons;
             ctx.beginPath();
             for (const poly of polys) {
                 poly.forEach(([u, v], i) => {
@@ -488,7 +490,7 @@ class CanvasRenderer {
                 });
                 ctx.closePath();
             }
-            ctx.fill();
+            this.fillShape(shade, g);
             return;
         }
 
@@ -536,6 +538,40 @@ class CanvasRenderer {
         }
 
         this.drawBoxChar(code, g);
+    }
+
+    // Fill the current path solid, or with a shade's dot pattern (see
+    // SHADE_PATTERNS) in the foreground colour. The pattern is anchored to
+    // the canvas origin and scaled from CSS px without smoothing, so dots
+    // stay crisp and line up across cells.
+    fillShape(shade, g) {
+        const ctx = this.ctx;
+        if (!shade) {
+            ctx.fill();
+            return;
+        }
+        const key = shade + '|' + ctx.fillStyle;
+        let pattern = this._shadePatterns.get(key);
+        if (!pattern) {
+            const tile = document.createElement('canvas');
+            tile.width = tile.height = 4;
+            const tileCtx = tile.getContext('2d');
+            tileCtx.fillStyle = ctx.fillStyle;
+            for (let y = 0; y < 4; y++) {
+                for (let x = 0; x < 4; x++) {
+                    if (SHADE_PATTERNS[shade](x, y)) tileCtx.fillRect(x, y, 1, 1);
+                }
+            }
+            pattern = ctx.createPattern(tile, 'repeat');
+            this._shadePatterns.set(key, pattern);
+        }
+        ctx.save();
+        ctx.clip();
+        ctx.setTransform(g.kx, 0, 0, g.ky, 0, 0);
+        ctx.imageSmoothingEnabled = false;
+        ctx.fillStyle = pattern;
+        ctx.fillRect(g.left, g.top, g.w, CELL_H);
+        ctx.restore();
     }
 
     // Box drawing (U+2500-257F): lines run from the cell centre to the edges
