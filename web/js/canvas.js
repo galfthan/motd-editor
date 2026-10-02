@@ -306,8 +306,10 @@ class CanvasRenderer {
         } else {
             for (const { x, y } of change.cells) this.updateCell(x, y);
         }
-        // Keep the text cursor in bounds and off wide chars' tails
-        if (this.textCursor) this.setTextCursor(this.textCursor.x, this.textCursor.y);
+        // Put the text cursor back where it was at that point (e.g. where
+        // undone typing started), in bounds and off wide chars' tails
+        const cursor = change.cursor || this.textCursor;
+        if (cursor && this.tool === 'text') this.setTextCursor(cursor.x, cursor.y);
     }
 
     // Give a cell the currently picked colours

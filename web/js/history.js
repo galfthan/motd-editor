@@ -14,7 +14,8 @@
 //                                 begin(label); fn(); end() — returns fn's
 //                                 result, and ends the step even if fn throws.
 //   history.undo() / redo()       Restore the canvas; returns the change made
-//                                 ({ label, wholeCanvas, cells: [{ x, y }] })
+//                                 ({ label, wholeCanvas, cells: [{ x, y }],
+//                                 cursor: the text cursor at that point })
 //                                 or null when there is nothing to do (or a
 //                                 step is still open).
 //   history.canUndo() / canRedo(), undoLabel() / redoLabel()
@@ -153,13 +154,22 @@ class EditHistory {
     }
 
     // A step: `cells` holds packed "before" records of touched cells; `keys`
-    // (while recording) the cells already recorded
+    // (while recording) the cells already recorded; `cursor` the text cursor
+    // before and after it, so undo/redo can put the cursor back
     newStep(label, group) {
-        return { label, group, cells: [], keys: new Set(), snapshot: null };
+        return { label, group, cells: [], keys: new Set(), snapshot: null, cursor: { before: null, after: null } };
+    }
+
+    textCursor() {
+        const c = this.target.textCursor;
+        return c ? { x: c.x, y: c.y } : null;
     }
 
     begin(label = 'Edit', group = null) {
-        if (this.depth++ === 0) this.step = this.newStep(label, group);
+        if (this.depth++ === 0) {
+            this.step = this.newStep(label, group);
+            this.step.cursor.before = this.textCursor();
+        }
     }
 
     end() {
@@ -167,6 +177,7 @@ class EditHistory {
         if (--this.depth > 0) return;
         const step = this.step;
         this.step = null;
+        step.cursor.after = this.textCursor();
         this.commit(step);
     }
 
@@ -253,6 +264,7 @@ class EditHistory {
     // Add a step's records to an earlier one, keeping the earlier "before"
     // copy of cells both touched
     mergeInto(top, step) {
+        top.cursor.after = step.cursor.after;
         const keys = new Set();
         for (let i = 0; i < top.cells.length; i += RECORD_SIZE) {
             keys.add(top.cells[i + 1] * 65536 + top.cells[i]);
@@ -309,7 +321,8 @@ class EditHistory {
         const step = from.pop();
         const inverse = this.newStep(step.label, step.group);
         inverse.keys = null;
-        const change = { label: step.label, wholeCanvas: !!step.snapshot, cells: [] };
+        inverse.cursor = { before: step.cursor.after, after: step.cursor.before };
+        const change = { label: step.label, wholeCanvas: !!step.snapshot, cells: [], cursor: step.cursor.before };
 
         if (step.snapshot) {
             inverse.snapshot = snapshotCanvas(this.target.canvas);
