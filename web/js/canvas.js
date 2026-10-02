@@ -492,6 +492,49 @@ class CanvasRenderer {
             return;
         }
 
+        const stripes = LEGACY_STRIPES.get(code);
+        if (stripes) {
+            // Parallelogram stripes 2 CSS px wide every 4 px across, slanted
+            // to the cell's 1:2 aspect, in canvas coordinates (CSS px)
+            const PERIOD = 4, WIDTH = 2;
+            const y0 = g.top, y1 = g.top + CELL_H;
+            const shift = (y) => stripes * y / 2; // x offset of a stripe at height y
+            ctx.setTransform(g.kx, 0, 0, g.ky, 0, 0);
+            ctx.beginPath();
+            const kMin = Math.floor((g.left - Math.max(shift(y0), shift(y1))) / PERIOD) - 1;
+            const kMax = Math.ceil((g.left + g.w - Math.min(shift(y0), shift(y1))) / PERIOD) + 1;
+            for (let k = kMin; k <= kMax; k++) {
+                const x = k * PERIOD;
+                ctx.moveTo(x + shift(y0), y0);
+                ctx.lineTo(x + WIDTH + shift(y0), y0);
+                ctx.lineTo(x + WIDTH + shift(y1), y1);
+                ctx.lineTo(x + shift(y1), y1);
+                ctx.closePath();
+            }
+            ctx.fill();
+            return;
+        }
+
+        const lines = LEGACY_LINES.get(code);
+        if (lines) {
+            ctx.lineWidth = Math.max(1, Math.round(2 * Math.min(g.kx, g.ky)));
+            ctx.lineJoin = 'miter';
+            ctx.beginPath();
+            for (const line of lines) {
+                line.forEach(([u, v], i) => {
+                    const px = g.X(ux(u)), py = g.Y(uy(v));
+                    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                });
+            }
+            if (code === 0x1FBAF) { // the vertical stroke across the middle
+                ctx.moveTo(g.X(ux(1 / 2)), g.Y(uy(1 / 3)));
+                ctx.lineTo(g.X(ux(1 / 2)), g.Y(uy(2 / 3)));
+            }
+            if (code === 0x1FBAE) ctx.closePath();
+            ctx.stroke();
+            return;
+        }
+
         this.drawBoxChar(code, g);
     }
 

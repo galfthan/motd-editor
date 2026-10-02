@@ -47,6 +47,23 @@ const BLOCK_SHAPES = new Map();
     });
     add(0x1FB8C, [0, 0, 1 / 2, 1, 0.5]); add(0x1FB8D, [1 / 2, 0, 1, 1, 0.5]); // half medium shades
     add(0x1FB8E, [0, 0, 1, 1 / 2, 0.5]); add(0x1FB8F, [0, 1 / 2, 1, 1, 0.5]);
+    add(0x1FB90, [0, 0, 1, 1, 0.5]);                                 // inverse medium shade
+    add(0x1FB91, [0, 0, 1, 1 / 2], [0, 1 / 2, 1, 1, 0.5]);           // upper half block + lower half shade
+    add(0x1FB92, [0, 0, 1, 1 / 2, 0.5], [0, 1 / 2, 1, 1]);           // upper half shade + lower half block
+    add(0x1FB94, [0, 0, 1 / 2, 1, 0.5], [1 / 2, 0, 1, 1]);           // left half shade + right half block
+    // Checker board fills: 4x4 squares, the inverse starting with a gap
+    const checker = (phase) => {
+        const squares = [];
+        for (let i = 0; i < 4; i++) {
+            for (let j = 0; j < 4; j++) {
+                if ((i + j) % 2 === phase) squares.push([i / 4, j / 4, (i + 1) / 4, (j + 1) / 4]);
+            }
+        }
+        return squares;
+    };
+    add(0x1FB95, ...checker(0));
+    add(0x1FB96, ...checker(1));
+    add(0x1FB97, [0, 1 / 8, 1, 3 / 8], [0, 5 / 8, 1, 7 / 8]);        // heavy horizontal fill (tiles vertically)
     add(0x1FBCE, [0, 0, 2 / 3, 1]);                                  // left 2/3 block
     add(0x1FBCF, [0, 0, 1 / 3, 1]);                                  // left 1/3 block
     add(0x1FBE4, [1 / 4, 0, 3 / 4, 1 / 2]); add(0x1FBE5, [1 / 4, 1 / 2, 3 / 4, 1]); // centred 1/4 blocks
@@ -117,6 +134,36 @@ const LEGACY_POLYGONS = new Map([
     [0x1FB9F, [0.5, [[0, 0], [1, 1], [0, 1]]]], // lower left triangular medium shade
 ]);
 
+// Diagonal stripe fills, drawn in canvas-wide coordinates so the stripes run
+// on seamlessly from cell to cell: code → direction (+1 "\\", -1 "/")
+const LEGACY_STRIPES = new Map([[0x1FB98, 1], [0x1FB99, -1]]);
+
+// Light diagonal lines between a cell's corners (U/L = upper/lower, L/R =
+// left/right), edge midpoints (UC, LC, ML, MR) and centre (MC), from the
+// Unicode names "BOX DRAWINGS LIGHT DIAGONAL P TO Q [TO R...] [AND ...]":
+// code → list of polylines
+const LEGACY_LINES = (() => {
+    const P = {
+        UL: [0, 0], UC: [1 / 2, 0], UR: [1, 0], ML: [0, 1 / 2], MC: [1 / 2, 1 / 2],
+        MR: [1, 1 / 2], LL: [0, 1], LC: [1 / 2, 1], LR: [1, 1]
+    };
+    const paths = {
+        0x1FBA0: 'UC ML', 0x1FBA1: 'UC MR', 0x1FBA2: 'ML LC', 0x1FBA3: 'MR LC',
+        0x1FBA4: 'UC ML LC', 0x1FBA5: 'UC MR LC', 0x1FBA6: 'ML LC MR', 0x1FBA7: 'ML UC MR',
+        0x1FBA8: 'UC ML, MR LC', 0x1FBA9: 'UC MR, ML LC', 0x1FBAA: 'UC MR LC ML', 0x1FBAB: 'UC ML LC MR',
+        0x1FBAC: 'ML UC MR LC', 0x1FBAD: 'MR UC ML LC', 0x1FBAE: 'UC MR LC ML UC', // diamond
+        0x1FBAF: 'ML MR', // horizontal with vertical stroke (stroke added in drawShape)
+        // Unicode 16
+        0x1FBD0: 'MR LL', 0x1FBD1: 'UR ML', 0x1FBD2: 'UL MR', 0x1FBD3: 'ML LR',
+        0x1FBD4: 'UL LC', 0x1FBD5: 'UC LR', 0x1FBD6: 'UR LC', 0x1FBD7: 'UC LL',
+        0x1FBD8: 'UL MC UR', 0x1FBD9: 'UR MC LR', 0x1FBDA: 'LL MC LR', 0x1FBDB: 'UL MC LL',
+        0x1FBDC: 'UL LC UR', 0x1FBDD: 'UR ML LR', 0x1FBDE: 'LL UC LR', 0x1FBDF: 'UL MR LL'
+    };
+    return new Map(Object.entries(paths).map(([code, path]) => [
+        Number(code), path.split(', ').map(line => line.split(' ').map(name => P[name]))
+    ]));
+})();
+
 // Box drawing, U+2500-257F. Most chars are described by their arms (styles
 // per direction: 0 none, 1 light, 2 heavy, 3 double), from the box tool's own
 // BoxDrawLookup table plus the half-line chars it doesn't use.
@@ -151,6 +198,7 @@ function boxArms(code) {
 // Whether the grid canvas draws this char itself rather than with a font
 function hasGlyphShape(code) {
     return BLOCK_SHAPES.has(code) || LEGACY_POLYGONS.has(code) ||
+        LEGACY_STRIPES.has(code) || LEGACY_LINES.has(code) ||
         (code >= 0x2500 && code <= 0x257F &&
          (boxArms(code) !== null || BOX_DASHES.has(code) || BOX_ARCS.has(code) ||
           code === 0x2571 || code === 0x2572 || code === 0x2573));
