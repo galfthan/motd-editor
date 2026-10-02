@@ -130,6 +130,7 @@ class Toolbar {
 
         this.setupMenuBar();
         this.setupEditMenu();
+        this.setupGridToggle();
         this.setupToolButtons();
         this.setupColorPickers();
         this.setupFileInputs();
@@ -208,6 +209,21 @@ class Toolbar {
         update();
     }
 
+    // Canvas > Show Grid, remembered in this browser (storage may be
+    // unavailable, e.g. in a private window: then the grid is just shown)
+    setupGridToggle() {
+        const btn = document.querySelector('button[data-action="toggle-grid"]');
+        const KEY = 'motd-editor.showGrid';
+        this.setShowGrid = (show) => {
+            btn.setAttribute('aria-checked', String(show));
+            this.renderer.setShowGrid(show);
+            try { localStorage.setItem(KEY, String(show)); } catch (e) { /* not saved */ }
+        };
+        let show = true;
+        try { show = localStorage.getItem(KEY) !== 'false'; } catch (e) { /* default */ }
+        this.setShowGrid(show);
+    }
+
     handleMenuAction(action) {
         switch (action) {
             case 'undo':
@@ -231,6 +247,9 @@ class Toolbar {
                 break;
             case 'save-as':
                 this.showSaveAsDialog();
+                break;
+            case 'toggle-grid':
+                this.setShowGrid(!this.renderer.showGrid);
                 break;
             case 'resize':
                 this.showResizeDialog();

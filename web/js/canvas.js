@@ -6,14 +6,18 @@ const CELL_W = 18;
 const CELL_H = 34;
 
 // Subpixel edges within a cell, in CSS px from its top-left corner: the
-// cell's 16x32 inside (within the 1px border) split into 2x3 equal parts.
-// Drawing, hit-testing and the subpixel selection overlay all use these.
+// part of the cell inside the 1px grid border (when the grid is shown) split
+// into 2x3 equal parts. Drawing, hit-testing and the subpixel selection
+// overlay all use these (via CanvasRenderer.subYEdges for the rows).
 const SUB_X_EDGES = [0, CELL_W / 2, CELL_W];
-const SUB_Y_EDGES = [0, 1 + (CELL_H - 2) / 3, 1 + 2 * (CELL_H - 2) / 3, CELL_H];
 
-// Left / top edge (CSS px) of subpixel column sx / row sy
+function subpixelYEdges(border) {
+    const h = CELL_H - 2 * border;
+    return [0, border + h / 3, border + 2 * h / 3, CELL_H];
+}
+
+// Left edge (CSS px) of subpixel column sx
 function subpixelEdgeX(sx) { return Math.floor(sx / 2) * CELL_W + SUB_X_EDGES[sx % 2]; }
-function subpixelEdgeY(sy) { return Math.floor(sy / 3) * CELL_H + SUB_Y_EDGES[sy % 3]; }
 
 // Cap on the grid canvas's backing store, in device pixels (see render)
 const MAX_CANVAS_PIXELS = 16 * 1024 * 1024;
@@ -80,6 +84,8 @@ class CanvasRenderer {
 
         // Grid canvas drawing state (see render / drawCell)
         this.ctx = null;                // 2D context of the grid canvas
+        this.showGrid = true;           // 1px border around each cell (see setShowGrid)
+        this.subYEdges = subpixelYEdges(1);
         this._onPixelRatioChange = () => this.render();
         this._glyphStyles = new Map();  // .glyph-* class → { font, transform, baseline }
         this._shadePatterns = new Map(); // shade + colour → CanvasPattern (see fillShape)
@@ -396,6 +402,18 @@ class CanvasRenderer {
         this._pixelRatioQuery.addEventListener('change', this._onPixelRatioChange);
     }
 
+    // Show or hide the 1px grid between cells. Without it the cells' contents
+    // and backgrounds run together, as they will in a terminal; subpixel rows
+    // then split the whole cell height.
+    setShowGrid(show) {
+        this.showGrid = show;
+        this.subYEdges = subpixelYEdges(show ? 1 : 0);
+        this.container.classList.toggle('no-grid', !show);
+        this.drawAll();
+        this.updateSubpixelSelectionDisplay();
+        this.clearPastePreview();
+    }
+
     // Colours the grid is drawn with, from the page's CSS. Read on full
     // redraws only; the CSS variables are static (no theme switching).
     readTheme() {
@@ -471,8 +489,10 @@ class CanvasRenderer {
         const g = this.cellGeometry(x, y, isWideHead(cell) ? 2 * CELL_W : CELL_W);
 
         ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.fillStyle = this.theme.border;
-        ctx.fillRect(g.X(0), g.Y(0), g.X(g.w) - g.X(0), g.Y(CELL_H) - g.Y(0));
+        if (this.showGrid) {
+            ctx.fillStyle = this.theme.border;
+            ctx.fillRect(g.X(0), g.Y(0), g.X(g.w) - g.X(0), g.Y(CELL_H) - g.Y(0));
+        }
         ctx.fillStyle = cell.bg.default ? this.theme.cellBg : `rgb(${cell.bg.r},${cell.bg.g},${cell.bg.b})`;
         ctx.fillRect(...g.inner);
 
@@ -509,10 +529,12 @@ class CanvasRenderer {
         const top = y * CELL_H;
         const X = (px) => Math.round((left + px) * kx);
         const Y = (py) => Math.round((top + py) * ky);
-        const bx = Math.max(1, Math.floor(kx)); // the 1 CSS px border
-        const by = Math.max(1, Math.floor(ky));
+        // The 1 CSS px grid border, or none when the grid is hidden
+        const border = this.showGrid ? 1 : 0;
+        const bx = border && Math.max(1, Math.floor(kx));
+        const by = border && Math.max(1, Math.floor(ky));
         const inner = [X(0) + bx, Y(0) + by, X(w) - X(0) - 2 * bx, Y(CELL_H) - Y(0) - 2 * by];
-        return { left, top, w, kx, ky, X, Y, inner };
+        return { left, top, w, kx, ky, X, Y, border, inner };
     }
 
     // Font glyph, styled by its .glyph-* class and centred like the old DOM cells
@@ -539,8 +561,8 @@ class CanvasRenderer {
         for (let row = 0; row < 3; row++) {
             for (let col = 0; col < 2; col++) {
                 if (!cell.subpixels[row][col]) continue;
-                const x0 = g.X(SUB_X_EDGES[col]), y0 = g.Y(SUB_Y_EDGES[row]);
-                this.ctx.fillRect(x0, y0, g.X(SUB_X_EDGES[col + 1]) - x0, g.Y(SUB_Y_EDGES[row + 1]) - y0);
+                const x0 = g.X(SUB_X_EDGES[col]), y0 = g.Y(this.subYEdges[row]);
+                this.ctx.fillRect(x0, y0, g.X(SUB_X_EDGES[col + 1]) - x0, g.Y(this.subYEdges[row + 1]) - y0);
             }
         }
     }
@@ -551,8 +573,8 @@ class CanvasRenderer {
         // Unit coords of the inside → CSS px in the cell. 0 and 1 map to the
         // cell's outer edges (the clip trims the border off), so shapes reach
         // the inside's edges exactly; interior thirds match the sextant rows.
-        const ux = (u) => u <= 0 ? 0 : u >= 1 ? g.w : 1 + u * (g.w - 2);
-        const uy = (v) => v <= 0 ? 0 : v >= 1 ? CELL_H : 1 + v * (CELL_H - 2);
+        const ux = (u) => u <= 0 ? 0 : u >= 1 ? g.w : g.border + u * (g.w - 2 * g.border);
+        const uy = (v) => v <= 0 ? 0 : v >= 1 ? CELL_H : g.border + v * (CELL_H - 2 * g.border);
 
         const rects = BLOCK_SHAPES.get(code);
         if (rects) {
@@ -917,11 +939,21 @@ class CanvasRenderer {
     cellCoordsFromEvent(e) {
         if (!this.canvas) return null;
         const rect = this.container.getBoundingClientRect();
-        const relX = e.clientX - rect.left;
-        const relY = e.clientY - rect.top;
-        const cellX = Math.max(0, Math.min(this.canvas.width  - 1, Math.floor(relX / CELL_W)));
-        const cellY = Math.max(0, Math.min(this.canvas.height - 1, Math.floor(relY / CELL_H)));
+        const cellX = this.cellIndexAt(e.clientX - rect.left, CELL_W, this._scaleX, this.canvas.width);
+        const cellY = this.cellIndexAt(e.clientY - rect.top, CELL_H, this._scaleY, this.canvas.height);
         return { cellX, cellY };
+    }
+
+    // The cell containing a position (CSS px from the canvas edge) along one
+    // axis, clamped to the canvas. Decided in device pixels against the same
+    // rounded cell edges drawCell uses, so the boundary pixels between cells
+    // (visible when the grid is hidden) belong to the cell drawn there.
+    cellIndexAt(rel, size, scale = 1, count) {
+        let i = Math.floor(rel / size);
+        const dev = rel * scale;
+        if (dev < Math.round(i * size * scale)) i--;
+        else if (dev >= Math.round((i + 1) * size * scale)) i++;
+        return Math.max(0, Math.min(count - 1, i));
     }
 
     // Subpixel coords from a mouse event, clamped to canvas extents.
@@ -930,15 +962,15 @@ class CanvasRenderer {
         const rect = this.container.getBoundingClientRect();
         const relX = Math.max(0, Math.min(this.canvas.width  * CELL_W - 0.01, e.clientX - rect.left));
         const relY = Math.max(0, Math.min(this.canvas.height * CELL_H - 0.01, e.clientY - rect.top));
-        const cellX = Math.floor(relX / CELL_W);
-        const cellY = Math.floor(relY / CELL_H);
+        const cellX = this.cellIndexAt(relX, CELL_W, this._scaleX, this.canvas.width);
+        const cellY = this.cellIndexAt(relY, CELL_H, this._scaleY, this.canvas.height);
         // Compare in device pixels against the same rounded edges drawCell
         // uses, so a click lands in exactly the subpixel drawn under it
         const g = this.cellGeometry(cellX, cellY, CELL_W);
         const devX = relX * g.kx;
         const devY = relY * g.ky;
         const col = devX < g.X(SUB_X_EDGES[1]) ? 0 : 1;
-        const row = devY < g.Y(SUB_Y_EDGES[1]) ? 0 : devY < g.Y(SUB_Y_EDGES[2]) ? 1 : 2;
+        const row = devY < g.Y(this.subYEdges[1]) ? 0 : devY < g.Y(this.subYEdges[2]) ? 1 : 2;
         return { sx: cellX * 2 + col, sy: cellY * 3 + row, cellX, cellY };
     }
 
@@ -1001,7 +1033,8 @@ class CanvasRenderer {
         while (els.length > rects.length) els.pop().remove();
 
         const edgeX = subpixel ? subpixelEdgeX : (x) => x * CELL_W;
-        const edgeY = subpixel ? subpixelEdgeY : (y) => y * CELL_H;
+        const edgeY = subpixel ? (sy) => Math.floor(sy / 3) * CELL_H + this.subYEdges[sy % 3]
+            : (y) => y * CELL_H;
         rects.forEach((r, i) => {
             let el = els[i];
             if (!el) {

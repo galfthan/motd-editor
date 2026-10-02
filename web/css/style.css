@@ -501,6 +501,23 @@ main {
             transparent 12.667px 21.333px, var(--c) 21.333px 23.333px, transparent 23.333px 33px, var(--c) 33px);
 }
 
+/* Without the grid, subpixel rows split the whole 34px cell height */
+.canvas.no-grid .overlay.subpixel {
+    background-image:
+        linear-gradient(to right, var(--c) 1px, transparent 1px 8px, var(--c) 8px 10px, transparent 10px 17px, var(--c) 17px),
+        linear-gradient(to bottom, var(--c) 1px, transparent 1px 10.333px, var(--c) 10.333px 12.333px,
+            transparent 12.333px 21.667px, var(--c) 21.667px 23.667px, transparent 23.667px 33px, var(--c) 33px);
+}
+
+/* Show Grid menu item: check mark when on */
+.menu-check {
+    margin-left: 2rem;
+}
+
+.menu-dropdown button[aria-checked="false"] .menu-check {
+    visibility: hidden;
+}
+
 /* Selection styles */
 .overlay-selection,
 .overlay-subpixel-selection {
