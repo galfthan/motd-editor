@@ -129,6 +129,7 @@ class Toolbar {
         this.saveFormat = 'ansi';
 
         this.setupMenuBar();
+        this.setupEditMenu();
         this.setupToolButtons();
         this.setupColorPickers();
         this.setupFileInputs();
@@ -192,8 +193,29 @@ class Toolbar {
         this.openMenu = null;
     }
 
+    // Keep Undo/Redo enabled only when there is something to undo/redo
+    setupEditMenu() {
+        const undoBtn = document.querySelector('button[data-action="undo"]');
+        const redoBtn = document.querySelector('button[data-action="redo"]');
+        const history = this.renderer.history;
+        const update = () => {
+            undoBtn.disabled = !history.canUndo();
+            redoBtn.disabled = !history.canRedo();
+            undoBtn.title = history.undoLabel() ? `Undo ${history.undoLabel()}` : '';
+            redoBtn.title = history.redoLabel() ? `Redo ${history.redoLabel()}` : '';
+        };
+        history.onChange = update;
+        update();
+    }
+
     handleMenuAction(action) {
         switch (action) {
+            case 'undo':
+                this.renderer.undo();
+                break;
+            case 'redo':
+                this.renderer.redo();
+                break;
             case 'new':
                 if (confirm('Create a new canvas? Unsaved changes will be lost.')) {
                     this.renderer.createNew(80, 60, 'sextant');

@@ -86,6 +86,10 @@ class CanvasRenderer {
         this._overlays = {};
         this._pastePreviewKey = null; // Last previewed paste position
 
+        // Undo/redo (see history.js). strokeOpen: a mouse stroke's step is open.
+        this.history = new EditHistory(this);
+        this.strokeOpen = false;
+
         this.setupEventListeners();
         this.setupKeyboardShortcuts();
     }
@@ -137,6 +141,7 @@ class CanvasRenderer {
         if (tool !== 'text') {
             this.clearTextCursor();
         }
+        this.history.breakGroup();
     }
 
     isSelectTool() {
@@ -151,6 +156,16 @@ class CanvasRenderer {
         document.addEventListener('keydown', (e) => {
             if (e.target.tagName === 'INPUT') return;
 
+            // Ctrl+Z - undo, Ctrl+Shift+Z / Ctrl+Y - redo (checked before the
+            // text tool, so they also work while typing)
+            const key = e.key.toLowerCase();
+            if ((e.ctrlKey || e.metaKey) && !e.altKey && (key === 'z' || key === 'y')) {
+                e.preventDefault();
+                if (key === 'z' && !e.shiftKey) this.undo();
+                else this.redo();
+                return;
+            }
+
             // Text tool input handling (non-modifier keys only)
             if (this.tool === 'text' && this.textCursor && !e.ctrlKey && !e.metaKey && !e.altKey) {
                 if (e.key === 'Escape') {
@@ -159,7 +174,10 @@ class CanvasRenderer {
                     return;
                 }
                 e.preventDefault();
-                this.handleTextInput(e.key);
+                // Consecutive typing is one undo step; moving the cursor with
+                // the arrow keys starts a new one
+                if (e.key.startsWith('Arrow')) this.history.breakGroup();
+                this.history.record('Typing', () => this.handleTextInput(e.key), 'text');
                 return;
             }
 
@@ -192,10 +210,10 @@ class CanvasRenderer {
             if (mod && e.key === 'x') {
                 if (this.isSubpixelMode() && this.subpixelSelection) {
                     e.preventDefault();
-                    this.cutSelectionSubpixel();
+                    this.recordEdit('Cut', () => this.cutSelectionSubpixel());
                 } else if (this.selection) {
                     e.preventDefault();
-                    this.cutSelection();
+                    this.recordEdit('Cut', () => this.cutSelection());
                 }
                 return;
             }
@@ -227,6 +245,69 @@ class CanvasRenderer {
 
     setBgColor(color) {
         this.bgColor = color;
+    }
+
+    // --- Undo / redo ---
+    //
+    // Every write to canvas cells must be preceded by beforeChange() for the
+    // cells it writes (or snapshotCanvas() when the whole canvas changes), so
+    // the open undo step keeps their "before" copies.
+    //
+    // Collaboration API: wrap any sequence of editor operations in
+    // recordEdit(label, fn), or history.begin(label) ... history.end(), to make
+    // it one undo step named `label` (nested steps collapse into the outer one).
+    // undo() / redo() apply and repaint; history.undoLabel() names the step.
+
+    recordEdit(label, fn) {
+        return this.history.record(label, fn);
+    }
+
+    // Record the cells in a rect (cell coords, clipped) before writing them;
+    // see EditHistory.touchRect
+    beforeChange(x1, y1, x2, y2) {
+        this.history.touchRect(x1, y1, x2, y2);
+    }
+
+    // Record the whole canvas before replacing, resizing or clearing it
+    snapshotCanvas() {
+        this.history.snapshot();
+    }
+
+    // A mouse stroke (mousedown to mouseup) is one undo step
+    beginStroke(label) {
+        if (this.strokeOpen) return;
+        this.strokeOpen = true;
+        this.history.begin(label);
+    }
+
+    endStroke() {
+        if (!this.strokeOpen) return;
+        this.strokeOpen = false;
+        this.history.end();
+    }
+
+    undo() {
+        this.applyHistoryChange(() => this.history.undo());
+    }
+
+    redo() {
+        this.applyHistoryChange(() => this.history.redo());
+    }
+
+    // Run an undo/redo and repaint what it changed. Drags and selections are
+    // dropped first (which also commits an open stroke, so it can be undone).
+    applyHistoryChange(apply) {
+        this.resetInteractionState();
+        const change = apply();
+        if (!change) return;
+        if (change.wholeCanvas) {
+            this.render();
+            this.updateStatus();
+        } else {
+            for (const { x, y } of change.cells) this.updateCell(x, y);
+        }
+        // Keep the text cursor in bounds and off wide chars' tails
+        if (this.textCursor) this.setTextCursor(this.textCursor.x, this.textCursor.y);
     }
 
     // Give a cell the currently picked colours
@@ -726,21 +807,29 @@ class CanvasRenderer {
         this.updateCellRect(Math.floor(r.x1 / 2), Math.floor(r.y1 / 3), Math.floor(r.x2 / 2), Math.floor(r.y2 / 3));
     }
 
+    // beforeChange() for the cells covering a rectangle in subpixel coords
+    beforeSubpixelChange(r) {
+        this.beforeChange(Math.floor(r.x1 / 2), Math.floor(r.y1 / 3), Math.floor(r.x2 / 2), Math.floor(r.y2 / 3));
+    }
+
     handleMouseDown(e) {
         // Paste mode takes priority over any tool
         if (this.pasteMode) {
             // Same hit-testing as showPastePreview, so paste lands where previewed
             if (this.isSubpixelMode() && this.subpixelClipboard) {
                 const sp = this.subpixelCoordsFromEvent(e);
-                if (sp) this.pasteAtSubpixel(sp.sx, sp.sy);
+                if (sp) this.recordEdit('Paste', () => this.pasteAtSubpixel(sp.sx, sp.sy));
             } else if (this.clipboard) {
                 const c = this.cellCoordsFromEvent(e);
-                if (c) this.pasteAt(c.cellX, c.cellY);
+                if (c) this.recordEdit('Paste', () => this.pasteAt(c.cellX, c.cellY));
             }
             return;
         }
 
         this.isDrawing = true;
+        // Tools that change nothing (select, pick, text click) leave an empty
+        // step, which is dropped
+        this.beginStroke(this.tool.charAt(0).toUpperCase() + this.tool.slice(1));
 
         if (this.tool === 'pick') {
             this.handlePickTool(e);
@@ -799,6 +888,7 @@ class CanvasRenderer {
         this.subpixelSelectionStart = null;
         this.isDrawing = false;
         this.lastPoint = null;
+        this.endStroke();
     }
 
     handlePickTool(e) {
@@ -982,6 +1072,7 @@ class CanvasRenderer {
         this.copySelection();
 
         const { x1, y1, x2, y2 } = this.selection;
+        this.beforeChange(x1, y1, x2, y2);
         for (let y = y1; y <= y2; y++) {
             for (let x = x1; x <= x2; x++) {
                 detachWide(this.canvas.cells, x, y);
@@ -996,9 +1087,10 @@ class CanvasRenderer {
     pasteAt(x, y) {
         if (!this.clipboard || this.clipboard.length === 0) return;
 
-        let maxWidth = 0;
+        // One column extra for the tail of a wide char at the right edge
+        const maxWidth = Math.max(...this.clipboard.map(row => row.length));
+        this.beforeChange(x, y, x + maxWidth, y + this.clipboard.length - 1);
         this.clipboard.forEach((row, dy) => {
-            maxWidth = Math.max(maxWidth, row.length);
             row.forEach((cell, dx) => {
                 // A wide char's tail was already placed along with its head
                 if (cell.type === 'wide-tail' && dx > 0 && isWideHead(row[dx - 1])) return;
@@ -1146,6 +1238,7 @@ class CanvasRenderer {
         this.copySelectionSubpixel();
 
         const r = this.subpixelSelection;
+        this.beforeSubpixelChange(r);
         for (let sy = r.y1; sy <= r.y2; sy++) {
             for (let sx = r.x1; sx <= r.x2; sx++) {
                 const sp = this.subpixelAt(sx, sy);
@@ -1162,6 +1255,12 @@ class CanvasRenderer {
     pasteAtSubpixel(sx, sy) {
         if (!this.subpixelClipboard || this.subpixelClipboard.length === 0) return;
 
+        const r = {
+            x1: sx, y1: sy,
+            x2: sx + this.subpixelClipboard[0].length - 1,
+            y2: sy + this.subpixelClipboard.length - 1
+        };
+        this.beforeSubpixelChange(r);
         this.subpixelClipboard.forEach((row, dy) => {
             row.forEach((data, dx) => {
                 const sp = this.subpixelAt(sx + dx, sy + dy);
@@ -1173,11 +1272,7 @@ class CanvasRenderer {
             });
         });
 
-        this.updateSubpixelRect({
-            x1: sx, y1: sy,
-            x2: sx + this.subpixelClipboard[0].length - 1,
-            y2: sy + this.subpixelClipboard.length - 1
-        });
+        this.updateSubpixelRect(r);
         this.pasteMode = false;
         this.clearPastePreview();
     }
@@ -1220,6 +1315,7 @@ class CanvasRenderer {
             return null;
         }
 
+        this.beforeChange(cellX, cellY, cellX, cellY);
         // Erase keeps the cell's colours so the remaining subpixels are unchanged
         if (filled) this.applyCurrentColors(cell);
         detachWide(this.canvas.cells, cellX, cellY);
@@ -1245,6 +1341,7 @@ class CanvasRenderer {
             return;
         }
 
+        this.beforeChange(cellX, cellY, cellX + 1, cellY);
         this.applyCurrentColors(row[cellX]);
         setGridChar(this.canvas.cells, cellX, cellY, this.selectedChar);
         this.updateCell(cellX, cellY);
@@ -1284,6 +1381,7 @@ class CanvasRenderer {
         // Fill: when there is a border, fill the interior only; otherwise fill the whole area
         if (this.boxFillMode > 0) {
             const inset = this.boxLineStyle > 0 ? 1 : 0;
+            this.beforeChange(x1 + inset, y1 + inset, x2 - inset, y2 - inset);
             for (let y = y1 + inset; y <= y2 - inset; y++) {
                 for (let x = x1 + inset; x <= x2 - inset; x++) {
                     const cell = this.canvas.cells[y][x];
@@ -1297,6 +1395,7 @@ class CanvasRenderer {
         }
 
         for (const c of computeBoxChars(x1, y1, x2, y2, this.boxLineStyle, this.canvas.cells, boxDrawLookup)) {
+            this.beforeChange(c.x, c.y, c.x, c.y);
             this.applyCurrentColors(this.canvas.cells[c.y][c.x]);
             setGridChar(this.canvas.cells, c.x, c.y, c.charCode);
         }
@@ -1326,6 +1425,7 @@ class CanvasRenderer {
             this.boxLineStyle, this.canvas.cells, boxDrawLookup
         );
         for (const c of chars) {
+            this.beforeChange(c.x, c.y, c.x, c.y);
             this.applyCurrentColors(this.canvas.cells[c.y][c.x]);
             setGridChar(this.canvas.cells, c.x, c.y, c.charCode);
             this.updateCell(c.x, c.y);
@@ -1361,6 +1461,7 @@ class CanvasRenderer {
     handleTextToolClick(e) {
         const c = this.cellCoordsFromEvent(e);
         if (!c) return;
+        this.history.breakGroup(); // Typing at a new spot is a new undo step
         this.setTextCursor(c.cellX, c.cellY);
     }
 
@@ -1379,6 +1480,7 @@ class CanvasRenderer {
     clearTextCursor() {
         this.clearTextCursorDisplay();
         this.textCursor = null;
+        this.history.breakGroup();
     }
 
     // The text cursor is a blinking overlay, two cells wide on a wide char
@@ -1469,6 +1571,7 @@ class CanvasRenderer {
     }
 
     setTextCell(x, y, charCode) {
+        this.beforeChange(x, y, x + 1, y);
         this.applyCurrentColors(this.canvas.cells[y][x]);
         setGridChar(this.canvas.cells, x, y, charCode);
         this.updateCell(x, y);
@@ -1490,31 +1593,44 @@ class CanvasRenderer {
         this.cancelDrag();
         this.isDrawing = false;
         this.lastPoint = null;
+        this.endStroke();
     }
 
     resize(width, height) {
         this.resetInteractionState();
-        resizeCanvas(this.canvas, width, height);
+        this.recordEdit('Resize', () => {
+            this.snapshotCanvas();
+            resizeCanvas(this.canvas, width, height);
+        });
         this.render();
         this.updateStatus();
     }
 
     clear() {
-        clearCanvas(this.canvas);
+        this.recordEdit('Clear', () => {
+            this.snapshotCanvas();
+            clearCanvas(this.canvas);
+        });
         this.drawAll();
     }
 
     createNew(width, height, mode) {
         this.resetInteractionState();
-        this.canvas = createCanvas(width, height);
-        this.canvas.mode = mode || 'sextant';
+        this.recordEdit('New', () => {
+            this.snapshotCanvas();
+            this.canvas = createCanvas(width, height);
+            this.canvas.mode = mode || 'sextant';
+        });
         this.render();
         this.updateStatus();
     }
 
     setCanvas(canvasData) {
         this.resetInteractionState();
-        this.canvas = canvasData;
+        this.recordEdit('Open', () => {
+            this.snapshotCanvas();
+            this.canvas = canvasData;
+        });
         this.render();
         this.updateStatus();
     }

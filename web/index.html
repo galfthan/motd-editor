@@ -24,6 +24,13 @@
                         <button data-action="save-as"><span class="menu-label">Save As...</span><span class="menu-shortcut">Ctrl+Shift+S</span></button>
                     </div>
                 </div>
+                <div class="menu-item" data-menu="edit">
+                    <button class="menu-trigger">Edit</button>
+                    <div class="menu-dropdown">
+                        <button data-action="undo"><span class="menu-label">Undo</span><span class="menu-shortcut">Ctrl+Z</span></button>
+                        <button data-action="redo"><span class="menu-label">Redo</span><span class="menu-shortcut">Ctrl+Shift+Z</span></button>
+                    </div>
+                </div>
                 <div class="menu-item" data-menu="canvas">
                     <button class="menu-trigger">Canvas</button>
                     <div class="menu-dropdown">
@@ -185,6 +192,7 @@
     <script src="js/boxdraw.js"></script>
     <script src="js/glyph-shapes.js"></script>
     <script src="js/emoji.js"></script>
+    <script src="js/history.js"></script>
     <script src="js/canvas.js"></script>
     <script src="js/toolbar.js"></script>
     <script src="js/app.js"></script>
