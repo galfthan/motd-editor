@@ -417,33 +417,18 @@ main {
     user-select: none;
 }
 
-.cell {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    background-color: var(--cell-bg);
-    width: 16px;
-    height: 32px;
+/* The grid is drawn on this canvas (CanvasRenderer.drawCell), as 18x34px
+   cells: a 1px var(--border) border around a 16x32 var(--cell-bg) inside */
+.grid-canvas {
     position: absolute;
+    left: 0;
+    top: 0;
+    display: block;
     cursor: crosshair;
-    border: 1px solid var(--border);
-    box-sizing: content-box;
-    /* Fixed-size cell: content changes never affect layout outside it */
-    contain: strict;
 }
 
-/* A wide char (CJK, emoji) spans two cells: its element covers the next
-   cell's position, and that cell (the tail) is hidden */
-.cell.wide {
-    width: calc(16px + 18px);
-}
-
-.cell.wide-tail {
-    display: none;
-}
-
-/* Glyph styles by character range (see CanvasRenderer.paintCellElement) */
+/* Glyph styles by character range, for the symbol palette and (read via a
+   probe element) the grid canvas; see CanvasRenderer.glyphStyle */
 .glyph-tiling,
 .glyph-legacy {
     font-family: 'Noto Sans Symbols 2', 'Cascadia Code', 'Consolas', monospace;
@@ -475,17 +460,12 @@ main {
  * --c: line colour, --w: line width. Tiles are one 18x34px cell.
  */
 /* Layers sized to the canvas (see CanvasRenderer.render) */
-.cell-layer,
 .overlay-layer {
     position: absolute;
     left: 0;
     top: 0;
     contain: strict;
-}
-
-.overlay-layer {
     pointer-events: none;
-    z-index: 1;
 }
 
 .overlay {
@@ -528,7 +508,8 @@ main {
 }
 
 /* Text cursor */
-.cell.text-cursor {
+.overlay.overlay-cursor {
+    background-image: none;
     outline: 2px solid #ffcc00;
     outline-offset: -2px;
     animation: text-cursor-blink 1s step-end infinite;
