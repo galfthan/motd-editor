@@ -397,6 +397,16 @@ main {
     contain: strict;
 }
 
+/* A wide char (CJK, emoji) spans two cells: its element covers the next
+   cell's position, and that cell (the tail) is hidden */
+.cell.wide {
+    width: calc(16px + 18px);
+}
+
+.cell.wide-tail {
+    display: none;
+}
+
 /* Glyph styles by character range (see CanvasRenderer.paintCellElement) */
 .glyph-tiling,
 .glyph-legacy {

@@ -62,6 +62,89 @@ function setCellChar(cell, charCode) {
     cell.subpixels = [[false, false], [false, false], [false, false]];
 }
 
+// --- Wide characters ---
+//
+// A wide char (charWidth 2: CJK, most emoji) takes two terminal columns, so it
+// occupies two cells: its own ("head", a normal 'custom' cell) and the cell to
+// its right, a 'wide-tail' continuation that displays and exports nothing.
+// Invariant: every wide head is directly followed by its tail and every tail
+// directly follows its head. Writes that could break this go through the
+// grid helpers below instead of setCellChar.
+
+function isWideHead(cell) {
+    return cell.type === 'custom' && charWidth(cell.charCode) === 2;
+}
+
+function makeWideTail(cell) {
+    clearCell(cell);
+    cell.type = 'wide-tail';
+}
+
+// If (x, y) is half of a wide char, blank the other half. Call before
+// overwriting a cell in any way.
+function detachWide(cells, x, y) {
+    const row = cells[y];
+    if (row[x].type === 'wide-tail') {
+        if (x > 0) clearCell(row[x - 1]);
+    } else if (isWideHead(row[x]) && x + 1 < row.length) {
+        clearCell(row[x + 1]);
+    }
+}
+
+// Give the wide head just written at (x, y) its tail. A wide char in the last
+// column doesn't fit and becomes a blank cell instead.
+function claimWideTail(cells, x, y) {
+    const row = cells[y];
+    if (x + 1 >= row.length) {
+        clearCell(row[x]);
+        return;
+    }
+    detachWide(cells, x + 1, y);
+    const tail = row[x + 1];
+    makeWideTail(tail);
+    tail.fg = { ...row[x].fg };
+    tail.bg = { ...row[x].bg };
+}
+
+// Set cell (x, y) to a character, keeping wide chars consistent
+function setGridChar(cells, x, y, charCode) {
+    detachWide(cells, x, y);
+    const cell = cells[y][x];
+    setCellChar(cell, charCode);
+    if (isWideHead(cell)) claimWideTail(cells, x, y);
+}
+
+// Write a copy of `src` into (x, y), keeping wide chars consistent. A tail
+// whose head wasn't copied along with it becomes a blank cell.
+function placeCell(cells, x, y, src) {
+    detachWide(cells, x, y);
+    const cell = structuredClone(src);
+    if (cell.type === 'wide-tail') clearCell(cell);
+    cells[y][x] = cell;
+    if (isWideHead(cell)) claimWideTail(cells, x, y);
+}
+
+// Build a row of cells from { code, fg, bg } chars: a cell per char plus a
+// tail after each wide char. Zero-width chars (combining marks left over after
+// NFC normalisation, variation selectors, ZWJ) have no cell and are dropped.
+function charsToRow(chars) {
+    const row = [];
+    for (const { code, fg, bg } of chars) {
+        if (charWidth(code) === 0) continue;
+        const cell = createCell();
+        cell.fg = { ...fg };
+        cell.bg = { ...bg };
+        setCellChar(cell, code);
+        row.push(cell);
+        if (isWideHead(cell)) {
+            const tail = structuredClone(cell);
+            makeWideTail(tail);
+            row.push(tail);
+        }
+    }
+    return row;
+}
+
 function createCanvas(width, height) {
     const cells = [];
     for (let y = 0; y < height; y++) {
@@ -85,6 +168,8 @@ function resizeCanvas(canvas, newWidth, newHeight) {
                 row.push(createCell());
             }
         }
+        // A wide char cut off at the new right edge no longer fits
+        if (isWideHead(row[newWidth - 1])) clearCell(row[newWidth - 1]);
         cells.push(row);
     }
     canvas.width = newWidth;
@@ -106,8 +191,10 @@ function colorsEqual(a, b) {
     return a.r === b.r && a.g === b.g && a.b === b.b;
 }
 
-// The character a cell displays
+// The character a cell displays ('' for a wide char's tail: the head's
+// character already covers both columns)
 function cellToChar(cell) {
+    if (cell.type === 'wide-tail') return '';
     if (cell.type === 'sextant') {
         return sextantPatternToChar(subpixelsToPattern(cell.subpixels));
     }
@@ -131,6 +218,7 @@ function canvasToANSI(canvas) {
 
         for (let x = 0; x < canvas.width; x++) {
             const cell = canvas.cells[y][x];
+            if (cell.type === 'wide-tail') continue;
             const ch = cellToChar(cell);
 
             // A space shows only its background, so leave the foreground alone
@@ -160,7 +248,8 @@ function canvasToPlain(canvas) {
 }
 
 function parseTextToCells(text, fgColor, bgColor) {
-    text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    // NFC composes e.g. e + U+0301 into é, which fits in one cell
+    text = text.normalize('NFC').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     let lines = text.split('\n');
 
     // Remove trailing empty lines
@@ -168,11 +257,7 @@ function parseTextToCells(text, fgColor, bgColor) {
         lines.pop();
     }
 
-    return lines.map(line => Array.from(line, ch => {
-        const cell = createCell();
-        cell.fg = { ...fgColor };
-        cell.bg = { ...bgColor };
-        setCellChar(cell, ch.codePointAt(0));
-        return cell;
-    }));
+    return lines.map(line => charsToRow(
+        Array.from(line, ch => ({ code: ch.codePointAt(0), fg: fgColor, bg: bgColor }))
+    ));
 }

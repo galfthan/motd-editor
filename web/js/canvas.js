@@ -276,15 +276,18 @@ class CanvasRenderer {
     // (Re)paint a cell element in place from cell state. Updating the existing
     // element instead of replacing it keeps layout invalidation local to the
     // cell and preserves decoration classes such as the text cursor.
+    // A wide char's element is drawn two cells wide, covering its (hidden) tail.
     paintCellElement(cellEl, x, y, cell) {
         let css = `left:${x * CELL_W}px;top:${y * CELL_H}px`;
         if (!cell.bg.default) {
             css += `;background-color:rgb(${cell.bg.r},${cell.bg.g},${cell.bg.b})`;
         }
         cellEl.style.cssText = css;
+        cellEl.classList.toggle('wide', isWideHead(cell));
+        cellEl.classList.toggle('wide-tail', cell.type === 'wide-tail');
 
         const char = cellToChar(cell);
-        if (char === ' ') {
+        if (char === ' ' || char === '') {
             cellEl.textContent = '';
             return;
         }
@@ -299,8 +302,7 @@ class CanvasRenderer {
     }
 
     updateCell(x, y) {
-        const cellEl = this.getCellElement(x, y);
-        if (cellEl) this.paintCellElement(cellEl, x, y, this.canvas.cells[y][x]);
+        this.updateCellRect(x, y, x, y);
     }
 
     // Repaint the cells in a rectangle (clipped to the canvas)
@@ -310,8 +312,25 @@ class CanvasRenderer {
         x2 = Math.min(this.canvas.width - 1, x2);
         y2 = Math.min(this.canvas.height - 1, y2);
         for (let y = y1; y <= y2; y++) {
-            for (let x = x1; x <= x2; x++) this.updateCell(x, y);
+            for (let x = x1; x <= x2; x++) this.repaintCell(x, y);
+            // An edit may have claimed or blanked the other half of a wide
+            // char just outside the rect
+            this.repaintCell(x1 - 1, y, true);
+            this.repaintCell(x2 + 1, y, true);
         }
+    }
+
+    // Repaint one cell; with onlyIfWide, only when it is (or was painted as)
+    // half of a wide char
+    repaintCell(x, y, onlyIfWide = false) {
+        const cellEl = this.getCellElement(x, y);
+        if (!cellEl) return;
+        const cell = this.canvas.cells[y][x];
+        if (onlyIfWide && !isWideHead(cell) && cell.type !== 'wide-tail' &&
+            !cellEl.classList.contains('wide') && !cellEl.classList.contains('wide-tail')) {
+            return;
+        }
+        this.paintCellElement(cellEl, x, y, cell);
     }
 
     // Repaint the cells covering a rectangle given in subpixel coords
@@ -395,7 +414,9 @@ class CanvasRenderer {
     handlePickTool(e) {
         const c = this.cellCoordsFromEvent(e);
         if (!c) return;
-        const cell = this.canvas.cells[c.cellY][c.cellX];
+        const row = this.canvas.cells[c.cellY];
+        // A wide char's tail takes its colours from the head
+        const cell = row[c.cellX].type === 'wide-tail' ? row[c.cellX - 1] : row[c.cellX];
 
         if (this.toolbar) {
             this.toolbar.setColors(cell.fg, cell.bg);
@@ -567,6 +588,7 @@ class CanvasRenderer {
         const { x1, y1, x2, y2 } = this.selection;
         for (let y = y1; y <= y2; y++) {
             for (let x = x1; x <= x2; x++) {
+                detachWide(this.canvas.cells, x, y);
                 this.canvas.cells[y][x] = createCell();
             }
         }
@@ -582,10 +604,12 @@ class CanvasRenderer {
         this.clipboard.forEach((row, dy) => {
             maxWidth = Math.max(maxWidth, row.length);
             row.forEach((cell, dx) => {
+                // A wide char's tail was already placed along with its head
+                if (cell.type === 'wide-tail' && dx > 0 && isWideHead(row[dx - 1])) return;
                 const tx = x + dx;
                 const ty = y + dy;
                 if (tx >= 0 && tx < this.canvas.width && ty >= 0 && ty < this.canvas.height) {
-                    this.canvas.cells[ty][tx] = structuredClone(cell);
+                    placeCell(this.canvas.cells, tx, ty, cell);
                 }
             });
         });
@@ -729,7 +753,9 @@ class CanvasRenderer {
         for (let sy = r.y1; sy <= r.y2; sy++) {
             for (let sx = r.x1; sx <= r.x2; sx++) {
                 const sp = this.subpixelAt(sx, sy);
-                if (sp) setCellSubpixel(sp.cell, sp.row, sp.col, false);
+                if (!sp) continue;
+                detachWide(this.canvas.cells, sp.cellX, sp.cellY);
+                setCellSubpixel(sp.cell, sp.row, sp.col, false);
             }
         }
         this.updateSubpixelRect(r);
@@ -744,6 +770,7 @@ class CanvasRenderer {
             row.forEach((data, dx) => {
                 const sp = this.subpixelAt(sx + dx, sy + dy);
                 if (!sp) return;
+                detachWide(this.canvas.cells, sp.cellX, sp.cellY);
                 setCellSubpixel(sp.cell, sp.row, sp.col, data.filled);
                 if (data.fg) sp.cell.fg = { ...data.fg };
                 if (data.bg) sp.cell.bg = { ...data.bg };
@@ -781,6 +808,7 @@ class CanvasRenderer {
 
         // Erase keeps the cell's colours so the remaining subpixels are unchanged
         if (filled) this.applyCurrentColors(cell);
+        detachWide(this.canvas.cells, cellX, cellY);
         setCellSubpixel(cell, row, col, filled);
         this.updateCell(cellX, cellY);
     }
@@ -797,9 +825,8 @@ class CanvasRenderer {
         if (this.lastCell === key) return;
         this.lastCell = key;
 
-        const cell = this.canvas.cells[cellY][cellX];
-        this.applyCurrentColors(cell);
-        setCellChar(cell, this.selectedChar);
+        this.applyCurrentColors(this.canvas.cells[cellY][cellX]);
+        setGridChar(this.canvas.cells, cellX, cellY, this.selectedChar);
         this.updateCell(cellX, cellY);
     }
 
@@ -841,6 +868,7 @@ class CanvasRenderer {
                 for (let x = x1 + inset; x <= x2 - inset; x++) {
                     const cell = this.canvas.cells[y][x];
                     if (this.boxFillMode === 1) {
+                        detachWide(this.canvas.cells, x, y);
                         clearCell(cell);
                     }
                     this.applyCurrentColors(cell);
@@ -849,9 +877,8 @@ class CanvasRenderer {
         }
 
         for (const c of computeBoxChars(x1, y1, x2, y2, this.boxLineStyle, this.canvas.cells, boxDrawLookup)) {
-            const cell = this.canvas.cells[c.y][c.x];
-            this.applyCurrentColors(cell);
-            setCellChar(cell, c.charCode);
+            this.applyCurrentColors(this.canvas.cells[c.y][c.x]);
+            setGridChar(this.canvas.cells, c.x, c.y, c.charCode);
         }
 
         this.updateCellRect(x1, y1, x2, y2);
@@ -879,9 +906,8 @@ class CanvasRenderer {
             this.boxLineStyle, this.canvas.cells, boxDrawLookup
         );
         for (const c of chars) {
-            const cell = this.canvas.cells[c.y][c.x];
-            this.applyCurrentColors(cell);
-            setCellChar(cell, c.charCode);
+            this.applyCurrentColors(this.canvas.cells[c.y][c.x]);
+            setGridChar(this.canvas.cells, c.x, c.y, c.charCode);
             this.updateCell(c.x, c.y);
         }
     }
@@ -922,6 +948,8 @@ class CanvasRenderer {
         if (!this.canvas) return;
         x = Math.max(0, Math.min(x, this.canvas.width - 1));
         y = Math.max(0, Math.min(y, this.canvas.height - 1));
+        // The cursor sits on a wide char's head, never its tail
+        if (this.canvas.cells[y][x].type === 'wide-tail') x--;
 
         this.clearTextCursorDisplay();
         this.textCursor = { x, y };
@@ -950,16 +978,20 @@ class CanvasRenderer {
         }
     }
 
-    // Previous / next cell in reading order (wrapping across rows), or null
-    // at the start / end of the canvas
+    // Previous / next character position in reading order (wrapping across
+    // rows, stepping over wide chars' tails), or null at the start / end of
+    // the canvas
     prevTextPos(x, y) {
-        if (x > 0) return { x: x - 1, y };
-        if (y > 0) return { x: this.canvas.width - 1, y: y - 1 };
-        return null;
+        let p = null;
+        if (x > 0) p = { x: x - 1, y };
+        else if (y > 0) p = { x: this.canvas.width - 1, y: y - 1 };
+        if (p && this.canvas.cells[p.y][p.x].type === 'wide-tail') p.x--;
+        return p;
     }
 
     nextTextPos(x, y) {
-        if (x < this.canvas.width - 1) return { x: x + 1, y };
+        const step = isWideHead(this.canvas.cells[y][x]) ? 2 : 1;
+        if (x + step < this.canvas.width) return { x: x + step, y };
         if (y < this.canvas.height - 1) return { x: 0, y: y + 1 };
         return null;
     }
@@ -1000,15 +1032,23 @@ class CanvasRenderer {
         // Only accept single printable characters (count code points, not
         // UTF-16 units, so astral chars like emoji aren't rejected)
         if ([...key].length !== 1) return;
+        const code = key.codePointAt(0);
+        const width = charWidth(code);
+        if (width === 0) return; // combining mark: nothing to put in a cell
 
-        this.setTextCell(x, y, key.codePointAt(0));
-        moveTo(this.nextTextPos(x, y)); // stays put at the last cell
+        // A wide char needs two cells; in the last column, wrap to the next row
+        let pos = { x, y };
+        if (width === 2 && x === this.canvas.width - 1) {
+            pos = this.nextTextPos(x, y);
+            if (!pos) return;
+        }
+        this.setTextCell(pos.x, pos.y, code);
+        moveTo(this.nextTextPos(pos.x, pos.y)); // stays put at the last cell
     }
 
     setTextCell(x, y, charCode) {
-        const cell = this.canvas.cells[y][x];
-        this.applyCurrentColors(cell);
-        setCellChar(cell, charCode);
+        this.applyCurrentColors(this.canvas.cells[y][x]);
+        setGridChar(this.canvas.cells, x, y, charCode);
         this.updateCell(x, y);
     }
 
