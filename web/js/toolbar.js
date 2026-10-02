@@ -419,37 +419,70 @@ class Toolbar {
                 this.renderCharPalette();
             });
         });
+
+        document.getElementById('emoji-search').addEventListener('input', () => this.renderCharPalette());
     }
 
-    // Palette entries { code, name } for a tab
-    getCharsForTab(tab) {
-        if (tab === 'diagonal') return DIAGONAL_CHARS;
-        if (tab === 'triangle') return TRIANGLE_CHARS;
-        return (LEGACY_CHARS[tab] || []).map(([code, name]) => ({ code, name }));
+    // Palette sections [{ title, chars: [{ code, name }] }] for a tab. Only the
+    // emoji tab has titled sections (its Unicode groups), filtered by `query`.
+    getPaletteSections(tab, query) {
+        if (tab === 'emoji') {
+            return EMOJI_GROUPS
+                .map(group => ({
+                    title: group.name,
+                    chars: group.emoji
+                        .filter(([, name]) => name.includes(query))
+                        .map(([code, name]) => ({ code, name }))
+                }))
+                .filter(section => section.chars.length > 0);
+        }
+        if (tab === 'diagonal') return [{ chars: DIAGONAL_CHARS }];
+        if (tab === 'triangle') return [{ chars: TRIANGLE_CHARS }];
+        return [{ chars: (LEGACY_CHARS[tab] || []).map(([code, name]) => ({ code, name })) }];
     }
 
     renderCharPalette() {
         const palette = document.getElementById('char-palette');
+        const search = document.getElementById('emoji-search');
+        const isEmoji = this.currentTab === 'emoji';
+        search.style.display = isEmoji ? '' : 'none';
+        palette.classList.toggle('emoji-grid', isEmoji);
         palette.innerHTML = '';
 
-        const chars = this.getCharsForTab(this.currentTab);
+        const query = isEmoji ? search.value.trim().toLowerCase() : '';
+        const sections = this.getPaletteSections(this.currentTab, query);
+        if (sections.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'char-group-title';
+            empty.textContent = 'No matches';
+            palette.appendChild(empty);
+        }
 
-        chars.forEach(charInfo => {
-            const btn = document.createElement('button');
-            btn.title = charInfo.name || `U+${charInfo.code.toString(16).toUpperCase()}`;
+        for (const section of sections) {
+            if (section.title) {
+                const title = document.createElement('div');
+                title.className = 'char-group-title';
+                title.textContent = section.title;
+                palette.appendChild(title);
+            }
+            for (const charInfo of section.chars) {
+                const btn = document.createElement('button');
+                btn.title = charInfo.name || `U+${charInfo.code.toString(16).toUpperCase()}`;
+                btn.classList.toggle('selected', charInfo.code === this.renderer.selectedChar);
 
-            const span = document.createElement('span');
-            span.className = glyphClass(charInfo.code);
-            span.textContent = String.fromCodePoint(charInfo.code);
-            btn.appendChild(span);
+                const span = document.createElement('span');
+                span.className = glyphClass(charInfo.code);
+                span.textContent = String.fromCodePoint(charInfo.code);
+                btn.appendChild(span);
 
-            btn.addEventListener('click', () => {
-                palette.querySelectorAll('button').forEach(b => b.classList.remove('selected'));
-                btn.classList.add('selected');
-                this.renderer.setSelectedChar(charInfo.code);
-            });
-            palette.appendChild(btn);
-        });
+                btn.addEventListener('click', () => {
+                    palette.querySelectorAll('button').forEach(b => b.classList.remove('selected'));
+                    btn.classList.add('selected');
+                    this.renderer.setSelectedChar(charInfo.code);
+                });
+                palette.appendChild(btn);
+            }
+        }
     }
 
     // --- Utilities ---

@@ -55,7 +55,7 @@ function parseLine(line) {
         if (match.index > lastIndex) {
             const text = line.slice(lastIndex, match.index);
             for (const ch of text) {
-                cells.push({ char: ch.codePointAt(0), fg: { ...fg }, bg: { ...bg } });
+                cells.push({ code: ch.codePointAt(0), fg, bg });
             }
         }
 
@@ -73,7 +73,7 @@ function parseLine(line) {
     if (lastIndex < line.length) {
         const text = line.slice(lastIndex);
         for (const ch of text) {
-            cells.push({ char: ch.codePointAt(0), fg: { ...fg }, bg: { ...bg } });
+            cells.push({ code: ch.codePointAt(0), fg, bg });
         }
     }
 
@@ -156,7 +156,8 @@ function parseCodes(codes, fg, bg) {
 }
 
 function parseANSIText(text) {
-    text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    // NFC composes e.g. e + U+0301 into é, which fits in one cell
+    text = text.normalize('NFC').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     const lines = text.split('\n');
 
     // Drop only the empty piece after the final newline; blank rows are content
@@ -168,21 +169,10 @@ function parseANSIText(text) {
         return createCanvas(1, 1);
     }
 
-    const parsedLines = lines.map(line => parseLine(line));
-    const maxWidth = Math.max(1, ...parsedLines.map(l => l.length));
-
-    const canvas = createCanvas(maxWidth, parsedLines.length);
-
-    for (let y = 0; y < parsedLines.length; y++) {
-        for (let x = 0; x < parsedLines[y].length; x++) {
-            const pc = parsedLines[y][x];
-            const cell = canvas.cells[y][x];
-
-            cell.fg = pc.fg;
-            cell.bg = pc.bg;
-            setCellChar(cell, pc.char);
-        }
-    }
+    // Wide chars take two cells, so a row's width is its width in columns
+    const rows = lines.map(line => charsToRow(parseLine(line)));
+    const canvas = createCanvas(Math.max(1, ...rows.map(row => row.length)), rows.length);
+    rows.forEach((row, y) => row.forEach((cell, x) => { canvas.cells[y][x] = cell; }));
 
     return canvas;
 }
