@@ -62,21 +62,15 @@ class CanvasRenderer {
 
     setupEventListeners() {
         this.container.addEventListener('mousedown', (e) => this.handleMouseDown(e));
-        this.container.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-        this.container.addEventListener('mouseup', () => this.handleMouseUp(false));
-        this.container.addEventListener('mouseleave', () => this.handleMouseUp(true));
 
-        // Window-level handlers take over while the pointer is outside the canvas:
-        // they let select drags and paste-preview keep tracking (clamped to canvas
-        // edges) and let a select drag finalise on release outside the canvas.
-        window.addEventListener('mousemove', (e) => {
-            if (this.container.contains(e.target)) return;
-            this.handleMouseMove(e);
-        });
+        // Moves and releases are handled at window level, so a drag keeps
+        // going when the pointer leaves the canvas: select, box and line drags
+        // track it clamped to the canvas edges, draw/erase/symbol strokes pause
+        // until it comes back, and the drag finishes wherever the button is
+        // released. Paste preview also tracks the pointer outside the canvas.
+        window.addEventListener('mousemove', (e) => this.handleMouseMove(e));
         window.addEventListener('mouseup', () => {
-            if (this.isDrawing && this.isSelectTool()) {
-                this.handleMouseUp(false);
-            }
+            if (this.isDrawing) this.handleMouseUp();
         });
 
         // Prevent context menu on right-click
@@ -136,8 +130,9 @@ class CanvasRenderer {
                 return;
             }
 
-            // Escape - clear selection
+            // Escape - cancel a box/line drag, clear selection
             if (e.key === 'Escape') {
+                this.cancelDrag();
                 this.clearSelection();
                 this.clearSubpixelSelection();
                 this.pasteMode = false;
@@ -377,10 +372,20 @@ class CanvasRenderer {
 
         if (!this.isDrawing) return;
 
+        // The button was released where we didn't see it (e.g. outside the
+        // browser window): finish the drag now
+        if (e.buttons === 0) {
+            this.handleMouseUp();
+            return;
+        }
+
         if (this.isSelectTool()) {
             this.handleSelectToolMove(e);
         } else if (this.tool === 'box' || this.tool === 'line') {
             this.handleShapeToolMove(e);
+        } else if (!this.container.contains(e.target)) {
+            // Freehand tools only paint under the pointer: pause outside the
+            // canvas (clamping would smear along the edge)
         } else if (this.tool === 'char') {
             this.handleCharTool(e);
         } else if (this.tool !== 'pick' && this.tool !== 'text') {
@@ -388,25 +393,15 @@ class CanvasRenderer {
         }
     }
 
-    handleMouseUp(isLeave = false) {
-        // Box/line: commit on release, cancel when the pointer leaves the canvas
+    handleMouseUp() {
+        // Box/line: commit on release
         if (this.dragStart) {
-            if (!isLeave) {
-                if (this.tool === 'box') this.commitBox();
-                else this.commitLine();
-            }
+            if (this.tool === 'box') this.commitBox();
+            else this.commitLine();
             this.cancelDrag();
         }
-        if (this.isSelectTool() && (this.selectionStart || this.subpixelSelectionStart)) {
-            if (isLeave) {
-                // Drag continues; window-level handlers in setupEventListeners
-                // keep updating the clamped selection while the pointer is outside,
-                // and finalise when the user releases the button anywhere.
-                return;
-            }
-            this.selectionStart = null;
-            this.subpixelSelectionStart = null;
-        }
+        this.selectionStart = null;
+        this.subpixelSelectionStart = null;
         this.isDrawing = false;
         this.lastCell = null;
     }
