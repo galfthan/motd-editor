@@ -7,6 +7,22 @@ const CELL_H = 34;
 const SUB_W = CELL_W / 2;
 const SUB_H = CELL_H / 3;
 
+// Grid points on the straight line from (x0, y0) to (x1, y1), both ends
+// included, stepping one point at a time (Bresenham)
+function linePoints(x0, y0, x1, y1) {
+    const points = [];
+    const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0);
+    const stepX = x0 < x1 ? 1 : -1, stepY = y0 < y1 ? 1 : -1;
+    let err = dx + dy;
+    for (;;) {
+        points.push({ x: x0, y: y0 });
+        if (x0 === x1 && y0 === y1) return points;
+        const e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += stepX; }
+        if (e2 <= dx) { err += dx; y0 += stepY; }
+    }
+}
+
 // Normalised rect { x1, y1, x2, y2 } spanning two points
 function normRect(a, b) {
     return {
@@ -24,7 +40,7 @@ class CanvasRenderer {
         this.fgColor = defaultFG();
         this.bgColor = defaultBG();
         this.isDrawing = false;
-        this.lastCell = null;
+        this.lastPoint = null;     // Previous point of a draw/erase/symbol stroke
         this.toolbar = null; // Set by app.js
 
         // Selection state (cell-level for 'select' tool)
@@ -385,7 +401,9 @@ class CanvasRenderer {
             this.handleShapeToolMove(e);
         } else if (!this.container.contains(e.target)) {
             // Freehand tools only paint under the pointer: pause outside the
-            // canvas (clamping would smear along the edge)
+            // canvas (clamping would smear along the edge), and don't join the
+            // exit and re-entry points
+            this.lastPoint = null;
         } else if (this.tool === 'char') {
             this.handleCharTool(e);
         } else if (this.tool !== 'pick' && this.tool !== 'text') {
@@ -403,7 +421,7 @@ class CanvasRenderer {
         this.selectionStart = null;
         this.subpixelSelectionStart = null;
         this.isDrawing = false;
-        this.lastCell = null;
+        this.lastPoint = null;
     }
 
     handlePickTool(e) {
@@ -783,29 +801,47 @@ class CanvasRenderer {
 
     // --- Draw / erase / char tools ---
 
+    // Freehand strokes: mouse events arrive at most about once per frame, so a
+    // fast stroke jumps several subpixels (or cells) between two of them.
+    // Fill in the straight line from the previous point so there are no gaps.
+    strokeTo(x, y, paint) {
+        const from = this.lastPoint;
+        this.lastPoint = { x, y };
+        if (from && from.x === x && from.y === y) return;
+        const points = from ? linePoints(from.x, from.y, x, y).slice(1) : [{ x, y }];
+        for (const p of points) paint(p.x, p.y);
+    }
+
     handleDrawTool(e) {
         const p = this.subpixelCoordsFromEvent(e);
         if (!p) return;
 
-        // Avoid re-processing same subpixel while dragging
-        const key = `${p.sx},${p.sy}`;
-        if (this.lastCell === key) return;
-        this.lastCell = key;
+        // Repaint each touched cell once, after all its subpixels are set
+        const changed = new Map();
+        this.strokeTo(p.sx, p.sy, (sx, sy) => {
+            const sp = this.paintSubpixel(sx, sy, this.tool === 'draw');
+            if (sp) changed.set(`${sp.cellX},${sp.cellY}`, sp);
+        });
+        for (const { cellX, cellY } of changed.values()) this.updateCell(cellX, cellY);
+    }
 
-        const filled = this.tool === 'draw';
-        const { cell, cellX, cellY, row, col } = this.subpixelAt(p.sx, p.sy);
+    // Set (draw) or clear (erase) one subpixel; returns its subpixelAt() info
+    // if anything changed
+    paintSubpixel(sx, sy, filled) {
+        const sp = this.subpixelAt(sx, sy);
+        const { cell, cellX, cellY, row, col } = sp;
 
         // Nothing to do if the subpixel (and, when drawing, the colours) already match
         if (cell.type === 'sextant' && cell.subpixels[row][col] === filled &&
             (!filled || (colorsEqual(cell.fg, this.fgColor) && colorsEqual(cell.bg, this.bgColor)))) {
-            return;
+            return null;
         }
 
         // Erase keeps the cell's colours so the remaining subpixels are unchanged
         if (filled) this.applyCurrentColors(cell);
         detachWide(this.canvas.cells, cellX, cellY);
         setCellSubpixel(cell, row, col, filled);
-        this.updateCell(cellX, cellY);
+        return sp;
     }
 
     handleCharTool(e) {
@@ -813,13 +849,10 @@ class CanvasRenderer {
 
         const c = this.cellCoordsFromEvent(e);
         if (!c) return;
-        const { cellX, cellY } = c;
+        this.strokeTo(c.cellX, c.cellY, (x, y) => this.placeSelectedChar(x, y));
+    }
 
-        // Avoid re-processing same cell while dragging
-        const key = `${cellX},${cellY}`;
-        if (this.lastCell === key) return;
-        this.lastCell = key;
-
+    placeSelectedChar(cellX, cellY) {
         // A wide char (emoji) needs two cells: skip the last column, where it
         // can't fit, and the tail of the copy just placed while dragging
         const row = this.canvas.cells[cellY];
@@ -1071,7 +1104,7 @@ class CanvasRenderer {
         this.clearPastePreview();
         this.cancelDrag();
         this.isDrawing = false;
-        this.lastCell = null;
+        this.lastPoint = null;
     }
 
     resize(width, height) {
