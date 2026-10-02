@@ -492,17 +492,10 @@ main {
 }
 
 /* Subpixel variant: 1px outline around each of the 2x3 subpixels per cell,
-   on the subpixel edges in canvas.js (SUB_X_EDGES / SUB_Y_EDGES) */
+   on the subpixel edges in canvas.js (SUB_X_EDGES / SUB_Y_EDGES: thirds of
+   the full 34px cell) */
 .overlay.subpixel {
     --w: 1px;
-    background-image:
-        linear-gradient(to right, var(--c) 1px, transparent 1px 8px, var(--c) 8px 10px, transparent 10px 17px, var(--c) 17px),
-        linear-gradient(to bottom, var(--c) 1px, transparent 1px 10.667px, var(--c) 10.667px 12.667px,
-            transparent 12.667px 21.333px, var(--c) 21.333px 23.333px, transparent 23.333px 33px, var(--c) 33px);
-}
-
-/* Without the grid, subpixel rows split the whole 34px cell height */
-.canvas.no-grid .overlay.subpixel {
     background-image:
         linear-gradient(to right, var(--c) 1px, transparent 1px 8px, var(--c) 8px 10px, transparent 10px 17px, var(--c) 17px),
         linear-gradient(to bottom, var(--c) 1px, transparent 1px 10.333px, var(--c) 10.333px 12.333px,
