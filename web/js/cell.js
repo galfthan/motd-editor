@@ -177,10 +177,12 @@ function resizeCanvas(canvas, newWidth, newHeight) {
     canvas.cells = cells;
 }
 
+// Empty every cell, back to the default colours (an empty cell's background
+// would otherwise still show)
 function clearCanvas(canvas) {
     for (let y = 0; y < canvas.height; y++) {
         for (let x = 0; x < canvas.width; x++) {
-            clearCell(canvas.cells[y][x]);
+            canvas.cells[y][x] = createCell();
         }
     }
 }
