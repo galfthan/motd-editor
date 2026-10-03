@@ -404,6 +404,26 @@ const OPS = {
         flash({ x1: x, y1: y, x2: x + parsed.width - 1, y2: y + parsed.height - 1 });
     },
 
+    // a.image: decoded from a.data (see prepare)
+    import_image(a) {
+        const { image } = a;
+        const x = a.x ?? 0, y = a.y ?? 0;
+        if (!Object.hasOwn(IMAGE_DITHERS, a.dither || 'floyd-steinberg')) {
+            throw new Error(`unknown dither "${a.dither}": use ${Object.keys(IMAGE_DITHERS).join(', ')}`);
+        }
+        let cols = a.width, rows = a.height;
+        if (!cols && !rows) cols = fitImageCols(image, r.cellAspect, r.canvas.width - x, r.canvas.height - y);
+        cols ||= Math.max(1, Math.round(rows * image.width / (image.height * r.cellAspect)));
+        rows ||= imageRows(image, cols, r.cellAspect);
+        if (cols > 500 || rows > 200) throw new Error('the image can be at most 500x200 cells');
+        const cells = imageToCells(image, cols, rows, {
+            mono: a.mono, fg: parseColor(a.fg, defaultFG), bg: parseColor(a.bg, defaultBG), dither: a.dither || 'floyd-steinberg'
+        });
+        withState({ clipboard: cells, pasteMode: false }, () => r.pasteAt(x, y));
+        flash({ x1: x, y1: y, x2: x + cols - 1, y2: y + rows - 1 });
+        return `placed the image as ${cols}x${rows} cells at (${x}, ${y})`;
+    },
+
     export(a) {
         const format = a.format || 'ansi';
         if (format === 'ansi') return canvasToANSI(r.canvas);
@@ -435,7 +455,7 @@ const OPS = {
         const results = [];
         if (!Array.isArray(a.ops)) throw new Error('ops must be a list of {op, args}');
         for (const [i, { op, args }] of a.ops.entries()) {
-            if (['batch', 'view_canvas', 'undo', 'redo'].includes(op) || !Object.hasOwn(OPS, op)) {
+            if (['batch', 'view_canvas', 'undo', 'redo', 'import_image'].includes(op) || !Object.hasOwn(OPS, op)) {
                 throw new Error(`ops[${i}]: "${op}" can't be used in a batch`);
             }
             try {
@@ -447,6 +467,17 @@ const OPS = {
         return results.every(res => res === 'ok') ? `ok (${results.length} ops)` : results;
     }
 };
+
+// Operations' asynchronous preparation, done before they run
+async function prepare(op, args) {
+    if (op !== 'import_image') return args;
+    const blob = await (await fetch(args.data)).blob();
+    try {
+        return { ...args, image: await createImageBitmap(blob) };
+    } catch (e) {
+        throw new Error(`can't decode the image (${blob.type}): ${e.message}`);
+    }
+}
 
 // Run one operation; each one that edits is one undo step. Operations are
 // synchronous, so the user's own edits can't end up inside the step.
@@ -460,7 +491,7 @@ function run(op, args) {
 
 function log(op, args, reply, ms) {
     const li = document.createElement('li');
-    const summary = JSON.stringify(args ?? {});
+    const summary = JSON.stringify({ ...args, data: undefined });
     li.textContent = `${new Date().toLocaleTimeString()} ${op} ${summary.length > 90 ? summary.slice(0, 90) + '…' : summary} · ${ms.toFixed(0)} ms` +
         (reply.error ? ` · ${reply.error}` : '');
     li.classList.toggle('error', !!reply.error);
@@ -472,13 +503,14 @@ let queue = Promise.resolve();
 
 async function handle(event) {
     const { id, op, args } = JSON.parse(event.data);
-    // An edit made while the user drags (mouse button down) would end up in
-    // the user's undo step: wait for the button to come up
-    while (!NO_STEP.has(op) && r.isDrawing) await new Promise(res => setTimeout(res, 50));
     const t0 = performance.now();
     let reply;
     try {
-        reply = { id, result: run(op, args || {}) ?? 'ok' };
+        const a = await prepare(op, args || {});
+        // An edit made while the user drags (mouse button down) would end up
+        // in the user's undo step: wait for the button to come up
+        while (!NO_STEP.has(op) && r.isDrawing) await new Promise(res => setTimeout(res, 50));
+        reply = { id, result: run(op, a) ?? 'ok' };
     } catch (e) {
         reply = { id, error: e.message };
     }

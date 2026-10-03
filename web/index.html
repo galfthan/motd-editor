@@ -19,6 +19,7 @@
                     <div class="menu-dropdown">
                         <button data-action="new">New</button>
                         <button data-action="open">Open...</button>
+                        <button data-action="import-image" title="Or paste (Ctrl+V) or drop an image">Import Image...</button>
                         <hr>
                         <button data-action="save"><span class="menu-label">Save</span><span class="menu-shortcut">Ctrl+S</span></button>
                         <button data-action="save-as"><span class="menu-label">Save As...</span><span class="menu-shortcut">Ctrl+Shift+S</span></button>
@@ -161,6 +162,7 @@
 
     <!-- Hidden file input -->
     <input type="file" id="file-input" accept=".txt" style="display:none">
+    <input type="file" id="image-input" accept="image/*" style="display:none">
 
     <!-- Save As Dialog -->
     <dialog id="save-as-dialog">
@@ -210,6 +212,7 @@
     <script src="js/glyph-shapes.js"></script>
     <script src="js/emoji.js"></script>
     <script src="js/history.js"></script>
+    <script src="js/image-import.js"></script>
     <script src="js/canvas.js"></script>
     <script src="js/toolbar.js"></script>
     <script src="js/app.js"></script>
