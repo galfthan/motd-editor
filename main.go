@@ -159,7 +159,10 @@ func (e *editor) result(w http.ResponseWriter, r *http.Request) {
 	done := e.pending[msg.ID]
 	e.mu.Unlock()
 	if done != nil {
-		done <- msg.reply
+		select {
+		case done <- msg.reply:
+		default: // already answered
+		}
 	}
 }
 
@@ -213,28 +216,32 @@ func (l *link) serve() bool {
 }
 
 func (l *link) call(ctx context.Context, op string, args json.RawMessage) (json.RawMessage, error) {
-	if l.serve() {
-		return l.e.call(ctx, op, args)
-	}
 	body, _ := json.Marshal(map[string]any{"op": op, "args": args})
-	req, _ := http.NewRequestWithContext(ctx, "POST", "http://"+l.addr+"/call", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		if l.serve() { // the other process just exited
+	var err error
+	// A second try when the process serving the editor has gone away: this
+	// one takes the port over, or passes the operation on to the process
+	// that just did
+	for try := 0; try < 2; try++ {
+		if l.serve() {
 			return l.e.call(ctx, op, args)
 		}
-		return nil, err
+		req, _ := http.NewRequestWithContext(ctx, "POST", "http://"+l.addr+"/call", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		var resp *http.Response
+		if resp, err = http.DefaultClient.Do(req); err != nil {
+			continue
+		}
+		defer resp.Body.Close()
+		var r reply
+		if json.NewDecoder(resp.Body).Decode(&r) != nil {
+			return nil, fmt.Errorf("%s is in use by something other than motd-editor: start it with another -addr", l.addr)
+		}
+		if r.Error != "" {
+			return nil, errors.New(r.Error)
+		}
+		return r.Result, nil
 	}
-	defer resp.Body.Close()
-	var r reply
-	if json.NewDecoder(resp.Body).Decode(&r) != nil {
-		return nil, fmt.Errorf("%s is in use by something other than motd-editor: start it with another -addr", l.addr)
-	}
-	if r.Error != "" {
-		return nil, errors.New(r.Error)
-	}
-	return r.Result, nil
+	return nil, err
 }
 
 // localOnly rejects requests from other sites' pages (cross-origin, any

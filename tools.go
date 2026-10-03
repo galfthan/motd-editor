@@ -26,7 +26,7 @@ type rect struct {
 
 type viewArgs struct {
 	region
-	CellPx   int  `json:"cell_px,omitempty" jsonschema:"cell width in image pixels; cells are 18x34 in the editor (default 18, reduced to keep the image within 1600 px)"`
+	CellPx   int  `json:"cell_px,omitempty" jsonschema:"cell width in image pixels (default: the editor's cell width, see get_state's display.cell_px; reduced to keep the image within 1600 px)"`
 	NoRulers bool `json:"no_rulers,omitempty" jsonschema:"leave out the coordinate rulers and the lines every 10 cells"`
 	display
 }

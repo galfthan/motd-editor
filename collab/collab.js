@@ -123,7 +123,7 @@ function paintSubpixels(points) {
 }
 
 function checkAspect(aspect) {
-    if (!(aspect >= 0.3 && aspect <= 0.8)) throw new Error('cell_aspect must be 0.3-0.8 (cell width / height)');
+    if (!isCellAspect(aspect)) throw new Error(`cell_aspect must be ${CELL_ASPECT_RANGE.join('-')} (cell width / height)`);
     return aspect;
 }
 
@@ -495,15 +495,22 @@ function setStatus(text, state) {
     panel.status.dataset.state = state;
 }
 
+// The AI link goes to the tab that connected last. A tab that lost it to
+// another takes it back when the user comes back to it (or clicks the
+// status), also if that other tab has been closed meanwhile.
+let replaced = false;
+
 function connect() {
+    replaced = false;
     const events = new EventSource('events');
     events.onopen = () => setStatus('AI link', 'on');
     events.onerror = () => setStatus('AI link: server offline', 'off');
-        // One at a time, in order (replies are posted asynchronously)
-    // (a failed reply, e.g. the server just exited, mustn't stop the queue)
+    // One at a time, in order (replies are posted asynchronously); a failed
+    // reply (e.g. the server just exited) mustn't stop the queue
     events.onmessage = (event) => { queue = queue.then(() => handle(event)).catch(() => {}); };
     events.addEventListener('replaced', () => {
         events.close();
+        replaced = true;
         setStatus('AI link: in another tab (click to take over)', 'off');
     });
 }
@@ -521,12 +528,10 @@ function createPanel() {
     document.body.appendChild(box);
 
     status.addEventListener('click', () => {
-        if (status.dataset.state === 'off' && status.textContent.includes('another tab')) {
-            connect();
-        } else {
-            box.classList.toggle('open');
-        }
+        if (replaced) connect();
+        else box.classList.toggle('open');
     });
+    window.addEventListener('focus', () => { if (replaced) connect(); });
     return { status, box, note: box.querySelector('textarea'), log: box.querySelector('ol') };
 }
 

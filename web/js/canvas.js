@@ -9,6 +9,12 @@ const GLYPH_CELL_W = 18;
 const DEFAULT_CELL_ASPECT = 0.5;
 let CELL_W = DEFAULT_CELL_ASPECT * CELL_H;
 
+// The cell aspects the editor accepts (terminals are around 0.45-0.55)
+const CELL_ASPECT_RANGE = [0.3, 0.8];
+function isCellAspect(aspect) {
+    return aspect >= CELL_ASPECT_RANGE[0] && aspect <= CELL_ASPECT_RANGE[1];
+}
+
 // Subpixel edges within a cell, in CSS px from its top-left corner: the
 // whole cell split into 2x3 equal parts, as a terminal draws sextants (the
 // grid, when shown, is painted over the cell's outermost pixel). Drawing,

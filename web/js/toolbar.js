@@ -247,7 +247,7 @@ class Toolbar {
         const value = (b) => parseFloat(b.dataset.cellAspect);
         const presets = items.filter(b => b !== custom);
 
-        // Show and apply `aspect` (0.3-0.8); with `save`, remember it
+        // Show and apply `aspect` (see isCellAspect); with `save`, remember it
         this.setCellAspect = (aspect, save = true) => {
             const preset = presets.find(b => Math.abs(value(b) - aspect) < 0.0005);
             items.forEach(b => b.setAttribute('aria-checked', String(b === (preset || custom))));
@@ -265,16 +265,16 @@ class Toolbar {
                 this.setCellAspect(value(b));
                 return;
             }
-            const answer = prompt('Cell width ÷ height, 0.3-0.8 (e.g. 9x19 px terminal cells: 0.47)',
+            const answer = prompt(`Cell width ÷ height, ${CELL_ASPECT_RANGE.join('-')} (e.g. 9x19 px terminal cells: 0.47)`,
                 this.renderer.cellAspect.toFixed(3));
             const aspect = parseFloat(answer);
-            if (aspect >= 0.3 && aspect <= 0.8) this.setCellAspect(aspect);
+            if (isCellAspect(aspect)) this.setCellAspect(aspect);
         }));
 
         let aspect = DEFAULT_CELL_ASPECT;
         try {
             const saved = parseFloat(localStorage.getItem(key));
-            if (saved >= 0.3 && saved <= 0.8) aspect = saved;
+            if (isCellAspect(saved)) aspect = saved;
         } catch (e) { /* default */ }
         this.setCellAspect(aspect, false);
     }
