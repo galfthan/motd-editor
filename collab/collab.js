@@ -168,7 +168,8 @@ function renderPNG(rect, scale, rulers, grid, light) {
     r.readTheme();
     let src;
     try {
-        src = r.drawCellsImage(cells, rect, undefined, true).image;
+        // At the output's scale, not the editor's zoom
+        src = withState({ _scaleX: scale, _scaleY: scale }, () => r.drawCellsImage(cells, rect, undefined, true).image);
     } finally {
         r.showGrid = shown.showGrid;
         r.container.classList.toggle('light-terminal', shown.light);
@@ -184,7 +185,7 @@ function renderPNG(rect, scale, rulers, grid, light) {
     const g = out.getContext('2d');
     g.fillStyle = '#000';
     g.fillRect(0, 0, out.width, out.height);
-    g.drawImage(src, ml, mt, w * scale, h * scale);
+    g.drawImage(src, ml, mt);
 
     if (rulers) {
         g.font = '10px monospace';

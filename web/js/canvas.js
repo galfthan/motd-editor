@@ -180,7 +180,8 @@ class CanvasRenderer {
         // Image paste: the wheel over the canvas resizes it (Ctrl+wheel still
         // zooms the page)
         window.addEventListener('wheel', (e) => {
-            if (!this.isImagePaste() || e.ctrlKey || !this.container.parentElement.contains(e.target)) return;
+            const area = this.container.closest('.canvas-scroll') || this.container.parentElement;
+            if (!this.isImagePaste() || e.ctrlKey || !area.contains(e.target)) return;
             e.preventDefault();
             // Shift+wheel scrolls sideways in some browsers
             this._wheel += (e.deltaY || e.deltaX) * (e.deltaMode ? 33 : 1);

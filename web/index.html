@@ -109,19 +109,19 @@
                             <input type="search" id="glyph-search" placeholder="Search glyphs and emoji" aria-label="Search glyphs and emoji">
                         </label>
                         <div class="chips" id="glyph-tabs" role="tablist">
-                            <button data-tab="diagonal" aria-selected="true">Diagonal</button>
-                            <button data-tab="triangle" aria-selected="false">Triangle</button>
-                            <button data-tab="blocks" aria-selected="false">Blocks</button>
-                            <button data-tab="shades" aria-selected="false">Shades</button>
-                            <button data-tab="lines" aria-selected="false">Lines</button>
-                            <button data-tab="misc" aria-selected="false">Misc</button>
-                            <button data-tab="emoji" aria-selected="false">Emoji</button>
+                            <button role="tab" data-tab="diagonal" aria-selected="true">Diagonal</button>
+                            <button role="tab" data-tab="triangle" aria-selected="false">Triangle</button>
+                            <button role="tab" data-tab="blocks" aria-selected="false">Blocks</button>
+                            <button role="tab" data-tab="shades" aria-selected="false">Shades</button>
+                            <button role="tab" data-tab="lines" aria-selected="false">Lines</button>
+                            <button role="tab" data-tab="misc" aria-selected="false">Misc</button>
+                            <button role="tab" data-tab="emoji" aria-selected="false">Emoji</button>
                         </div>
                         <div id="char-palette" class="char-grid"></div>
                     </section>
 
                     <section data-panel="text">
-                        <p class="hint">Click a cell and type. Enter goes to the next row at the starting column; the arrow keys move the cursor.</p>
+                        <p class="hint">Click a cell and type. Enter goes to the start of the next row; the arrow keys move the cursor.</p>
                     </section>
 
                     <section data-panel="shape">
@@ -150,7 +150,7 @@
                         </div>
                     </section>
 
-                    <section data-panel="select">
+                    <section data-panel="selection">
                         <div class="segmented wide" role="group" aria-label="Select precision">
                             <button data-tool-set="select" aria-pressed="true">Cells</button>
                             <button data-tool-set="select-subpixel" aria-pressed="false">Subpixels</button>
@@ -167,13 +167,13 @@
                     <section class="colors">
                         <span class="label">Colour</span>
                         <div class="color-targets">
-                            <div class="color-target" data-target="fg" aria-pressed="true">
+                            <div class="color-target" data-target="fg">
                                 <label class="swatch" id="fg-color-swatch" title="Choose the ink colour"><input type="color" id="fg-color" value="#ffffff" aria-label="Ink colour"></label>
-                                <button class="color-target-name" data-target-pick="fg"><span>Ink</span><span class="color-value" id="fg-value">Terminal</span></button>
+                                <button class="color-target-name" data-target-pick="fg" aria-pressed="true"><span>Ink</span><span class="color-value" id="fg-value">Terminal</span></button>
                             </div>
-                            <div class="color-target" data-target="bg" aria-pressed="false">
+                            <div class="color-target" data-target="bg">
                                 <label class="swatch" title="Choose the paper colour"><input type="color" id="bg-color" value="#000000" aria-label="Paper colour"></label>
-                                <button class="color-target-name" data-target-pick="bg"><span>Paper</span><span class="color-value" id="bg-value">Terminal</span></button>
+                                <button class="color-target-name" data-target-pick="bg" aria-pressed="false"><span>Paper</span><span class="color-value" id="bg-value">Terminal</span></button>
                             </div>
                         </div>
                         <div class="palette" id="palette" aria-label="Terminal colours"></div>
@@ -187,11 +187,11 @@
             </aside>
 
             <nav class="dock card" aria-label="Tools">
-                <button class="dock-btn" data-tool="brush" title="Brush (B)" aria-label="Brush"><svg class="ic lg"><use href="#i-brush"></use></svg><kbd>B</kbd></button>
-                <button class="dock-btn" data-tool="glyph" title="Glyph (G)" aria-label="Glyph"><svg class="ic lg"><use href="#i-glyph"></use></svg><kbd>G</kbd></button>
-                <button class="dock-btn" data-tool="text" title="Text (T)" aria-label="Text"><svg class="ic lg"><use href="#i-text"></use></svg><kbd>T</kbd></button>
-                <button class="dock-btn" data-tool="shape" title="Shape (S)" aria-label="Shape"><svg class="ic lg"><use href="#i-shape"></use></svg><kbd>S</kbd></button>
-                <button class="dock-btn" data-tool="select" title="Select (V)" aria-label="Select"><svg class="ic lg"><use href="#i-select"></use></svg><kbd>V</kbd></button>
+                <button class="dock-btn" aria-pressed="false" data-tool="brush" title="Brush (B)" aria-label="Brush"><svg class="ic lg"><use href="#i-brush"></use></svg><kbd>B</kbd></button>
+                <button class="dock-btn" aria-pressed="false" data-tool="glyph" title="Glyph (G)" aria-label="Glyph"><svg class="ic lg"><use href="#i-glyph"></use></svg><kbd>G</kbd></button>
+                <button class="dock-btn" aria-pressed="false" data-tool="text" title="Text (T)" aria-label="Text"><svg class="ic lg"><use href="#i-text"></use></svg><kbd>T</kbd></button>
+                <button class="dock-btn" aria-pressed="false" data-tool="shape" title="Shape (S)" aria-label="Shape"><svg class="ic lg"><use href="#i-shape"></use></svg><kbd>S</kbd></button>
+                <button class="dock-btn" aria-pressed="false" data-tool="selection" title="Select (V)" aria-label="Select"><svg class="ic lg"><use href="#i-select"></use></svg><kbd>V</kbd></button>
                 <span class="dock-sep"></span>
                 <div class="dock-colors" aria-hidden="true">
                     <span class="chip-bg" id="dock-bg"></span>

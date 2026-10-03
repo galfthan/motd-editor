@@ -37,9 +37,10 @@
     flex-direction: column;
     gap: 10px;
     position: fixed;
-    right: 16px;
+    /* Left of the canvas, clear of the inspector and the zoom card */
+    left: 16px;
     top: 72px;
-    bottom: 16px;
+    bottom: 88px;
     width: 340px;
     padding: 14px;
     background: var(--bg-secondary);

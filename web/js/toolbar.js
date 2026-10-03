@@ -103,7 +103,7 @@ const TOOL_GROUPS = {
     glyph: ['char'],
     text: ['text'],
     shape: ['box', 'line'],
-    select: ['select', 'select-subpixel'],
+    selection: ['select', 'select-subpixel'],
     pick: ['pick']
 };
 
@@ -112,7 +112,7 @@ const GROUP_INFO = {
     glyph: { title: 'Glyph', key: 'G' },
     text: { title: 'Text', key: 'T' },
     shape: { title: 'Shape', key: 'S' },
-    select: { title: 'Select', key: 'V' },
+    selection: { title: 'Select', key: 'V' },
     pick: { title: 'Pick colour', key: 'I' }
 };
 
@@ -120,7 +120,7 @@ const GROUP_INFO = {
 // and P are the older keys for draw, symbol and pick.
 const KEY_TOOLS = {
     b: 'brush', e: 'erase', d: 'draw', g: 'glyph', c: 'glyph', t: 'text',
-    s: 'shape', l: 'line', v: 'select', i: 'pick', p: 'pick'
+    s: 'shape', l: 'line', v: 'selection', i: 'pick', p: 'pick'
 };
 
 // Zoom steps for + and -
@@ -170,7 +170,7 @@ class Toolbar {
         this.saveFilename = 'motd.txt';
         this.saveFormat = 'ansi';
         this.colorTarget = 'fg';
-        this.lastTool = { brush: 'draw', shape: 'box', select: 'select' };
+        this.lastTool = { brush: 'draw', shape: 'box', selection: 'select' };
         this.lastChar = null;
         this.toolBeforePick = null;
 
@@ -458,7 +458,10 @@ class Toolbar {
         r.setTool(tool);
         if (tool === 'char' && this.lastChar !== null) r.setSelectedChar(this.lastChar);
 
-        document.querySelectorAll('.dock-btn[data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === group));
+        document.querySelectorAll('.dock-btn[data-tool]').forEach(b => {
+            b.classList.toggle('active', b.dataset.tool === group);
+            b.setAttribute('aria-pressed', String(b.dataset.tool === group));
+        });
         document.querySelectorAll('.inspector section[data-panel]').forEach(s => s.classList.toggle('active', s.dataset.panel === group));
         document.querySelectorAll('[data-tool-set]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.toolSet === tool)));
         document.getElementById('tool-title').textContent = GROUP_INFO[group].title;
@@ -500,7 +503,7 @@ class Toolbar {
     // Which colour the palette sets: 'fg' (ink) or 'bg' (paper)
     setColorTarget(which) {
         this.colorTarget = which;
-        document.querySelectorAll('.color-target').forEach(t => t.setAttribute('aria-pressed', String(t.dataset.target === which)));
+        document.querySelectorAll('[data-target-pick]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.targetPick === which)));
     }
 
     // Make `color` the current fg/bg colour and show it
