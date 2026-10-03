@@ -22,6 +22,11 @@ npx serve web
 - Foreground/background color support
 - Import/export ANSI text files
 - Copy/paste with system clipboard integration
+- Image import: paste (Ctrl+V), drop or File > Import Image a picture, then
+  place it with a click. The mouse wheel or +/- resize it, M switches to two
+  colours (the current foreground and background) and D changes the
+  dithering. Each cell gets the two colours that best fit its subpixels;
+  transparent areas leave the canvas as it is.
 - Text tool for typing characters directly
 - Color picker tool
 - Preview for dark or light terminals and for the cell shape (width ÷ height)
@@ -62,7 +67,8 @@ can also see your current selection, so you can select an area and say
 
 The agent gets tools mirroring the editor's: `draw_bitmap` and
 `draw_strokes` (subpixels), `place_symbols`, `write_text`, `draw_box`,
-`draw_line`, `copy_region`, `import_ansi`/`export`, `resize_canvas`,
+`draw_line`, `copy_region`, `import_image` (a local file or URL),
+`import_ansi`/`export`, `resize_canvas`,
 `new_canvas`, `undo`/`redo` and `batch`, plus `get_state`, `read_region`
 (text, subpixel bitmap or per-cell colours), `view_canvas` (a PNG, in dark
 or light terminal colours and any cell aspect) and `set_display` (Show Grid,

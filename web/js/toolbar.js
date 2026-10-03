@@ -297,6 +297,9 @@ class Toolbar {
             case 'open':
                 document.getElementById('file-input').click();
                 break;
+            case 'import-image':
+                document.getElementById('image-input').click();
+                break;
             case 'save':
                 this.doSave();
                 break;
@@ -450,6 +453,8 @@ class Toolbar {
             if (e.ctrlKey || e.metaKey || e.altKey) return;
             // Skip tool shortcuts when text cursor is active (typing goes to canvas)
             if (this.renderer.tool === 'text' && this.renderer.textCursor) return;
+            // ... and while placing an image (its keys, see CanvasRenderer)
+            if (this.renderer.isImagePaste()) return;
 
             const key = e.key.toLowerCase();
             const tool = (e.shiftKey && key === 's') ? 'select-subpixel' : TOOL_SHORTCUTS[key];
@@ -511,6 +516,13 @@ class Toolbar {
             };
             reader.readAsText(file);
             fileInput.value = '';
+        });
+
+        const imageInput = document.getElementById('image-input');
+        imageInput.addEventListener('change', () => {
+            const file = imageInput.files[0];
+            if (file) this.renderer.startImagePaste(file);
+            imageInput.value = '';
         });
     }
 

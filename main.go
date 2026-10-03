@@ -39,7 +39,7 @@ const instructions = `Edit the MOTD banner open in the user's browser, together 
 
 The canvas is a grid of terminal character cells, addressed (x, y) from the top-left. Each cell is also 2x3 subpixels, addressed (sx, sy) = (2x + col, 3y + row), drawn with Unicode sextant characters; a cell holds either subpixels or one other character (text, box drawing, symbols). Colours are "#rrggbb" or "default" (the terminal's default; the default when omitted).
 
-Start with get_state (canvas size, the user's selection and note to you). Look with view_canvas; use read_region for exact content. The banner will be shown in users' terminals, with dark or light backgrounds: "default" colours follow the terminal, so check both. Terminals also differ in cell shape: get_state's display.cell_aspect (cell width / height) is what the editor previews, so check it before doing geometry (circles, diagonals, converting images to subpixels), and compare aspects with view_canvas's cell_aspect. Every drawing tool is one undo step for the user. Use batch to apply many operations at once.`
+Start with get_state (canvas size, the user's selection and note to you). Look with view_canvas; use read_region for exact content. The banner will be shown in users' terminals, with dark or light backgrounds: "default" colours follow the terminal, so check both. Terminals also differ in cell shape: get_state's display.cell_aspect (cell width / height) is what the editor previews, so check it before doing geometry (circles, diagonals), and compare aspects with view_canvas's cell_aspect. Put photos and other pictures on the canvas with import_image. Every drawing tool is one undo step for the user. Use batch to apply many operations at once.`
 
 type editor struct {
 	url     string // where the editor is served
@@ -287,8 +287,15 @@ func toolResult(raw json.RawMessage) *mcp.CallToolResult {
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(raw)}}}
 }
 
-// relay adds a tool that runs the tab operation of the same name. In only
-// describes and validates the arguments; the tab gets them as sent.
+// preparer is an In that turns the arguments into the ones the tab gets
+// (e.g. reading a file the tab can't)
+type preparer interface {
+	prepare(context.Context) (any, error)
+}
+
+// relay adds a tool that runs the tab operation of the same name. In
+// describes and validates the arguments; the tab gets them as sent, or as
+// In's prepare returns them.
 func relay[In any](s *mcp.Server, l *link, name, description string) {
 	schema, err := jsonschema.For[In](nil)
 	if err != nil {
@@ -296,8 +303,16 @@ func relay[In any](s *mcp.Server, l *link, name, description string) {
 	}
 	notNull(schema)
 	mcp.AddTool(s, &mcp.Tool{Name: name, Description: description, InputSchema: schema},
-		func(ctx context.Context, req *mcp.CallToolRequest, _ In) (*mcp.CallToolResult, any, error) {
-			res, err := l.call(ctx, name, req.Params.Arguments)
+		func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
+			args := req.Params.Arguments
+			if p, ok := any(in).(preparer); ok {
+				v, err := p.prepare(ctx)
+				if err != nil {
+					return nil, nil, err
+				}
+				args, _ = json.Marshal(v)
+			}
+			res, err := l.call(ctx, name, args)
 			if err != nil {
 				return nil, nil, err
 			}

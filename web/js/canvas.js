@@ -103,6 +103,10 @@ class CanvasRenderer {
         this.subpixelSelectionStart = null;
         this.subpixelClipboard = null;      // 2D array of {filled, fg, bg} objects
 
+        // Image being placed (see startImagePaste): { image, cols, mono, dither, cells }
+        this.imagePaste = null;
+        this._wheel = 0;            // wheel movement not yet turned into a resize step
+
         // Text tool state
         this.textCursor = null; // { x, y } cell coordinates, or null
 
@@ -171,6 +175,43 @@ class CanvasRenderer {
             });
         }
 
+        // Image paste: the wheel over the canvas resizes it (Ctrl+wheel still
+        // zooms the page)
+        window.addEventListener('wheel', (e) => {
+            if (!this.isImagePaste() || e.ctrlKey || !this.container.parentElement.contains(e.target)) return;
+            e.preventDefault();
+            // Shift+wheel scrolls sideways in some browsers
+            this._wheel += (e.deltaY || e.deltaX) * (e.deltaMode ? 33 : 1);
+            if (Math.abs(this._wheel) < 50) return;
+            this.resizeImagePaste(this._wheel < 0 ? 1 : -1, e.shiftKey);
+            this._wheel = 0;
+        }, { passive: false });
+
+        // Dropping an image file starts placing it (and dropping other files
+        // doesn't open them in place of the editor)
+        window.addEventListener('dragover', (e) => {
+            if (e.dataTransfer.types.includes('Files')) e.preventDefault();
+        });
+        window.addEventListener('drop', (e) => {
+            if (!e.dataTransfer.types.includes('Files')) return;
+            e.preventDefault();
+            const file = [...e.dataTransfer.files].find(f => f.type.startsWith('image/'));
+            if (file) {
+                this._lastPointerEvent = e;
+                this.startImagePaste(file);
+            }
+        });
+
+        // Ctrl+V: an image, text or the editor's own clipboard
+        document.addEventListener('paste', (e) => {
+            this._pasteEventSeen = true;
+            if (e.target.closest && e.target.closest('input, textarea, [contenteditable]')) return;
+            e.preventDefault();
+            const item = [...e.clipboardData.items].find(i => i.kind === 'file' && i.type.startsWith('image/'));
+            if (item) this.startImagePaste(item.getAsFile());
+            else this.handlePaste(e.clipboardData.getData('text/plain'));
+        });
+
         // Prevent context menu on right-click
         this.container.addEventListener('contextmenu', (e) => e.preventDefault());
     }
@@ -192,6 +233,7 @@ class CanvasRenderer {
         if (tool !== 'select' && tool !== 'select-subpixel') {
             this.pasteMode = false;
             this.clearPastePreview();
+            this.endImagePaste();
         }
         if (tool !== 'text') {
             this.clearTextCursor();
@@ -214,7 +256,7 @@ class CanvasRenderer {
 
     setupKeyboardShortcuts() {
         document.addEventListener('keydown', (e) => {
-            if (e.target.tagName === 'INPUT') return;
+            if (e.target.closest && e.target.closest('input, textarea')) return;
 
             // Ctrl+Z - undo, Ctrl+Shift+Z / Ctrl+Y - redo (checked before the
             // text tool, so they also work while typing)
@@ -241,6 +283,30 @@ class CanvasRenderer {
                 return;
             }
 
+            // Image paste: +/- resize it (by key position, so Shift is free to
+            // make the step fine), M switches colour / mono, D the dithering
+            if (this.isImagePaste() && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                const p = this.imagePaste;
+                const grow = e.code === 'Equal' || e.code === 'NumpadAdd';
+                const shrink = e.code === 'Minus' || e.code === 'NumpadSubtract';
+                const k = e.key.toLowerCase();
+                if (grow || shrink || k === 'm' || k === 'd') {
+                    e.preventDefault();
+                    if (grow || shrink) {
+                        this.resizeImagePaste(grow ? 1 : -1, e.shiftKey);
+                        return;
+                    }
+                    if (k === 'm') {
+                        p.mono = !p.mono;
+                    } else {
+                        const names = Object.keys(IMAGE_DITHERS);
+                        p.dither = names[(names.indexOf(p.dither) + 1) % names.length];
+                    }
+                    this.updateImagePaste();
+                    return;
+                }
+            }
+
             // Escape - cancel a box/line drag, clear selection
             if (e.key === 'Escape') {
                 this.cancelDrag();
@@ -248,6 +314,7 @@ class CanvasRenderer {
                 this.clearSubpixelSelection();
                 this.pasteMode = false;
                 this.clearPastePreview();
+                this.endImagePaste();
                 return;
             }
 
@@ -278,17 +345,12 @@ class CanvasRenderer {
                 return;
             }
 
-            // Ctrl+V - paste
+            // Ctrl+V - paste: handled by the paste event, which has the
+            // clipboard's image or text. Browsers that send none (no editable
+            // element focused) get the text through the clipboard API.
             if (mod && e.key === 'v') {
-                e.preventDefault();
-                // Subpixel paste stays internal-only
-                if (this.isSubpixelMode()) {
-                    if (this.subpixelClipboard) {
-                        this.pasteMode = true;
-                    }
-                } else {
-                    this.handlePaste();
-                }
+                this._pasteEventSeen = false;
+                setTimeout(() => { if (!this._pasteEventSeen) this.handlePaste(); });
                 return;
             }
         });
@@ -1014,12 +1076,13 @@ class CanvasRenderer {
         // Paste mode takes priority over any tool
         if (this.pasteMode) {
             // Same hit-testing as showPastePreview, so paste lands where previewed
-            if (this.isSubpixelMode() && this.subpixelClipboard) {
+            if (this.pastingSubpixels()) {
                 const sp = this.subpixelCoordsFromEvent(e);
                 if (sp) this.recordEdit('Paste', () => this.pasteAtSubpixel(sp.sx, sp.sy));
             } else if (this.clipboard) {
                 const c = this.cellCoordsFromEvent(e);
                 if (c) this.recordEdit('Paste', () => this.pasteAt(c.cellX, c.cellY));
+                if (c) this.endImagePaste();
             }
             return;
         }
@@ -1053,6 +1116,7 @@ class CanvasRenderer {
         this.updatePointerInfo(e);
         if (this.pasteMode) {
             this.showPastePreview(e);
+            this.updateDragLabel(e);
             return;
         }
 
@@ -1385,7 +1449,12 @@ class CanvasRenderer {
     // its size (cells, or subpixels for the subpixel selection)
     updateDragLabel(e) {
         let text = '';
-        if (e && this.isDrawing) {
+        if (e && this.isImagePaste()) {
+            const p = this.imagePaste;
+            text = `${this.rectSizeText({ x1: 1, y1: 1, x2: p.cells[0].length, y2: p.cells.length })}` +
+                ` · ${p.mono ? 'mono' : 'colour'} · ${IMAGE_DITHERS[p.dither].name}` +
+                '\nwheel or ± size · M mono · D dither · Esc cancel';
+        } else if (e && this.isDrawing) {
             if (this.subpixelSelectionStart && this.subpixelSelection) {
                 text = this.rectSizeText(this.subpixelSelection, true);
             } else if (this.selectionStart && this.selection) {
@@ -1491,8 +1560,9 @@ class CanvasRenderer {
         this.beforeChange(x, y, x + maxWidth, y + this.clipboard.length - 1);
         this.clipboard.forEach((row, dy) => {
             row.forEach((cell, dx) => {
-                // A wide char's tail was already placed along with its head
-                if (cell.type === 'wide-tail' && dx > 0 && isWideHead(row[dx - 1])) return;
+                // Transparent (image paste), or a wide char's tail that was
+                // already placed along with its head
+                if (!cell || (cell.type === 'wide-tail' && dx > 0 && isWideHead(row[dx - 1]))) return;
                 const tx = x + dx;
                 const ty = y + dy;
                 if (tx >= 0 && tx < this.canvas.width && ty >= 0 && ty < this.canvas.height) {
@@ -1511,7 +1581,7 @@ class CanvasRenderer {
     // the grid is shown, as the cells are drawn just like on the canvas)
     showPastePreview(e) {
         // Subpixel mode paste preview
-        if (this.isSubpixelMode() && this.subpixelClipboard) {
+        if (this.pastingSubpixels()) {
             const sp = this.subpixelCoordsFromEvent(e);
             if (!sp) return;
 
@@ -1574,13 +1644,14 @@ class CanvasRenderer {
             // and a tail without its head becomes a blank cell
             const cells = [];
             this.clipboard.forEach((row, dy) => row.forEach((cell, dx) => {
-                if (cell.type === 'wide-tail' && dx > 0 && isWideHead(row[dx - 1])) return;
+                if (!cell || (cell.type === 'wide-tail' && dx > 0 && isWideHead(row[dx - 1]))) return;
                 const placed = cell.type === 'wide-tail' ? { ...cell, type: 'sextant' } : cell;
                 if (placed !== cell) clearCell(placed);
                 cells.push({ x: x + dx, y: y + dy, cell: placed });
             }));
             const width = Math.max(...this.clipboard.map(row => row.length));
-            const rectangular = this.clipboard.every(row => row.length === width); // not ragged pasted text
+            // Not ragged pasted text, nor an image with transparent cells
+            const rectangular = this.clipboard.every(row => row.length === width && row.every(Boolean));
             cached = this.drawCellsImage(cells, { x1: x, y1: y, x2: x + width - 1, y2: y + this.clipboard.length - 1 },
                 undefined, rectangular);
             this._pasteImages.set(key, cached);
@@ -1619,26 +1690,34 @@ class CanvasRenderer {
 
     clearPastePreview() {
         this._pastePreviewKey = null;
+        this.updateDragLabel(null);
         this.setOverlay('paste', []);
         this.setOverlay('paste-subpixel', [], true);
     }
 
     // Convert a 2D cell array to a multiline text string
     cellsToText(cells) {
-        const lines = cells.map(row => row.map(cellToChar).join('').replace(/\s+$/, ''));
+        const lines = cells.map(row => row.map(cell => cell ? cellToChar(cell) : ' ').join('').replace(/\s+$/, ''));
         while (lines.length > 0 && lines[lines.length - 1] === '') {
             lines.pop();
         }
         return lines.join('\n');
     }
 
-    // Handle paste: read from system clipboard, fall back to internal clipboard
-    async handlePaste() {
-        let systemText = null;
-        try {
-            systemText = await navigator.clipboard.readText();
-        } catch (err) {
-            console.warn('Failed to read system clipboard:', err);
+    // Handle paste of the system clipboard's text (read here if not given),
+    // falling back to the internal clipboard
+    async handlePaste(systemText) {
+        // Subpixel paste stays internal-only
+        if (this.isSubpixelMode()) {
+            if (this.subpixelClipboard) this.pasteMode = true;
+            return;
+        }
+        if (systemText === undefined) {
+            try {
+                systemText = await navigator.clipboard.readText();
+            } catch (err) {
+                console.warn('Failed to read system clipboard:', err);
+            }
         }
 
         // If we have an internal clipboard, check if system clipboard matches it
@@ -1665,6 +1744,80 @@ class CanvasRenderer {
         if (this.clipboard) {
             this.pasteMode = true;
         }
+    }
+
+    // --- Image paste ---
+    //
+    // A bitmap image (pasted, dropped or imported) is placed like a paste:
+    // converted to cells (see image-import.js) that follow the pointer until
+    // a click places them. It starts as large as fits the selection or the
+    // canvas; the wheel or +/- resize it, M and D switch colour / mono and
+    // the dithering, and every change converts it again.
+
+    async startImagePaste(blob) {
+        let image;
+        try {
+            image = await createImageBitmap(blob);
+        } catch (err) {
+            alert('Could not read the image: ' + err.message);
+            return;
+        }
+        const area = this.selection || { x1: 0, y1: 0, x2: this.canvas.width - 1, y2: this.canvas.height - 1 };
+        const cols = fitImageCols(image, this.cellAspect, area.x2 - area.x1 + 1, area.y2 - area.y1 + 1);
+        this.endImagePaste();
+        this.clearTextCursor(); // its typing would take the image's keys
+        this.imagePaste = { image, cols, mono: false, dither: 'floyd-steinberg' };
+        this._wheel = 0;
+        this.pasteMode = true;
+        this.updateImagePaste();
+    }
+
+    // Free the image once it is placed or cancelled (its cells stay on the
+    // clipboard, to paste again as they are)
+    endImagePaste() {
+        if (!this.imagePaste) return;
+        this.imagePaste.image.close();
+        this.imagePaste = null;
+    }
+
+    // Whether an image is being placed
+    isImagePaste() {
+        return this.pasteMode && !!this.imagePaste && this.clipboard === this.imagePaste.cells;
+    }
+
+    // Whether a subpixel paste is being placed
+    pastingSubpixels() {
+        return this.isSubpixelMode() && !!this.subpixelClipboard && !this.isImagePaste();
+    }
+
+    // Convert the image again (after a change of size or options) and show it
+    updateImagePaste() {
+        const p = this.imagePaste;
+        p.cells = imageToCells(p.image, p.cols, imageRows(p.image, p.cols, this.cellAspect),
+            { mono: p.mono, fg: this.fgColor, bg: this.bgColor, dither: p.dither });
+        this.clipboard = p.cells;
+        this._pastePreviewKey = null;
+        const e = this._lastPointerEvent;
+        if (e) {
+            this.showPastePreview(e);
+            this.updateDragLabel(e);
+        }
+    }
+
+    // Grow (dir 1) or shrink (-1) the image by about a tenth, or by one
+    // column when `fine`
+    resizeImagePaste(dir, fine) {
+        const p = this.imagePaste;
+        const step = fine ? 1 : Math.max(1, Math.round(p.cols / 10));
+        const cols = Math.min(500, Math.max(1, p.cols + dir * step));
+        if (cols === p.cols || (dir > 0 && imageRows(p.image, cols, this.cellAspect) > 200)) return;
+        p.cols = cols;
+        // Once per frame: a fast wheel turn sends many steps
+        if (this._imageFrame) return;
+        this._imageFrame = requestAnimationFrame(() => {
+            this._imageFrame = null;
+            if (this.isImagePaste()) this.updateImagePaste();
+        });
     }
 
     // Subpixel value and cell colours at subpixel coordinates
@@ -2075,6 +2228,7 @@ class CanvasRenderer {
         this.clearSubpixelSelection();
         this.pasteMode = false;
         this.clearPastePreview();
+        this.endImagePaste();
         this.cancelDrag();
         this.isDrawing = false;
         this.lastPoint = null;

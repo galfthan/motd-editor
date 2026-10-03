@@ -1,9 +1,21 @@
 package main
 
-import "github.com/modelcontextprotocol/go-sdk/mcp"
+import (
+	"context"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strings"
 
-// Tool arguments. These types only define the schema the agent sees; the
-// operations themselves are in collab/collab.js.
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+// Tool arguments. These types define the schema the agent sees; the
+// operations themselves are in collab/collab.js (after a prepare step, for
+// types that have one).
 
 type colors struct {
 	FG string `json:"fg,omitempty" jsonschema:"foreground colour: #rrggbb or default (the default)"`
@@ -99,6 +111,74 @@ type importArgs struct {
 	Replace bool   `json:"replace,omitempty" jsonschema:"replace the whole canvas, sized to the text, like File > Open"`
 }
 
+type imageArgs struct {
+	Path   string `json:"path,omitempty" jsonschema:"absolute path of an image file on this computer: PNG, JPEG, GIF, WebP or BMP"`
+	URL    string `json:"url,omitempty" jsonschema:"or the image's http(s) URL"`
+	X      int    `json:"x,omitempty" jsonschema:"left cell (default 0)"`
+	Y      int    `json:"y,omitempty" jsonschema:"top cell (default 0)"`
+	Width  int    `json:"width,omitempty" jsonschema:"cells; with only one of width and height the other keeps the image's proportions at the editor's cell aspect (default: as large as fits the canvas from x, y)"`
+	Height int    `json:"height,omitempty" jsonschema:"cells"`
+	Mono   bool   `json:"mono,omitempty" jsonschema:"use only the colours fg and bg (default: full colour, two colours per cell fitted to the image)"`
+	Dither string `json:"dither,omitempty" jsonschema:"floyd-steinberg (the default), atkinson (crisper) or none"`
+	colors
+}
+
+const maxImage = 20 << 20
+
+// prepare reads the image, which the tab gets as a data: URL
+func (a imageArgs) prepare(ctx context.Context) (any, error) {
+	var data []byte
+	var err error
+	switch {
+	case a.Path != "":
+		data, err = readFile(a.Path)
+	case a.URL != "":
+		data, err = download(ctx, a.URL)
+	default:
+		return nil, errors.New("give the image's path or url")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxImage {
+		return nil, fmt.Errorf("the image is over %d MB", maxImage>>20)
+	}
+	mime := http.DetectContentType(data)
+	if !strings.HasPrefix(mime, "image/") {
+		return nil, fmt.Errorf("not an image (%s)", mime)
+	}
+	return struct {
+		imageArgs
+		Data string `json:"data"`
+	}{a, "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)}, nil
+}
+
+// readFile reads at most maxImage+1 bytes, enough to tell it is too big
+func readFile(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, maxImage+1))
+}
+
+func download(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s: %s", url, resp.Status)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, maxImage+1))
+}
+
 type exportArgs struct {
 	Format string `json:"format,omitempty" jsonschema:"ansi (the default) or plain"`
 }
@@ -110,7 +190,7 @@ type sizeArgs struct {
 
 type batchArgs struct {
 	Ops []struct {
-		Op   string         `json:"op" jsonschema:"name of any other tool except batch, view_canvas, undo and redo"`
+		Op   string         `json:"op" jsonschema:"name of any other tool except batch, view_canvas, import_image, undo and redo"`
 		Args map[string]any `json:"args,omitempty"`
 	} `json:"ops"`
 }
@@ -140,6 +220,8 @@ func addTools(s *mcp.Server, l *link) {
 		"Copy or move the rectangle (x1, y1)-(x2, y2), inclusive, to (to_x, to_y), like Select with copy/cut and paste.")
 	relay[importArgs](s, l, "import_ansi",
 		"Paste ANSI text, or load it as the whole canvas.")
+	relay[imageArgs](s, l, "import_image",
+		"Place a picture as cells, like pasting an image into the editor: scaled, each cell given the two colours that best fit its 2x3 subpixels, and dithered. Transparent areas leave the canvas as it is.")
 	relay[exportArgs](s, l, "export",
 		"The canvas as a MOTD file: ANSI text with colours, or plain text.")
 	relay[sizeArgs](s, l, "resize_canvas",

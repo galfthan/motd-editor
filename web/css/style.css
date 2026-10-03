@@ -78,7 +78,7 @@ body {
     color: #fff;
     font: 12px/1.4 'Cascadia Code', 'Consolas', monospace;
     font-variant-numeric: tabular-nums;
-    white-space: nowrap;
+    white-space: pre;
 }
 
 .github-link {
