@@ -20,8 +20,8 @@ import (
 type colors struct {
 	Bold    bool   `json:"bold,omitempty" jsonschema:"bold text (cells drawn on get it, or lose it when false)"`
 	Inverse bool   `json:"inverse,omitempty" jsonschema:"fg and bg swapped as the terminal shows them, following the terminal's own colours where they are default (cells drawn on get it, or lose it when false)"`
-	FG      string `json:"fg,omitempty" jsonschema:"foreground colour: #rrggbb or default (the default)"`
-	BG      string `json:"bg,omitempty" jsonschema:"background colour: #rrggbb or default (the default). Cells drawn on get it even where they had a colour: pass that colour to keep a background"`
+	FG      string `json:"fg,omitempty" jsonschema:"foreground colour: #rrggbb, default (the default) or keep (each cell keeps its own)"`
+	BG      string `json:"bg,omitempty" jsonschema:"background colour: #rrggbb, default (the default) or keep (each cell keeps its own). Cells drawn on get it even where they had a colour: use keep to leave a background as it is"`
 }
 
 type region struct {
@@ -87,14 +87,20 @@ type textArgs struct {
 
 type boxArgs struct {
 	rect
-	Style string `json:"style,omitempty" jsonschema:"border: light (the default), heavy, double or none"`
-	Fill  string `json:"fill,omitempty" jsonschema:"none (the default); fill: clear the inside and give it the colours; recolor: only give the inside the colours. With style none they cover the whole rectangle, its edge cells included"`
+	Style string `json:"style,omitempty" jsonschema:"border: light (the default), heavy, double, subpixel (drawn with subpixels; x1-y2 are then subpixel coordinates) or none"`
+	Fill  string `json:"fill,omitempty" jsonschema:"none (the default); fill: clear the inside and give it the colours (subpixel style: a solid rectangle of subpixels); recolor: only give the inside the colours. With style none they cover the whole rectangle, its edge cells included"`
 	colors
 }
 
 type lineArgs struct {
 	rect
-	Style string `json:"style,omitempty" jsonschema:"light (the default), heavy or double"`
+	Style string `json:"style,omitempty" jsonschema:"light (the default), heavy, double, or subpixel: a straight line of subpixels, with x1-y2 subpixel coordinates"`
+	colors
+}
+
+type fillArgs struct {
+	SX int `json:"sx" jsonschema:"subpixel column of an empty subpixel"`
+	SY int `json:"sy" jsonschema:"subpixel row"`
 	colors
 }
 
@@ -225,7 +231,9 @@ func addTools(s *mcp.Server, l *link) {
 	relay[boxArgs](s, l, "draw_box",
 		"Draw a box with box-drawing characters from (x1, y1) to (x2, y2), cells inclusive, like the Box tool. Borders join with lines and boxes already there. Parts past the canvas edges are left out.")
 	relay[lineArgs](s, l, "draw_line",
-		"Draw a line of box-drawing characters from (x1, y1) to (x2, y2), like the Line tool: straight, or if both x and y differ a Z of three straight legs, the middle one halfway (horizontal-vertical-horizontal when at least as wide as tall, else vertical-horizontal-vertical). Ends on another line join it (╠, ┯). Both ends must be on the canvas.")
+		"Draw a line of box-drawing characters from (x1, y1) to (x2, y2), like the Line tool: straight, or if both x and y differ a Z of three straight legs, the middle one halfway (horizontal-vertical-horizontal when at least as wide as tall, else vertical-horizontal-vertical). Ends on another line join it (╠, ┯). Both ends must be on the canvas. Style subpixel draws a straight line of subpixels between subpixel points instead.")
+	relay[fillArgs](s, l, "fill",
+		"Fill the empty subpixels connected to the empty subpixel (sx, sy), up, down, left and right, like the Fill tool. Cells holding a character count as full, so they bound the fill. The filled cells get fg and bg (bg: keep leaves their backgrounds).")
 	relay[copyArgs](s, l, "copy_region",
 		"Copy or move the rectangle (x1, y1)-(x2, y2), inclusive, to (to_x, to_y), like Select with copy/cut and paste.")
 	relay[importArgs](s, l, "import_ansi",

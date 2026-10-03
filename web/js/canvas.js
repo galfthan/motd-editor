@@ -34,7 +34,10 @@ function setCellWidthForAspect(aspect) {
 }
 
 // Overlays on the overlay canvas, bottom to top (see setOverlay)
-const OVERLAY_ORDER = ['hover', 'hover-subpixel', 'paste', 'image-handle', 'paste-subpixel', 'box', 'selection', 'subpixel-selection'];
+const OVERLAY_ORDER = ['hover', 'hover-subpixel', 'paste', 'image-handle', 'paste-subpixel', 'box', 'box-subpixel', 'selection', 'subpixel-selection'];
+
+// Box/line style drawn with subpixels instead of box-drawing characters
+const SUBPIXEL_STYLE = 4;
 
 // Left / top edge (CSS px) of subpixel column sx / row sy
 function subpixelEdgeX(sx) { return Math.floor(sx / 2) * CELL_W + SUB_X_EDGES[sx % 2]; }
@@ -42,6 +45,23 @@ function subpixelEdgeY(sy) { return Math.floor(sy / 3) * CELL_H + SUB_Y_EDGES[sy
 
 // Cap on the grid canvas's backing store, in device pixels (see render)
 const MAX_CANVAS_PIXELS = 16 * 1024 * 1024;
+
+// The cells covering a rect in subpixel coordinates
+function subpixelToCellRect(r) {
+    return { x1: Math.floor(r.x1 / 2), y1: Math.floor(r.y1 / 3), x2: Math.floor(r.x2 / 2), y2: Math.floor(r.y2 / 3) };
+}
+
+// Points ({ x, y }) as rects, consecutive ones on a row merged into one
+function runsOf(points) {
+    const rects = [];
+    for (const { x, y } of points) {
+        const r = rects[rects.length - 1];
+        if (r && r.y1 === y && x === r.x2 + 1) r.x2 = x;
+        else if (r && r.y1 === y && x === r.x1 - 1) r.x1 = x;
+        else rects.push({ x1: x, y1: y, x2: x, y2: y });
+    }
+    return rects;
+}
 
 // Grid points on the straight line from (x0, y0) to (x1, y1), both ends
 // included, stepping one point at a time (Bresenham)
@@ -118,7 +138,7 @@ class CanvasRenderer {
         // Box/line tool state
         this.dragStart = null;      // { x, y } cell where the drag began
         this.dragEnd = null;        // { x, y } current cell
-        this.boxLineStyle = 1;      // 0=none, 1=light, 2=heavy, 3=double
+        this.boxLineStyle = 1;      // 0=none, 1=light, 2=heavy, 3=double, 4=subpixels (SUBPIXEL_STYLE)
         this.boxFillMode = 0;       // 0=no fill, 1=fill & clear, 2=recolor only
 
         // Draw/erase tool state
@@ -456,10 +476,11 @@ class CanvasRenderer {
         if (cursor && this.tool === 'text') this.setTextCursor(cursor.x, cursor.y);
     }
 
-    // Give a cell the currently picked colours and text style
+    // Give a cell the currently picked colours (but not "keep" ones) and
+    // text style
     applyCurrentColors(cell) {
-        cell.fg = { ...this.fgColor };
-        cell.bg = { ...this.bgColor };
+        if (!this.fgColor.keep) cell.fg = { ...this.fgColor };
+        if (!this.bgColor.keep) cell.bg = { ...this.bgColor };
         cell.bold = this.bold;
         cell.inverse = this.inverse;
     }
@@ -618,6 +639,7 @@ class CanvasRenderer {
                 'image-handle': { line: style.getPropertyValue('--overlay-paste').trim(), fill: style.getPropertyValue('--overlay-handle').trim() },
                 'paste-subpixel': { line: style.getPropertyValue('--overlay-paste').trim() },
                 box: { line: style.getPropertyValue('--overlay-preview').trim() },
+                'box-subpixel': { line: style.getPropertyValue('--overlay-preview').trim() },
                 selection: { line: style.getPropertyValue('--overlay-selection').trim() },
                 'subpixel-selection': { line: style.getPropertyValue('--overlay-selection').trim() }
             }
@@ -1193,6 +1215,8 @@ class CanvasRenderer {
             this.handleSelectToolDown(e);
         } else if (this.tool === 'char') {
             this.handleCharTool(e);
+        } else if (this.tool === 'fill') {
+            this.handleFillTool(e);
         } else {
             this.handleDrawTool(e);
         }
@@ -1242,7 +1266,7 @@ class CanvasRenderer {
             this.lastPoint = null;
         } else if (this.tool === 'char') {
             this.handleCharTool(e);
-        } else if (this.tool !== 'pick' && this.tool !== 'text') {
+        } else if (this.tool === 'draw' || this.tool === 'erase') {
             this.handleDrawTool(e);
         }
         this.updateDragLabel(e);
@@ -1528,8 +1552,14 @@ class CanvasRenderer {
 
     // Whether the current tool works on subpixels rather than whole cells
     usesSubpixels() {
-        return this.tool === 'select-subpixel' ||
+        return this.tool === 'select-subpixel' || this.tool === 'fill' || this.subpixelShape() ||
             ((this.tool === 'draw' || this.tool === 'erase') && !this.brushCell);
+    }
+
+    // Whether the box/line tool draws with subpixels (its points are then
+    // subpixel coordinates)
+    subpixelShape() {
+        return (this.tool === 'box' || this.tool === 'line') && this.boxLineStyle === SUBPIXEL_STYLE;
     }
 
     // Size of a rect as "W×H"
@@ -1574,7 +1604,7 @@ class CanvasRenderer {
             } else if (this.selectionStart && this.selection) {
                 text = this.rectSizeText(this.selection);
             } else if (this.tool === 'box' && this.dragStart && this.dragEnd) {
-                text = this.rectSizeText(normRect(this.dragStart, this.dragEnd));
+                text = this.rectSizeText(normRect(this.dragStart, this.dragEnd), this.subpixelShape());
             }
         }
         if (!text) {
@@ -2201,8 +2231,8 @@ class CanvasRenderer {
         const { cell, cellX, cellY, row, col } = sp;
 
         // Nothing to do if the subpixel and the colours it sets already match
-        if (cell.type === 'sextant' && cell.subpixels[row][col] === filled && colorsEqual(cell.bg, this.bgColor) &&
-            (filled ? colorsEqual(cell.fg, this.fgColor) && !!cell.bold === this.bold && !!cell.inverse === this.inverse
+        if (cell.type === 'sextant' && cell.subpixels[row][col] === filled && colorKeeps(cell.bg, this.bgColor) &&
+            (filled ? colorKeeps(cell.fg, this.fgColor) && !!cell.bold === this.bold && !!cell.inverse === this.inverse
                 : !cell.bold && !cell.inverse)) {
             return null;
         }
@@ -2212,7 +2242,7 @@ class CanvasRenderer {
             this.applyCurrentColors(cell);
         } else {
             // Erased, the cell shows plainly (an inverse blank would be a block)
-            cell.bg = { ...this.bgColor };
+            if (!this.bgColor.keep) cell.bg = { ...this.bgColor };
             cell.bold = cell.inverse = false;
         }
         detachWide(this.canvas.cells, cellX, cellY);
@@ -2246,20 +2276,32 @@ class CanvasRenderer {
 
     // --- Box and line tools (drag from dragStart to dragEnd) ---
 
-    handleShapeToolDown(e) {
+    // The point a shape drag is at: a cell, or a subpixel for the subpixel style
+    shapePoint(e) {
+        if (this.subpixelShape()) {
+            const sp = this.subpixelCoordsFromEvent(e);
+            return sp && { x: sp.sx, y: sp.sy };
+        }
         const c = this.cellCoordsFromEvent(e);
-        if (!c) return;
-        this.dragStart = { x: c.cellX, y: c.cellY };
+        return c && { x: c.cellX, y: c.cellY };
+    }
+
+    handleShapeToolDown(e) {
+        const p = this.shapePoint(e);
+        if (!p) return;
+        this.dragStart = p;
         this.handleShapeToolMove(e);
     }
 
     handleShapeToolMove(e) {
         if (!this.dragStart) return;
-        const c = this.cellCoordsFromEvent(e);
-        if (!c) return;
-        this.dragEnd = { x: c.cellX, y: c.cellY };
+        const p = this.shapePoint(e);
+        if (!p) return;
+        this.dragEnd = p;
 
-        if (this.tool === 'box') {
+        if (this.subpixelShape()) {
+            this.setOverlay('box-subpixel', this.tool === 'box' ? this.subpixelBoxRects() : runsOf(this.subpixelLinePoints()), true);
+        } else if (this.tool === 'box') {
             this.showBoxPreview(normRect(this.dragStart, this.dragEnd));
         } else {
             this.showLinePreview();
@@ -2270,9 +2312,128 @@ class CanvasRenderer {
         this.dragStart = null;
         this.dragEnd = null;
         this.setOverlay('box', []);
+        this.setOverlay('box-subpixel', [], true);
+    }
+
+    // --- Subpixel boxes and lines (SUBPIXEL_STYLE), dragStart to dragEnd in
+    // subpixel coordinates ---
+
+    // A straight line of subpixels
+    subpixelLinePoints() {
+        return linePoints(this.dragStart.x, this.dragStart.y, this.dragEnd.x, this.dragEnd.y);
+    }
+
+    // The box's subpixels as rects: all of it when filled, else its outline
+    subpixelBoxRects() {
+        const { x1, y1, x2, y2 } = normRect(this.dragStart, this.dragEnd);
+        if (this.boxFillMode === 1 || x2 - x1 < 2 || y2 - y1 < 2) return [{ x1, y1, x2, y2 }];
+        return [
+            { x1, y1, x2, y2: y1 }, { x1, y1: y2, x2, y2 },
+            { x1, y1: y1 + 1, x2: x1, y2: y2 - 1 }, { x1: x2, y1: y1 + 1, x2, y2: y2 - 1 }
+        ];
+    }
+
+    // Set the subpixels in `rects` (clipped to the canvas) in the current
+    // colours, repainting each touched cell once
+    paintSubpixelRects(rects) {
+        const changed = new Map();
+        for (const r of rects) {
+            const c = this.clipRect(r, true);
+            if (!c) continue;
+            for (let sy = c.y1; sy <= c.y2; sy++) {
+                for (let sx = c.x1; sx <= c.x2; sx++) {
+                    const sp = this.paintSubpixel(sx, sy, true);
+                    if (sp) changed.set(`${sp.cellX},${sp.cellY}`, sp);
+                }
+            }
+        }
+        for (const { cellX, cellY } of changed.values()) this.updateCell(cellX, cellY);
+    }
+
+    // Draw the dragged 'box' or 'line' with subpixels
+    commitSubpixelShape(shape) {
+        if (shape === 'line') {
+            this.paintSubpixelRects(this.subpixelLinePoints().map(p => ({ x1: p.x, y1: p.y, x2: p.x, y2: p.y })));
+            return;
+        }
+        const rects = this.subpixelBoxRects();
+        // Recolour: the cells inside the outline get the colours too
+        const r = normRect(this.dragStart, this.dragEnd);
+        if (this.boxFillMode === 2 && rects.length === 4) {
+            const inside = this.clipRect(subpixelToCellRect({ x1: r.x1 + 1, y1: r.y1 + 1, x2: r.x2 - 1, y2: r.y2 - 1 }));
+            if (inside) {
+                this.beforeChange(inside.x1, inside.y1, inside.x2, inside.y2);
+                for (let y = inside.y1; y <= inside.y2; y++) {
+                    for (let x = inside.x1; x <= inside.x2; x++) this.applyCurrentColors(this.canvas.cells[y][x]);
+                }
+                this.updateCellRect(inside.x1, inside.y1, inside.x2, inside.y2);
+            }
+        }
+        this.paintSubpixelRects(rects);
+    }
+
+    // --- Fill tool ---
+
+    handleFillTool(e) {
+        const sp = this.subpixelCoordsFromEvent(e);
+        if (sp) this.fillAt(sp.sx, sp.sy);
+    }
+
+    // Set every empty subpixel connected to (sx, sy) (up, down, left, right)
+    // in the current colours. Cells holding a character are full. Returns
+    // how many were set (0 if (sx, sy) isn't empty) and the cells' rect.
+    fillAt(sx, sy) {
+        const cols = this.canvas.width, W = cols * 2, H = this.canvas.height * 3;
+        // The empty subpixels, row-major (cleared as the fill reaches them)
+        const empty = new Uint8Array(W * H);
+        this.canvas.cells.forEach((row, y) => row.forEach((cell, x) => {
+            if (cell.type !== 'sextant') return;
+            for (let r = 0; r < 3; r++) {
+                for (let c = 0; c < 2; c++) if (!cell.subpixels[r][c]) empty[(y * 3 + r) * W + x * 2 + c] = 1;
+            }
+        }));
+        if (!(sx >= 0 && sx < W && sy >= 0 && sy < H) || !empty[sy * W + sx]) return { count: 0 };
+
+        const filled = [];
+        const stack = [sy * W + sx];
+        empty[stack[0]] = 0;
+        while (stack.length) {
+            const i = stack.pop();
+            filled.push(i);
+            const x = i % W;
+            if (x > 0 && empty[i - 1]) { empty[i - 1] = 0; stack.push(i - 1); }
+            if (x < W - 1 && empty[i + 1]) { empty[i + 1] = 0; stack.push(i + 1); }
+            if (i >= W && empty[i - W]) { empty[i - W] = 0; stack.push(i - W); }
+            if (i + W < W * H && empty[i + W]) { empty[i + W] = 0; stack.push(i + W); }
+        }
+
+        // Each touched cell once: recorded, given the colours, then its subpixels set
+        const box = { x1: cols, y1: this.canvas.height, x2: 0, y2: 0 };
+        const touched = new Set();
+        for (const i of filled) {
+            const x = i % W, y = (i - x) / W;
+            touched.add(Math.floor(y / 3) * cols + (x >> 1));
+        }
+        for (const k of touched) {
+            const x = k % cols, y = (k - x) / cols;
+            this.beforeChange(x, y, x, y);
+            this.applyCurrentColors(this.canvas.cells[y][x]);
+            box.x1 = Math.min(box.x1, x); box.x2 = Math.max(box.x2, x);
+            box.y1 = Math.min(box.y1, y); box.y2 = Math.max(box.y2, y);
+        }
+        for (const i of filled) {
+            const x = i % W, y = (i - x) / W;
+            this.canvas.cells[Math.floor(y / 3)][x >> 1].subpixels[y % 3][x % 2] = true;
+        }
+        this.updateCellRect(box.x1, box.y1, box.x2, box.y2);
+        return { count: filled.length, rect: box };
     }
 
     commitBox() {
+        if (this.boxLineStyle === SUBPIXEL_STYLE) {
+            this.commitSubpixelShape('box');
+            return;
+        }
         const { x1, y1, x2, y2 } = normRect(this.dragStart, this.dragEnd);
 
         // Fill: when there is a border, fill the interior only; otherwise fill
@@ -2319,6 +2480,10 @@ class CanvasRenderer {
     }
 
     commitLine() {
+        if (this.boxLineStyle === SUBPIXEL_STYLE) {
+            this.commitSubpixelShape('line');
+            return;
+        }
         const chars = computeLineChars(
             this.dragStart.x, this.dragStart.y,
             this.dragEnd.x, this.dragEnd.y,

@@ -124,10 +124,13 @@ function setGridChar(cells, x, y, charCode) {
 // Write a copy of `src` into (x, y), keeping wide chars consistent. A tail
 // whose head wasn't copied along with it becomes a blank cell.
 function placeCell(cells, x, y, src) {
-    // A background marked `keep` (an image's edge cells) is the one there
+    // Colours marked `keep` (an image's edge cells, text pasted with keep
+    // colours) are the ones there
+    const fg = src.fg.keep ? { ...cells[y][x].fg } : null;
     const bg = src.bg.keep ? { ...cells[y][x].bg } : null;
     detachWide(cells, x, y);
     const cell = structuredClone(src);
+    if (fg) cell.fg = fg;
     if (bg) cell.bg = bg;
     if (cell.type === 'wide-tail') clearCell(cell);
     cells[y][x] = cell;
@@ -197,6 +200,17 @@ function clearCanvas(canvas) {
             canvas.cells[y][x] = createCell();
         }
     }
+}
+
+// A colour that leaves the cell's own: "keep" ink or paper (r, g, b as the
+// terminal's own, for code that needs some colour, e.g. a mono image)
+function keepColor(which) {
+    return { ...(which === 'fg' ? defaultFG() : defaultBG()), keep: true };
+}
+
+// Whether giving a cell `color` would leave its `own` colour as it is
+function colorKeeps(own, color) {
+    return color.keep || colorsEqual(own, color);
 }
 
 function colorsEqual(a, b) {
