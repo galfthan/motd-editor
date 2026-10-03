@@ -269,8 +269,11 @@ const OPS = {
         const { x1, y1, x2, y2 } = regionRect(a);
         const rows = r.canvas.cells.slice(y1, y2 + 1).map(row => row.slice(x1, x2 + 1));
         switch (a.format || 'text') {
-            case 'text':
-                return rows.map(row => row.map(cellToChar).join('')).join('\n');
+            case 'text': {
+                // Trailing spaces dropped, as in the export
+                const text = rows.map(row => row.map(cellToChar).join('').trimEnd()).join('\n');
+                return text.trim() ? text : `(${rows.length} blank rows)`;
+            }
             case 'subpixels':
                 return rows.flatMap(row => [0, 1, 2].map(sr => row.map(cell =>
                     cell.type === 'sextant' ? cell.subpixels[sr].map(on => on ? '#' : '.').join('') : '++'
@@ -337,7 +340,9 @@ const OPS = {
     },
 
     draw_box(a) {
-        const rect = argRect(a);
+        // Not clipped: the parts past the edges are left out
+        const rect = normRect({ x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 });
+        if (!r.clipRect(rect)) throw new Error('rectangle is outside the canvas');
         withState({
             ...colorState(a),
             dragStart: { x: rect.x1, y: rect.y1 },

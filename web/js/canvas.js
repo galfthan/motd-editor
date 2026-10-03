@@ -2066,12 +2066,15 @@ class CanvasRenderer {
     commitBox() {
         const { x1, y1, x2, y2 } = normRect(this.dragStart, this.dragEnd);
 
-        // Fill: when there is a border, fill the interior only; otherwise fill the whole area
-        if (this.boxFillMode > 0) {
-            const inset = this.boxLineStyle > 0 ? 1 : 0;
-            this.beforeChange(x1 + inset, y1 + inset, x2 - inset, y2 - inset);
-            for (let y = y1 + inset; y <= y2 - inset; y++) {
-                for (let x = x1 + inset; x <= x2 - inset; x++) {
+        // Fill: when there is a border, fill the interior only; otherwise fill
+        // the whole area. The box may reach past the canvas (the collab add-on
+        // draws boxes there): only cells on it change.
+        const inset = this.boxLineStyle > 0 ? 1 : 0;
+        const inside = this.clipRect({ x1: x1 + inset, y1: y1 + inset, x2: x2 - inset, y2: y2 - inset });
+        if (this.boxFillMode > 0 && inside) {
+            this.beforeChange(inside.x1, inside.y1, inside.x2, inside.y2);
+            for (let y = inside.y1; y <= inside.y2; y++) {
+                for (let x = inside.x1; x <= inside.x2; x++) {
                     const cell = this.canvas.cells[y][x];
                     if (this.boxFillMode === 1) {
                         detachWide(this.canvas.cells, x, y);

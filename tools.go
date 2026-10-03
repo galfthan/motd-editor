@@ -86,7 +86,7 @@ type textArgs struct {
 type boxArgs struct {
 	rect
 	Style string `json:"style,omitempty" jsonschema:"border: light (the default), heavy, double or none"`
-	Fill  string `json:"fill,omitempty" jsonschema:"none (the default); fill: clear the inside and give it the colours; recolor: only give the inside the colours"`
+	Fill  string `json:"fill,omitempty" jsonschema:"none (the default); fill: clear the inside and give it the colours; recolor: only give the inside the colours. With style none the inside is the whole rectangle"`
 	colors
 }
 
@@ -213,9 +213,9 @@ func addTools(s *mcp.Server, l *link) {
 	relay[textArgs](s, l, "write_text",
 		"Type text into cells, like the Text tool.")
 	relay[boxArgs](s, l, "draw_box",
-		"Draw a box with box-drawing characters from (x1, y1) to (x2, y2), cells inclusive, like the Box tool. Borders join with lines and boxes already there.")
+		"Draw a box with box-drawing characters from (x1, y1) to (x2, y2), cells inclusive, like the Box tool. Borders join with lines and boxes already there. Parts past the canvas edges are left out.")
 	relay[lineArgs](s, l, "draw_line",
-		"Draw a line of box-drawing characters from (x1, y1) to (x2, y2), going horizontally then vertically, like the Line tool.")
+		"Draw a line of box-drawing characters from (x1, y1) to (x2, y2), like the Line tool: straight, or if both x and y differ an S of three straight legs (horizontal, vertical, horizontal when at least as wide as tall). Ends on another line join it (╠, ┯).")
 	relay[copyArgs](s, l, "copy_region",
 		"Copy or move the rectangle (x1, y1)-(x2, y2), inclusive, to (to_x, to_y), like Select with copy/cut and paste.")
 	relay[importArgs](s, l, "import_ansi",
