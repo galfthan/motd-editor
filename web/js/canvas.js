@@ -609,32 +609,56 @@ class CanvasRenderer {
                 this.drawCell(x, y, false);
             }
         }
-        if (this.showGrid) {
+        if (this.gridLines().show) {
             this.drawGridLines();
             // A wide char has no grid line between its halves
             for (const [x, y] of wide) this.drawCell(x, y);
         }
     }
 
-    // All the cells' grid rings at once, as one line per cell edge across the
+    // How the grid is drawn at this scale: a ring of bx x by device px over
+    // each cell's outermost pixels where there are 2 or more device px per
+    // CSS px, else (`thin`) one device px along each cell's top and left (and
+    // the canvas's right and bottom edges), shared by neighbouring cells; not
+    // at all (`show` false) once cells are too small for lines to help
+    gridLines() {
+        const kx = this._scaleX, ky = this._scaleY;
+        return {
+            show: this.showGrid && CELL_W * kx >= 4,
+            thin: kx < 2 || ky < 2,
+            bx: Math.max(1, Math.floor(kx)),
+            by: Math.max(1, Math.floor(ky))
+        };
+    }
+
+    // All the cells' grid lines at once, as one line per cell edge across the
     // whole canvas: the same pixels as drawCell's per-cell rings
     drawGridLines() {
         const ctx = this.ctx;
         const kx = this._scaleX, ky = this._scaleY;
-        const bx = Math.max(1, Math.floor(kx)), by = Math.max(1, Math.floor(ky));
-        const width = Math.round(this.canvas.width * CELL_W * kx);
-        const height = Math.round(this.canvas.height * CELL_H * ky);
+        const { thin, bx, by } = this.gridLines();
+        const cols = this.canvas.width, rows = this.canvas.height;
+        const width = Math.round(cols * CELL_W * kx);
+        const height = Math.round(rows * CELL_H * ky);
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.fillStyle = this.theme.border;
-        for (let x = 0; x <= this.canvas.width; x++) {
+        for (let x = 0; x <= cols; x++) {
             const dx = Math.round(x * CELL_W * kx);
+            if (thin) {
+                ctx.fillRect(x < cols ? dx : dx - 1, 0, 1, height);
+                continue;
+            }
             if (x > 0) ctx.fillRect(dx - bx, 0, bx, height);                // right edge of column x - 1
-            if (x < this.canvas.width) ctx.fillRect(dx, 0, bx, height);     // left edge of column x
+            if (x < cols) ctx.fillRect(dx, 0, bx, height);                  // left edge of column x
         }
-        for (let y = 0; y <= this.canvas.height; y++) {
+        for (let y = 0; y <= rows; y++) {
             const dy = Math.round(y * CELL_H * ky);
+            if (thin) {
+                ctx.fillRect(0, y < rows ? dy : dy - 1, width, 1);
+                continue;
+            }
             if (y > 0) ctx.fillRect(0, dy - by, width, by);
-            if (y < this.canvas.height) ctx.fillRect(0, dy, width, by);
+            if (y < rows) ctx.fillRect(0, dy, width, by);
         }
     }
 
@@ -720,17 +744,25 @@ class CanvasRenderer {
             ctx.restore();
         }
 
-        // Grid lines: a 1 CSS px ring painted over the cell's outermost pixels
-        // (drawAll draws them for all cells at once instead)
-        if (this.showGrid && gridRing) {
+        // Grid lines painted over the cell's outermost pixels, as gridLines
+        // says (drawAll draws them for all cells at once instead)
+        const grid = this.gridLines();
+        if (grid.show && gridRing) {
             const [x0, y0, w, h] = g.rect;
-            const bx = Math.max(1, Math.floor(g.kx)), by = Math.max(1, Math.floor(g.ky));
             ctx.setTransform(1, 0, 0, 1, 0, 0);
             ctx.fillStyle = this.theme.border;
-            ctx.fillRect(x0, y0, w, by);
-            ctx.fillRect(x0, y0 + h - by, w, by);
-            ctx.fillRect(x0, y0, bx, h);
-            ctx.fillRect(x0 + w - bx, y0, bx, h);
+            if (grid.thin) {
+                ctx.fillRect(x0, y0, w, 1);
+                ctx.fillRect(x0, y0, 1, h);
+                if (x + (isWideHead(cell) ? 2 : 1) >= this.canvas.width) ctx.fillRect(x0 + w - 1, y0, 1, h);
+                if (y + 1 >= this.canvas.height) ctx.fillRect(x0, y0 + h - 1, w, 1);
+            } else {
+                const { bx, by } = grid;
+                ctx.fillRect(x0, y0, w, by);
+                ctx.fillRect(x0, y0 + h - by, w, by);
+                ctx.fillRect(x0, y0, bx, h);
+                ctx.fillRect(x0 + w - bx, y0, bx, h);
+            }
         }
     }
 
@@ -1289,11 +1321,11 @@ class CanvasRenderer {
     // --- Overlays ---
 
     // Show `rects` (grid coordinates, inclusive; in subpixels, 2x3 per cell,
-    // with `subpixel`) as the given kind of overlay: outlines of every cell or
-    // subpixel in them, drawn exactly like the grid lines but in the kind's
-    // colour (see OVERLAY_ORDER and the --overlay-* CSS variables). A rect
-    // with `whole` gets one outline around all of it (a wide char). An empty
-    // list hides the overlay.
+    // with `subpixel`) as the given kind of overlay, in the kind's colour (see
+    // OVERLAY_ORDER and the --overlay-* CSS variables): an outline as thick
+    // as the grid lines, and hairlines between the cells or subpixels in it
+    // while they are big enough. A rect with `whole` is one unit (a wide
+    // char). An empty list hides the overlay.
     // `images` ({ image, x, y } at device positions, from drawCellsImage) are
     // drawn under the outlines (the paste preview's content).
     setOverlay(kind, rects, subpixel = false, images = []) {
@@ -1312,15 +1344,21 @@ class CanvasRenderer {
     }
 
     // Where an overlay kind changed from `a` to `b`, as device-pixel rects.
-    // Outlines are drawn per cell (or subpixel), so units in both look the
-    // same before and after: for single rects (selections, the hover box,
-    // filled box previews) only the units in one but not the other change,
-    // e.g. the new row when a selection grows by one.
+    // For single rects (selections, the hover box, filled box previews) only
+    // the units in one but not the other change, plus the rows and columns
+    // along both outlines, e.g. the new row and the old bottom row when a
+    // selection grows by one.
     overlayChangedAreas(a, b) {
         const subpixel = (a || b).subpixel;
         const single = (e) => e && e.rects.length === 1 && !e.rects[0].whole && !e.images.length;
+        // The rows and columns along a rect's edges, where its outline is
+        // thicker than the lines inside it
+        const edges = (r) => [
+            { ...r, y2: r.y1 }, { ...r, y1: r.y2 }, { ...r, x2: r.x1 }, { ...r, x1: r.x2 }
+        ];
         const units = single(a) && single(b)
-            ? [...rectMinus(a.rects[0], b.rects[0]), ...rectMinus(b.rects[0], a.rects[0])]
+            ? [...rectMinus(a.rects[0], b.rects[0]), ...rectMinus(b.rects[0], a.rects[0]),
+                ...edges(a.rects[0]), ...edges(b.rects[0])]
             : [...(a ? a.rects : []), ...(b ? b.rects : [])];
         const edgeX = subpixel ? subpixelEdgeX : (x) => x * CELL_W;
         const edgeY = subpixel ? subpixelEdgeY : (y) => y * CELL_H;
@@ -1378,22 +1416,23 @@ class CanvasRenderer {
         const DX = (x) => Math.round(edgeX(x) * kx);
         const DY = (y) => Math.round(edgeY(y) * ky);
         const bx = Math.max(1, Math.floor(kx)), by = Math.max(1, Math.floor(ky)); // as the grid
+        // Lines between the units inside a rect: one device px, and none
+        // once the units are too small for them to help
+        const unitW = (subpixel ? CELL_W / 2 : CELL_W) * kx, unitH = (subpixel ? CELL_H / 3 : CELL_H) * ky;
+        const inner = unitW >= 8 && unitH >= 8;
         const out = [...images];
         for (const r of rects) {
             const left = DX(r.x1), right = DX(r.x2 + 1);
             const top = DY(r.y1), bottom = DY(r.y2 + 1);
             if (style.fill) out.push([left, top, right - left, bottom - top, style.fill]);
-            // Unit spans along each axis: every cell/subpixel, or the whole
-            // rect as one unit (a wide char's hover box)
-            const spans = (a, b) => r.whole ? [[a, b]] : Array.from({ length: b - a + 1 }, (_, i) => [a + i, a + i]);
-            for (const [a, b] of spans(r.x1, r.x2)) {
-                out.push([DX(a), top, bx, bottom - top, style.line]);
-                out.push([DX(b + 1) - bx, top, bx, bottom - top, style.line]);
-            }
-            for (const [a, b] of spans(r.y1, r.y2)) {
-                out.push([left, DY(a), right - left, by, style.line]);
-                out.push([left, DY(b + 1) - by, right - left, by, style.line]);
-            }
+            out.push([left, top, bx, bottom - top, style.line]);
+            out.push([right - bx, top, bx, bottom - top, style.line]);
+            out.push([left, top, right - left, by, style.line]);
+            out.push([left, bottom - by, right - left, by, style.line]);
+            // `whole`: one outline around all of it (a wide char's hover box)
+            if (r.whole || !inner) continue;
+            for (let x = r.x1 + 1; x <= r.x2; x++) out.push([DX(x), top, 1, bottom - top, style.line]);
+            for (let y = r.y1 + 1; y <= r.y2; y++) out.push([left, DY(y), right - left, 1, style.line]);
         }
         return out;
     }
