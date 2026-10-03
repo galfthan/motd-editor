@@ -120,7 +120,8 @@ type imageArgs struct {
 	Height int    `json:"height,omitempty" jsonschema:"cells"`
 	Mono   bool   `json:"mono,omitempty" jsonschema:"use only the colours fg and bg (default: full colour, two colours per cell fitted to the image)"`
 	Dither string `json:"dither,omitempty" jsonschema:"floyd-steinberg (the default), atkinson (crisper) or none"`
-	colors
+	FG     string `json:"fg,omitempty" jsonschema:"mono only: the colour for the image's light parts, #rrggbb or default (the default)"`
+	BG     string `json:"bg,omitempty" jsonschema:"mono only: the colour for its dark parts, #rrggbb or default (the default), also in cells the image only partly covers. Full colour ignores fg and bg and keeps the canvas background where the image is transparent"`
 }
 
 const maxImage = 20 << 20
@@ -233,5 +234,5 @@ func addTools(s *mcp.Server, l *link) {
 	relay[struct{}](s, l, "undo", "Undo the last step, the user's or yours.")
 	relay[struct{}](s, l, "redo", "Redo the last undone step.")
 	relay[batchArgs](s, l, "batch",
-		"Run several operations in order as one undo step, e.g. [{op: \"draw_box\", args: {...}}, {op: \"write_text\", args: {...}}]. Stops at the first failing one; the ones before it stay applied.")
+		"Run several operations in order as one undo step, e.g. [{op: \"draw_box\", args: {...}}, {op: \"write_text\", args: {...}}]. Op names are checked first: an unknown or disallowed op changes nothing. Otherwise stops at the first failing op; the ones before it stay applied.")
 }
