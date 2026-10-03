@@ -114,16 +114,21 @@ type importArgs struct {
 }
 
 type imageArgs struct {
-	Path   string `json:"path,omitempty" jsonschema:"absolute path of an image file on this computer: PNG, JPEG, GIF, WebP or BMP"`
-	URL    string `json:"url,omitempty" jsonschema:"or the image's http(s) URL"`
-	X      int    `json:"x,omitempty" jsonschema:"left cell (default 0)"`
-	Y      int    `json:"y,omitempty" jsonschema:"top cell (default 0)"`
-	Width  int    `json:"width,omitempty" jsonschema:"cells; with only one of width and height the other keeps the image's proportions at the editor's cell aspect (default: as large as fits the canvas from x, y)"`
-	Height int    `json:"height,omitempty" jsonschema:"cells"`
-	Mono   bool   `json:"mono,omitempty" jsonschema:"use only the colours fg and bg (default: full colour, two colours per cell fitted to the image)"`
-	Dither string `json:"dither,omitempty" jsonschema:"floyd-steinberg (the default), atkinson (crisper) or none"`
-	FG     string `json:"fg,omitempty" jsonschema:"mono only: one of the two colours, #rrggbb or default (the default); each subpixel gets the nearer one"`
-	BG     string `json:"bg,omitempty" jsonschema:"mono only: the other colour, #rrggbb or default (the default), also given to cells the image only partly covers. Full colour ignores fg and bg and keeps the canvas background where the image is transparent"`
+	Path           string `json:"path,omitempty" jsonschema:"absolute path of an image file on this computer: PNG, JPEG, GIF, WebP or BMP"`
+	URL            string `json:"url,omitempty" jsonschema:"or the image's http(s) URL"`
+	X              int    `json:"x,omitempty" jsonschema:"left cell (default 0)"`
+	Y              int    `json:"y,omitempty" jsonschema:"top cell (default 0)"`
+	Width          int    `json:"width,omitempty" jsonschema:"cells; with only one of width and height the other keeps the image's proportions at the editor's cell aspect (default: as large as fits the canvas from x, y)"`
+	Height         int    `json:"height,omitempty" jsonschema:"cells"`
+	Mono           bool   `json:"mono,omitempty" jsonschema:"use only the colours fg and bg (default: full colour, two colours per cell fitted to the image)"`
+	Dither         string `json:"dither,omitempty" jsonschema:"floyd-steinberg (the default), atkinson (crisper) or none"`
+	DitherStrength *int   `json:"dither_strength,omitempty" jsonschema:"0-100: how much of each subpixel's error is passed on (default 100); lower is less grainy"`
+	Brightness     int    `json:"brightness,omitempty" jsonschema:"-100 to 100 (default 0): shifts every tone"`
+	Contrast       int    `json:"contrast,omitempty" jsonschema:"-100 to 100 (default 0): spreads tones from the middle, or squeezes them to it"`
+	Midtones       int    `json:"midtones,omitempty" jsonschema:"-100 to 100 (default 0): lightens or darkens the middle tones, black and white stay; mono images look dark at 0, which mixes light physically, so try 30-50 to lighten them"`
+	Invert         bool   `json:"invert,omitempty" jsonschema:"use the image's negative"`
+	FG             string `json:"fg,omitempty" jsonschema:"mono only: one of the two colours, #rrggbb or default (the default); each subpixel gets the nearer one"`
+	BG             string `json:"bg,omitempty" jsonschema:"mono only: the other colour, #rrggbb or default (the default), also given to cells the image only partly covers. Full colour ignores fg and bg and keeps the canvas background where the image is transparent"`
 }
 
 const maxImage = 20 << 20

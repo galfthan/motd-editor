@@ -166,6 +166,7 @@ kbd {
 }
 
 .btn.primary:hover { background: #ff7d55; }
+.btn.primary kbd { color: inherit; border-color: rgba(26, 12, 6, 0.4); }
 
 .icon-btn {
     width: 36px;
@@ -491,6 +492,61 @@ kbd {
 
 .chips button:hover { color: var(--text); }
 .chips button[aria-selected="true"] { background: #2e3036; color: var(--text); }
+
+/* Image panel (placing an image) */
+.image-actions,
+.image-fit {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.image-actions .btn { flex: 1; justify-content: center; }
+.image-fit .btn { flex: 1; justify-content: center; }
+
+.size-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-secondary);
+}
+
+.size-row input {
+    width: 72px;
+    height: 34px;
+    padding: 0 8px;
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    background: #17181b;
+    color: var(--text);
+    font-family: var(--mono);
+}
+
+.size-row input:focus { outline: 0; border-color: var(--accent); }
+.size-row .unit { margin-right: auto; font-size: 12px; }
+
+.slider {
+    display: grid;
+    grid-template-columns: 76px 1fr 40px;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.slider input { width: 100%; accent-color: var(--accent); }
+.slider output { text-align: right; font-family: var(--mono); color: var(--text); }
+
+.check {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.check input { accent-color: var(--accent); width: 16px; height: 16px; }
 
 /* Glyph palette */
 .char-grid {
@@ -975,6 +1031,7 @@ dialog h3 {
     --overlay-paste: var(--success);
     --overlay-preview: #ffb020;               /* box / line tool */
     --overlay-hover: #c678dd;                 /* the cell under the pointer */
+    --overlay-handle: rgba(91, 214, 155, 0.45); /* an image's resize handle */
     position: relative;
     color: #e0e0e0;
     background-color: var(--cell-bg);
@@ -1001,6 +1058,10 @@ dialog h3 {
     display: block;
     cursor: crosshair;
 }
+
+/* Placing an image: drags move it, or resize it from its handle */
+.canvas.image-move .grid-canvas { cursor: move; }
+.canvas.image-resize .grid-canvas { cursor: nwse-resize; }
 
 /* Glyph styles by character range, for the glyph palette and (read via a
    probe element) the grid canvas; see CanvasRenderer.glyphStyle */

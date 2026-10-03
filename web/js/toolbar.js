@@ -195,6 +195,7 @@ class Toolbar {
         this.setupTools();
         this.setupColors();
         this.setupStyle();
+        this.setupImagePanel();
         this.setupFileInputs();
         this.setupCharPalette();
         this.setupCommandPalette();
@@ -473,16 +474,92 @@ class Toolbar {
             b.classList.toggle('active', b.dataset.tool === group);
             b.setAttribute('aria-pressed', String(b.dataset.tool === group));
         });
-        document.querySelectorAll('.inspector section[data-panel]').forEach(s => s.classList.toggle('active', s.dataset.panel === group));
         document.querySelectorAll('[data-tool-set]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.toolSet === tool)));
-        document.getElementById('tool-title').textContent = GROUP_INFO[group].title;
-        document.getElementById('tool-key').textContent = GROUP_INFO[group].key;
+        this.currentGroup = group;
+        this.showPanel();
 
         // Fill applies to boxes only, and a line needs a border
         document.querySelector('.box-only').hidden = tool !== 'box';
         const none = document.querySelector('.tile[data-style="0"]');
         none.hidden = tool === 'line';
         if (tool === 'line' && r.boxLineStyle === 0) document.querySelector('.tile[data-style="1"]').click();
+    }
+
+    // The inspector's panel: the Image panel while an image is being
+    // placed, else the current tool's
+    showPanel() {
+        const image = !!this.renderer.imagePaste;
+        const panel = image ? 'image' : this.currentGroup;
+        document.querySelectorAll('.inspector section[data-panel]').forEach(s => s.classList.toggle('active', s.dataset.panel === panel));
+        document.getElementById('tool-title').textContent = image ? 'Image' : GROUP_INFO[panel].title;
+        const key = document.getElementById('tool-key');
+        key.textContent = image ? '' : GROUP_INFO[panel].key;
+        key.hidden = image;
+        if (image) document.getElementById('inspector').classList.add('open'); // narrow windows
+    }
+
+    // --- Image panel ---
+
+    setupImagePanel() {
+        const r = this.renderer;
+        r.onImagePaste = (p) => this.showImagePanel(p);
+        const set = (changes) => r.setImageOptions(changes);
+
+        document.querySelectorAll('[data-image-action]').forEach(btn => btn.addEventListener('click', () => {
+            const p = r.imagePaste;
+            if (!p) return;
+            switch (btn.dataset.imageAction) {
+                case 'place': r.placeImage(); break;
+                case 'cancel': r.endImagePaste(); break;
+                case 'reset-tone': set({ brightness: 0, contrast: 0, midtones: 0, invert: false }); break;
+                case 'fit-canvas':
+                case 'fit-selection': {
+                    const a = btn.dataset.imageAction === 'fit-selection' && r.selection ||
+                        { x1: 0, y1: 0, x2: r.canvas.width - 1, y2: r.canvas.height - 1 };
+                    const cols = fitImageCols(p.image, r.cellAspect, a.x2 - a.x1 + 1, a.y2 - a.y1 + 1);
+                    r.setImageOptions({ cols, rows: imageRows(p.image, cols, r.cellAspect), locked: true });
+                    r.moveImageTo({ x: a.x1, y: a.y1 });
+                    break;
+                }
+            }
+        }));
+        const cols = document.getElementById('image-cols'), rows = document.getElementById('image-rows');
+        cols.addEventListener('input', () => { if (cols.value >= 1) set({ cols: +cols.value }); });
+        rows.addEventListener('input', () => { if (rows.value >= 1) set({ rows: +rows.value }); });
+        const lock = document.getElementById('image-lock');
+        lock.addEventListener('click', () => set({ locked: lock.getAttribute('aria-pressed') !== 'true' }));
+        document.querySelectorAll('[data-image-mono]').forEach(b => b.addEventListener('click', () => set({ mono: b.dataset.imageMono === 'true' })));
+        document.querySelectorAll('[data-image-dither]').forEach(b => b.addEventListener('click', () => set({ dither: b.dataset.imageDither })));
+        document.querySelectorAll('[data-image-slider]').forEach(input => {
+            const name = input.dataset.imageSlider;
+            input.addEventListener('input', () => set({ [name]: name === 'strength' ? input.value / 100 : +input.value }));
+            // Double-click puts a slider back to its default
+            input.addEventListener('dblclick', () => set({ [name]: name === 'strength' ? 1 : 0 }));
+        });
+        const invert = document.getElementById('image-invert');
+        invert.addEventListener('change', () => set({ invert: invert.checked }));
+    }
+
+    // Show the image's settings (null: placing ended)
+    showImagePanel(p) {
+        this.showPanel();
+        if (!p) return;
+        // Not the field being typed in, which would move its cursor
+        for (const [id, value] of [['image-cols', p.cols], ['image-rows', p.rows]]) {
+            const input = document.getElementById(id);
+            if (document.activeElement !== input) input.value = value;
+        }
+        document.getElementById('image-lock').setAttribute('aria-pressed', String(p.locked));
+        pressOne([...document.querySelectorAll('[data-image-mono]')], document.querySelector(`[data-image-mono="${p.mono}"]`));
+        pressOne([...document.querySelectorAll('[data-image-dither]')], document.querySelector(`[data-image-dither="${p.dither}"]`));
+        document.querySelectorAll('[data-image-slider]').forEach(input => {
+            const name = input.dataset.imageSlider;
+            const value = name === 'strength' ? Math.round(p.strength * 100) : p[name];
+            input.value = value;
+            input.nextElementSibling.textContent = name === 'strength' ? value + '%' : (value > 0 ? '+' : '') + value;
+        });
+        document.getElementById('image-invert').checked = p.invert;
+        document.querySelector('[data-image-action="fit-selection"]').disabled = !this.renderer.selection;
     }
 
     // --- Colours ---
@@ -521,6 +598,7 @@ class Toolbar {
     setColor(which, color) {
         if (which === 'fg') this.renderer.setFgColor(color);
         else this.renderer.setBgColor(color);
+        if (this.renderer.imagePaste && this.renderer.imagePaste.mono) this.renderer.scheduleImageUpdate();
         const input = document.getElementById(`${which}-color`);
         input.value = toHex(color);
         const swatch = input.parentElement;

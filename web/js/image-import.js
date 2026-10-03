@@ -22,6 +22,22 @@ function linearToSrgb(v) {
     return Math.round(255 * (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055));
 }
 
+// A table from an sRGB channel value (0-255) to linear light, after the tone
+// adjustments, each -100 to 100 (0: none): brightness shifts every value,
+// contrast spreads them from or squeezes them to the middle, and midtones
+// lightens or darkens the middle while black and white stay; invert first
+// turns the image into its negative
+function toneToLinear({ brightness = 0, contrast = 0, midtones = 0, invert = false } = {}) {
+    if (!brightness && !contrast && !midtones && !invert) return SRGB_TO_LINEAR;
+    const spread = contrast >= 0 ? 1 + contrast / 50 : 1 + contrast / 100;
+    const gamma = 2 ** (-midtones / 50);
+    return SRGB_TO_LINEAR.map((_, i) => {
+        let v = invert ? 1 - i / 255 : i / 255;
+        v = Math.min(1, Math.max(0, (v - 0.5) * spread + 0.5 + brightness / 200)) ** gamma;
+        return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+    });
+}
+
 // Rows for an image `cols` cells wide, keeping its proportions in cells of
 // the given aspect (width / height)
 function imageRows(image, cols, aspect) {
@@ -39,9 +55,10 @@ function fitImageCols(image, aspect, maxCols, maxRows) {
 // its edge, the transparent subpixels are cleared and the rest get one colour
 // on the background already there (bg marked `keep`, see placeCell), so
 // outlines keep subpixel detail.
-// Options: mono (only the colours fg and bg), fg, bg and dither (a key of
-// IMAGE_DITHERS).
-function imageToCells(image, cols, rows, { mono = false, fg, bg, dither = 'floyd-steinberg' } = {}) {
+// Options: mono (only the colours fg and bg), fg, bg, dither (a key of
+// IMAGE_DITHERS), strength (0-1: how much of the error is diffused) and the
+// tone (see toneToLinear).
+function imageToCells(image, cols, rows, { mono = false, fg, bg, dither = 'floyd-steinberg', strength = 1, ...tone } = {}) {
     const W = cols * 2, H = rows * 3;
     const canvas = document.createElement('canvas');
     canvas.width = W;
@@ -55,10 +72,11 @@ function imageToCells(image, cols, rows, { mono = false, fg, bg, dither = 'floyd
     // diffused into it so far
     const px = new Float32Array(W * H * 3), err = new Float32Array(W * H * 3);
     const opaque = new Uint8Array(W * H);
+    const toLinearToned = toneToLinear(tone);
     for (let i = 0; i < W * H; i++) {
-        px[3 * i] = SRGB_TO_LINEAR[data[4 * i]];
-        px[3 * i + 1] = SRGB_TO_LINEAR[data[4 * i + 1]];
-        px[3 * i + 2] = SRGB_TO_LINEAR[data[4 * i + 2]];
+        px[3 * i] = toLinearToned[data[4 * i]];
+        px[3 * i + 1] = toLinearToned[data[4 * i + 1]];
+        px[3 * i + 2] = toLinearToned[data[4 * i + 2]];
         opaque[i] = data[4 * i + 3] >= 128 ? 1 : 0;
     }
 
@@ -68,7 +86,7 @@ function imageToCells(image, cols, rows, { mono = false, fg, bg, dither = 'floyd
     // (1), as perceived. In colour, error the two colours can't pay off (a
     // yellow's blue, for grey ink) would pile up and darken everything.
     const level = mono ? monoLevels(px, W * H, ...monoPair) : null;
-    const kernel = IMAGE_DITHERS[dither].kernel;
+    const kernel = IMAGE_DITHERS[dither].kernel.map(([dx, dy, k]) => [dx, dy, k * strength]);
     const toColor = (v) => v ? { r: linearToSrgb(v[0]), g: linearToSrgb(v[1]), b: linearToSrgb(v[2]), default: false } : { ...defaultBG(), keep: true };
     const out = [];
 

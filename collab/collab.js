@@ -440,8 +440,17 @@ const OPS = {
         cols ||= Math.max(1, Math.round(rows * image.width / (image.height * r.cellAspect)));
         rows ||= imageRows(image, cols, r.cellAspect);
         if (cols > 500 || rows > 200) throw new Error('the image can be at most 500x200 cells');
+        const tone = {};
+        for (const name of ['brightness', 'contrast', 'midtones']) {
+            const v = a[name] ?? 0;
+            if (!(v >= -100 && v <= 100)) throw new Error(`${name} must be -100 to 100`);
+            tone[name] = v;
+        }
+        const strength = a.dither_strength ?? 100;
+        if (!(strength >= 0 && strength <= 100)) throw new Error('dither_strength must be 0-100');
         const cells = imageToCells(image, cols, rows, {
-            mono: a.mono, fg: parseColor(a.fg, defaultFG), bg: parseColor(a.bg, defaultBG), dither: a.dither || 'floyd-steinberg'
+            mono: a.mono, fg: parseColor(a.fg, defaultFG), bg: parseColor(a.bg, defaultBG), dither: a.dither || 'floyd-steinberg',
+            strength: strength / 100, invert: !!a.invert, ...tone
         });
         withState({ clipboard: cells, pasteMode: false }, () => r.pasteAt(x, y));
         flash({ x1: x, y1: y, x2: x + cols - 1, y2: y + rows - 1 });
