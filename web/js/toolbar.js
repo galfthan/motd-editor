@@ -442,6 +442,8 @@ class Toolbar {
 
         const styles = [...document.querySelectorAll('.tile[data-style]')];
         styles.forEach(btn => btn.addEventListener('click', () => {
+            // A drag in progress is in the old style's units (cells or subpixels)
+            if (this.renderer.dragStart) this.renderer.cancelDrag();
             pressOne(styles, btn);
             this.renderer.boxLineStyle = parseInt(btn.dataset.style);
         }));
@@ -615,6 +617,7 @@ class Toolbar {
 
     // Make `color` the current fg/bg colour and show it
     setColor(which, color) {
+        if (color.keep) color = keepColor(which);   // e.g. after a swap
         if (which === 'fg') this.renderer.setFgColor(color);
         else this.renderer.setBgColor(color);
         if (this.renderer.imagePaste && this.renderer.imagePaste.mono) this.renderer.scheduleImageUpdate();

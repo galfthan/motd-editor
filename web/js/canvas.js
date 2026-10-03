@@ -1779,18 +1779,25 @@ class CanvasRenderer {
         if (this._pasteImagesFor !== clipboard) {
             this._pasteImages.clear();
             this._pasteImagesFor = clipboard;
+            // Keep colours show the canvas's, which differ from place to place
+            this._pasteKeeps = clipboard.some(row => row.some(c => c && (c.fg.keep || c.bg.keep)));
         }
         const fx = x * CELL_W * this._scaleX, fy = y * CELL_H * this._scaleY;
         const key = Math.round((fx - Math.floor(fx)) * 1000) + ',' + Math.round((fy - Math.floor(fy)) * 1000);
-        let cached = this._pasteImages.get(key);
+        let cached = this._pasteKeeps ? null : this._pasteImages.get(key);
         if (!cached) {
             // As pasteAt places them: a wide char's tail goes with its head,
-            // and a tail without its head becomes a blank cell
+            // a tail without its head becomes a blank cell, and keep colours
+            // are the ones there
             const cells = [];
             clipboard.forEach((row, dy) => row.forEach((cell, dx) => {
                 if (!cell || (cell.type === 'wide-tail' && dx > 0 && isWideHead(row[dx - 1]))) return;
-                const placed = cell.type === 'wide-tail' ? { ...cell, type: 'sextant' } : cell;
+                let placed = cell.type === 'wide-tail' ? { ...cell, type: 'sextant' } : cell;
                 if (placed !== cell) clearCell(placed);
+                const under = this.canvas.cells[y + dy] && this.canvas.cells[y + dy][x + dx];
+                if (under && (cell.fg.keep || cell.bg.keep)) {
+                    placed = { ...placed, fg: cell.fg.keep ? under.fg : cell.fg, bg: cell.bg.keep ? under.bg : cell.bg };
+                }
                 cells.push({ x: x + dx, y: y + dy, cell: placed });
             }));
             const width = Math.max(...clipboard.map(row => row.length));
@@ -1798,7 +1805,7 @@ class CanvasRenderer {
             const rectangular = clipboard.every(row => row.length === width && row.every(Boolean));
             cached = this.drawCellsImage(cells, { x1: x, y1: y, x2: x + width - 1, y2: y + clipboard.length - 1 },
                 undefined, rectangular);
-            this._pasteImages.set(key, cached);
+            if (!this._pasteKeeps) this._pasteImages.set(key, cached);
         }
         return { image: cached.image, x: Math.round(fx), y: Math.round(fy) };
     }
@@ -2300,7 +2307,10 @@ class CanvasRenderer {
         this.dragEnd = p;
 
         if (this.subpixelShape()) {
-            this.setOverlay('box-subpixel', this.tool === 'box' ? this.subpixelBoxRects() : runsOf(this.subpixelLinePoints()), true);
+            // Fill and Recolour change the inside too
+            const rects = this.tool === 'line' ? runsOf(this.subpixelLinePoints())
+                : this.boxFillMode > 0 ? [normRect(this.dragStart, this.dragEnd)] : this.subpixelBoxRects();
+            this.setOverlay('box-subpixel', rects, true);
         } else if (this.tool === 'box') {
             this.showBoxPreview(normRect(this.dragStart, this.dragEnd));
         } else {
