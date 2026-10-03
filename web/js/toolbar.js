@@ -130,6 +130,11 @@ class Toolbar {
 
         this.setupMenuBar();
         this.setupEditMenu();
+        // Canvas menu check items, remembered in this browser once toggled
+        this.toggleGrid = this.setupCanvasToggle('toggle-grid', 'motd-editor.grid', false,
+            on => this.renderer.setShowGrid(on));
+        this.toggleLightTerminal = this.setupCanvasToggle('toggle-light-terminal', 'motd-editor.lightTerminal', false,
+            on => this.renderer.setLightTerminal(on));
         this.setupToolButtons();
         this.setupColorPickers();
         this.setupFileInputs();
@@ -208,6 +213,30 @@ class Toolbar {
         update();
     }
 
+    // A check item in the Canvas menu: applies the saved choice (or the
+    // default) now and returns a function that toggles it. The choice is only
+    // saved once the user toggles it, so changing a default reaches everyone
+    // who never chose. Storage may be unavailable (e.g. a private window):
+    // then the default is used and nothing is remembered.
+    setupCanvasToggle(action, key, defaultOn, apply) {
+        const btn = document.querySelector(`button[data-action="${action}"]`);
+        const set = (on) => {
+            btn.setAttribute('aria-checked', String(on));
+            apply(on);
+        };
+        let on = defaultOn;
+        try {
+            const saved = localStorage.getItem(key);
+            if (saved !== null) on = saved === 'true';
+        } catch (e) { /* default */ }
+        set(on);
+        return () => {
+            const next = btn.getAttribute('aria-checked') !== 'true';
+            set(next);
+            try { localStorage.setItem(key, String(next)); } catch (e) { /* not saved */ }
+        };
+    }
+
     handleMenuAction(action) {
         switch (action) {
             case 'undo':
@@ -231,6 +260,12 @@ class Toolbar {
                 break;
             case 'save-as':
                 this.showSaveAsDialog();
+                break;
+            case 'toggle-grid':
+                this.toggleGrid();
+                break;
+            case 'toggle-light-terminal':
+                this.toggleLightTerminal();
                 break;
             case 'resize':
                 this.showResizeDialog();
