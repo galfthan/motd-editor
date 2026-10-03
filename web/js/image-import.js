@@ -37,7 +37,8 @@ function fitImageCols(image, aspect, maxCols, maxRows) {
 // The image (anything drawImage takes) as a cols x rows array of cells, null
 // where it is transparent (pasting leaves those cells alone). In cells along
 // its edge, the transparent subpixels are cleared and the rest get one colour
-// on the terminal's default background, so outlines keep subpixel detail.
+// on the background already there (bg marked `keep`, see placeCell), so
+// outlines keep subpixel detail.
 // Options: mono (only the colours fg and bg), fg, bg and dither (a key of
 // IMAGE_DITHERS).
 function imageToCells(image, cols, rows, { mono = false, fg, bg, dither = 'floyd-steinberg' } = {}) {
@@ -68,7 +69,7 @@ function imageToCells(image, cols, rows, { mono = false, fg, bg, dither = 'floyd
     // yellow's blue, for grey ink) would pile up and darken everything.
     const level = mono ? monoLevels(px, W * H, ...monoPair) : null;
     const kernel = IMAGE_DITHERS[dither].kernel;
-    const toColor = (v) => v ? { r: linearToSrgb(v[0]), g: linearToSrgb(v[1]), b: linearToSrgb(v[2]), default: false } : defaultBG();
+    const toColor = (v) => v ? { r: linearToSrgb(v[0]), g: linearToSrgb(v[1]), b: linearToSrgb(v[2]), default: false } : { ...defaultBG(), keep: true };
     const out = [];
 
     for (let cy = 0; cy < rows; cy++) {

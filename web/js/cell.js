@@ -117,8 +117,11 @@ function setGridChar(cells, x, y, charCode) {
 // Write a copy of `src` into (x, y), keeping wide chars consistent. A tail
 // whose head wasn't copied along with it becomes a blank cell.
 function placeCell(cells, x, y, src) {
+    // A background marked `keep` (an image's edge cells) is the one there
+    const bg = src.bg.keep ? { ...cells[y][x].bg } : null;
     detachWide(cells, x, y);
     const cell = structuredClone(src);
+    if (bg) cell.bg = bg;
     if (cell.type === 'wide-tail') clearCell(cell);
     cells[y][x] = cell;
     if (isWideHead(cell)) claimWideTail(cells, x, y);
