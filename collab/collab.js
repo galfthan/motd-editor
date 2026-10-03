@@ -232,12 +232,13 @@ const OPS = {
         };
     },
 
-    // Through the toolbar, so the Canvas menu shows (and remembers) it
+    // Through the toolbar, so its controls show it; not remembered, so the
+    // user's own saved choices stay as they were
     set_display(a) {
         // Absent or null: leave as is
-        if (a.cell_aspect != null) toolbar.setCellAspect(checkAspect(a.cell_aspect));
-        if (a.grid != null && a.grid !== r.showGrid) toolbar.toggleGrid();
-        if (a.light_terminal != null && a.light_terminal !== r.lightTerminal) toolbar.toggleLightTerminal();
+        if (a.cell_aspect != null) toolbar.setCellAspect(checkAspect(a.cell_aspect), false);
+        if (a.grid != null && a.grid !== r.showGrid) toolbar.toggleGrid(false);
+        if (a.light_terminal != null && a.light_terminal !== r.lightTerminal) toolbar.toggleLightTerminal(false);
         return displayState();
     },
 

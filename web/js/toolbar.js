@@ -283,15 +283,16 @@ class Toolbar {
 
     // A view setting: applies the saved choice (or the default) now and
     // returns a function that toggles it. The choice is only saved once the
-    // user toggles it, so changing a default reaches everyone who never chose.
+    // user toggles it, so changing a default reaches everyone who never chose;
+    // with save false (the AI's changes) it isn't saved at all.
     setupToggle(key, defaultOn, apply) {
         const saved = loadSetting(key);
         let on = saved === null ? defaultOn : saved === 'true';
         apply(on);
-        return () => {
+        return (save = true) => {
             on = !on;
             apply(on);
-            saveSetting(key, on);
+            if (save) saveSetting(key, on);
         };
     }
 
