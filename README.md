@@ -21,8 +21,9 @@ npx serve web
   and emoji, searchable by name
 - Box and line drawing with light/heavy/double borders, or with subpixels
   (straight lines, and boxes that blend with subpixel art)
-- Fill: fills the empty subpixels around the one clicked; cells holding a
-  character stop it
+- Fill (paint bucket): paints the area of the clicked colour in the ink
+  colour, an empty area by its background; other colours and cells holding
+  a character stop it, and lines through the area keep their colour
 - Ink (foreground) and paper (background) colours, the 16 terminal colours,
   the terminal's own, or keep (leave each cell's colour as it is); bold and
   inverse text

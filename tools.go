@@ -99,7 +99,7 @@ type lineArgs struct {
 }
 
 type fillArgs struct {
-	SX int `json:"sx" jsonschema:"subpixel column of an empty subpixel"`
+	SX int `json:"sx" jsonschema:"subpixel column where the fill starts"`
 	SY int `json:"sy" jsonschema:"subpixel row"`
 	colors
 }
@@ -233,7 +233,7 @@ func addTools(s *mcp.Server, l *link) {
 	relay[lineArgs](s, l, "draw_line",
 		"Draw a line of box-drawing characters from (x1, y1) to (x2, y2), like the Line tool: straight, or if both x and y differ a Z of three straight legs, the middle one halfway (horizontal-vertical-horizontal when at least as wide as tall, else vertical-horizontal-vertical). Ends on another line join it (╠, ┯). Both ends must be on the canvas. Style subpixel draws a straight line of subpixels between subpixel points instead.")
 	relay[fillArgs](s, l, "fill",
-		"Fill the empty subpixels connected to the empty subpixel (sx, sy), up, down, left and right, like the Fill tool. Cells holding a character count as full, so they bound the fill. The filled cells get fg and bg (bg: keep leaves their backgrounds).")
+		"Paint bucket, like the Fill tool: the subpixels connected to (sx, sy), up, down, left and right, that show the same colour as it get the colour fg. An empty area counts by its background colour; other colours and cells holding a character bound the fill. Each cell keeps what it shows in other colours (a line through it); bg is not used.")
 	relay[copyArgs](s, l, "copy_region",
 		"Copy or move the rectangle (x1, y1)-(x2, y2), inclusive, to (to_x, to_y), like Select with copy/cut and paste.")
 	relay[importArgs](s, l, "import_ansi",

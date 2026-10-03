@@ -2389,51 +2389,88 @@ class CanvasRenderer {
         if (sp) this.fillAt(sp.sx, sp.sy);
     }
 
-    // Set every empty subpixel connected to (sx, sy) (up, down, left, right)
-    // in the current colours. Cells holding a character are full. Returns
-    // how many were set (0 if (sx, sy) isn't empty) and the cells' rect.
+    // Paint bucket: the subpixels connected to (sx, sy) (up, down, left,
+    // right) that show the same colour as it get the ink colour. Empty
+    // subpixels show their cell's paper, so an empty area is a colour too;
+    // cells holding a character are walls. A cell has one ink and one paper,
+    // so the fill changes whichever of them the area's subpixels show, which
+    // keeps the cell's other subpixels (a line through it) as they are. Where
+    // a cell would need a third colour (the area is only part of what shows
+    // one of its colours) it sets or clears the area's subpixels to show a
+    // colour the cell has, the fill's if it can. Returns how many subpixels
+    // were filled (0: none, as (sx, sy) is a character or already the ink
+    // colour, or the ink is keep) and the cells' rect.
     fillAt(sx, sy) {
         const cols = this.canvas.width, W = cols * 2, H = this.canvas.height * 3;
-        // The empty subpixels, row-major (cleared as the fill reaches them)
-        const empty = new Uint8Array(W * H);
-        this.canvas.cells.forEach((row, y) => row.forEach((cell, x) => {
-            if (cell.type !== 'sextant') return;
-            for (let r = 0; r < 3; r++) {
-                for (let c = 0; c < 2; c++) if (!cell.subpixels[r][c]) empty[(y * 3 + r) * W + x * 2 + c] = 1;
-            }
-        }));
-        if (!(sx >= 0 && sx < W && sy >= 0 && sy < H) || !empty[sy * W + sx]) return { count: 0 };
+        const ink = this.fgColor;
+        if (ink.keep || !(sx >= 0 && sx < W && sy >= 0 && sy < H)) return { count: 0 };
+        // Which of a cell's colours a subpixel shows (inverse swaps them)
+        const slot = (cell, on) => on !== !!cell.inverse ? 'fg' : 'bg';
+        const shown = (x, y) => {
+            const cell = this.canvas.cells[Math.floor(y / 3)][x >> 1];
+            return cell.type === 'sextant' ? cell[slot(cell, cell.subpixels[y % 3][x % 2])] : null;
+        };
+        const target = shown(sx, sy);
+        if (!target || colorsEqual(target, ink)) return { count: 0 };
 
+        // The subpixels showing the target colour, row-major (cleared as the
+        // fill reaches them)
+        const match = new Uint8Array(W * H);
+        for (let y = 0; y < H; y++) {
+            for (let x = 0; x < W; x++) {
+                const c = shown(x, y);
+                if (c && colorsEqual(c, target)) match[y * W + x] = 1;
+            }
+        }
         const filled = [];
         const stack = [sy * W + sx];
-        empty[stack[0]] = 0;
+        match[stack[0]] = 0;
         while (stack.length) {
             const i = stack.pop();
             filled.push(i);
             const x = i % W;
-            if (x > 0 && empty[i - 1]) { empty[i - 1] = 0; stack.push(i - 1); }
-            if (x < W - 1 && empty[i + 1]) { empty[i + 1] = 0; stack.push(i + 1); }
-            if (i >= W && empty[i - W]) { empty[i - W] = 0; stack.push(i - W); }
-            if (i + W < W * H && empty[i + W]) { empty[i + W] = 0; stack.push(i + W); }
+            if (x > 0 && match[i - 1]) { match[i - 1] = 0; stack.push(i - 1); }
+            if (x < W - 1 && match[i + 1]) { match[i + 1] = 0; stack.push(i + 1); }
+            if (i >= W && match[i - W]) { match[i - W] = 0; stack.push(i - W); }
+            if (i + W < W * H && match[i + W]) { match[i + W] = 0; stack.push(i + W); }
         }
 
-        // Each touched cell once: recorded, given the colours, then its subpixels set
-        const box = { x1: cols, y1: this.canvas.height, x2: 0, y2: 0 };
-        const touched = new Set();
+        // The filled subpixels by cell
+        const byCell = new Map();
         for (const i of filled) {
             const x = i % W, y = (i - x) / W;
-            touched.add(Math.floor(y / 3) * cols + (x >> 1));
+            const k = Math.floor(y / 3) * cols + (x >> 1);
+            if (!byCell.has(k)) byCell.set(k, []);
+            byCell.get(k).push([y % 3, x % 2]);
         }
-        for (const k of touched) {
+        const box = { x1: cols, y1: this.canvas.height, x2: 0, y2: 0 };
+        for (const [k, subs] of byCell) {
             const x = k % cols, y = (k - x) / cols;
+            const cell = this.canvas.cells[y][x];
             this.beforeChange(x, y, x, y);
-            this.applyCurrentColors(this.canvas.cells[y][x]);
+            // As the cell was: changing one area mustn't change the other
+            const was = cell.subpixels.flat();
+            for (const on of [true, false]) {
+                const area = subs.filter(([r, c]) => was[r * 2 + c] === on);
+                if (!area.length) continue;
+                const all = was.filter(v => v === on).length;
+                const same = slot(cell, on), other = slot(cell, !on);
+                const othersUsed = was.some(v => v !== on);
+                if (area.length === all) {
+                    cell[same] = { ...ink };            // all that show this colour: exact
+                } else if (!othersUsed || colorsEqual(cell[other], ink)) {
+                    // The other colour is free (or the ink already): show it there
+                    cell[other] = { ...ink };
+                    for (const [r, c] of area) cell.subpixels[r][c] = !on;
+                } else if (!on) {
+                    // A line runs through the cell: its colour fills the area
+                    for (const [r, c] of area) cell.subpixels[r][c] = true;
+                } else {
+                    cell[same] = { ...ink };            // parts of two shapes: both
+                }
+            }
             box.x1 = Math.min(box.x1, x); box.x2 = Math.max(box.x2, x);
             box.y1 = Math.min(box.y1, y); box.y2 = Math.max(box.y2, y);
-        }
-        for (const i of filled) {
-            const x = i % W, y = (i - x) / W;
-            this.canvas.cells[Math.floor(y / 3)][x >> 1].subpixels[y % 3][x % 2] = true;
         }
         this.updateCellRect(box.x1, box.y1, box.x2, box.y2);
         return { count: filled.length, rect: box };

@@ -399,7 +399,7 @@ const OPS = {
     fill(a) {
         checkSubpixel(a.sx, a.sy);
         const { count, rect } = withState(colorState(a), () => r.fillAt(a.sx, a.sy));
-        if (!count) return `subpixel (${a.sx}, ${a.sy}) isn't empty: nothing was filled`;
+        if (!count) return `nothing was filled: (${a.sx}, ${a.sy}) is in a character cell or already the fg colour, or fg is keep`;
         flash(rect);
         return `filled ${count} subpixels`;
     },
