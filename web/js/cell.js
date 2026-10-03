@@ -9,13 +9,18 @@ function defaultBG() {
     return { r: 0, g: 0, b: 0, default: true };
 }
 
+// A cell: what it shows (subpixels, or a character), its colours, and its
+// text style: bold, and inverse (fg and bg swapped as the terminal shows it,
+// which follows the terminal's own colours where they are "default")
 function createCell() {
     return {
         type: 'sextant',
         fg: defaultFG(),
         bg: defaultBG(),
         subpixels: [[false, false], [false, false], [false, false]],
-        charCode: 0
+        charCode: 0,
+        bold: false,
+        inverse: false
     };
 }
 
@@ -132,11 +137,13 @@ function placeCell(cells, x, y, src) {
 // NFC normalisation, variation selectors, ZWJ) have no cell and are dropped.
 function charsToRow(chars) {
     const row = [];
-    for (const { code, fg, bg } of chars) {
+    for (const { code, fg, bg, bold, inverse } of chars) {
         if (charWidth(code) === 0) continue;
         const cell = createCell();
         cell.fg = { ...fg };
         cell.bg = { ...bg };
+        cell.bold = !!bold;
+        cell.inverse = !!inverse;
         setCellChar(cell, code);
         row.push(cell);
         if (isWideHead(cell)) {
@@ -217,7 +224,7 @@ function sgrColor(color, isBg) {
 // terminals narrower than the canvas
 function visibleLength(row) {
     let n = row.length;
-    while (n > 0 && cellToChar(row[n - 1]) === ' ' && row[n - 1].bg.default) n--;
+    while (n > 0 && cellToChar(row[n - 1]) === ' ' && row[n - 1].bg.default && !row[n - 1].inverse) n--;
     return n;
 }
 
@@ -228,6 +235,7 @@ function canvasToANSI(canvas) {
         let line = '';
         let lastFG = defaultFG();
         let lastBG = defaultBG();
+        let lastBold = false, lastInverse = false;
         let lineHasColor = false;
         const length = visibleLength(canvas.cells[y]);
 
@@ -235,9 +243,21 @@ function canvasToANSI(canvas) {
             const cell = canvas.cells[y][x];
             if (cell.type === 'wide-tail') continue;
             const ch = cellToChar(cell);
+            const bold = !!cell.bold, inverse = !!cell.inverse;
 
-            // A space shows only its background, so leave the foreground alone
-            if (ch !== ' ' && !colorsEqual(cell.fg, lastFG)) {
+            if (bold !== lastBold) {
+                line += bold ? '\x1b[1m' : '\x1b[22m';
+                lastBold = bold;
+                lineHasColor = true;
+            }
+            if (inverse !== lastInverse) {
+                line += inverse ? '\x1b[7m' : '\x1b[27m';
+                lastInverse = inverse;
+                lineHasColor = true;
+            }
+            // A space shows only its background, so leave the foreground
+            // alone (unless inverse, which shows the foreground there)
+            if ((ch !== ' ' || inverse) && !colorsEqual(cell.fg, lastFG)) {
                 line += sgrColor(cell.fg, false);
                 lastFG = cell.fg;
                 lineHasColor = true;

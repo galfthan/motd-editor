@@ -44,23 +44,9 @@ function color256ToRGB(index) {
 // interpreted; cursor moves, erase-line, mode switches etc. are dropped.
 const ansiRegex = /\x1b\[([0-?]*)([ -\/]*)([@-~])/g;
 
-// SGR state: colours, bold, inverse, and which basic colour (0-7) fg is
-// if it is one (bold shows those bright, as terminals do)
+// SGR state: the colours and style text gets
 function initialSGR() {
-    return { fg: defaultFG(), bg: defaultBG(), bold: false, inverse: false, basic: -1 };
-}
-
-// The colours text gets in SGR state `s`. Cells have no bold or inverse, so
-// bold brightens a basic fg colour and inverse swaps the colours (the
-// terminal's own ones as the editor shows them)
-function sgrColors(s) {
-    let fg = s.bold && s.basic >= 0 ? { ...BRIGHT_COLORS[s.basic], default: false } : s.fg;
-    let bg = s.bg;
-    if (s.inverse) {
-        const solid = (c) => ({ r: c.r, g: c.g, b: c.b, default: false });
-        [fg, bg] = [solid(bg), solid(fg)];
-    }
-    return { fg, bg };
+    return { fg: defaultFG(), bg: defaultBG(), bold: false, inverse: false };
 }
 
 function parseLine(line) {
@@ -68,8 +54,7 @@ function parseLine(line) {
     let state = initialSGR();
     let lastIndex = 0;
     const addText = (text) => {
-        const { fg, bg } = sgrColors(state);
-        for (const ch of text) cells.push({ code: ch.codePointAt(0), fg, bg });
+        for (const ch of text) cells.push({ code: ch.codePointAt(0), ...state });
     };
 
     ansiRegex.lastIndex = 0;
@@ -113,7 +98,7 @@ function parseExtendedColor(parts, i) {
 }
 
 function parseCodes(codes, state) {
-    let { fg, bg, bold, inverse, basic } = state;
+    let { fg, bg, bold, inverse } = state;
 
     if (codes === '' || codes === '0') return initialSGR();
 
@@ -125,7 +110,7 @@ function parseCodes(codes, state) {
 
         switch (code) {
             case 0:
-                ({ fg, bg, bold, inverse, basic } = initialSGR());
+                ({ fg, bg, bold, inverse } = initialSGR());
                 break;
             case 1:
                 bold = true;
@@ -141,7 +126,6 @@ function parseCodes(codes, state) {
                 break;
             case 39:
                 fg = defaultFG();
-                basic = -1;
                 break;
             case 49:
                 bg = defaultBG();
@@ -150,12 +134,8 @@ function parseCodes(codes, state) {
             case 48: { // Extended BG
                 const ext = parseExtendedColor(parts, i);
                 if (ext) {
-                    if (code === 38) {
-                        fg = ext.color;
-                        basic = -1;
-                    } else {
-                        bg = ext.color;
-                    }
+                    if (code === 38) fg = ext.color;
+                    else bg = ext.color;
                     i += ext.skip;
                 }
                 break;
@@ -163,12 +143,10 @@ function parseCodes(codes, state) {
             default:
                 if (code >= 30 && code <= 37) {
                     fg = { ...BASIC_COLORS[code - 30], default: false };
-                    basic = code - 30;
                 } else if (code >= 40 && code <= 47) {
                     bg = { ...BASIC_COLORS[code - 40], default: false };
                 } else if (code >= 90 && code <= 97) {
                     fg = { ...BRIGHT_COLORS[code - 90], default: false };
-                    basic = -1;
                 } else if (code >= 100 && code <= 107) {
                     bg = { ...BRIGHT_COLORS[code - 100], default: false };
                 }
@@ -177,7 +155,7 @@ function parseCodes(codes, state) {
         i++;
     }
 
-    return { fg, bg, bold, inverse, basic };
+    return { fg, bg, bold, inverse };
 }
 
 // ANSI text as rows of cells, each as long as its line (wide chars take two

@@ -52,6 +52,7 @@
                     <button data-action="clear" role="menuitem">Clear canvas</button>
                 </div>
             </div>
+            <span class="save-state" id="save-state"></span>
             <div class="group">
                 <button class="icon-btn" data-action="undo" aria-label="Undo"><svg class="ic"><use href="#i-undo"></use></svg></button>
                 <button class="icon-btn" data-action="redo" aria-label="Redo"><svg class="ic"><use href="#i-redo"></use></svg></button>
@@ -175,6 +176,10 @@
                                 <label class="swatch" title="Choose the paper colour"><input type="color" id="bg-color" value="#000000" aria-label="Paper colour"></label>
                                 <button class="color-target-name" data-target-pick="bg" aria-pressed="false"><span>Paper</span><span class="color-value" id="bg-value">Terminal</span></button>
                             </div>
+                        </div>
+                        <div class="segmented wide" role="group" aria-label="Text style">
+                            <button data-style-toggle="bold" aria-pressed="false" title="Bold text"><strong>B</strong> Bold</button>
+                            <button data-style-toggle="inverse" aria-pressed="false" title="Swap ink and paper as the terminal shows them, also its own colours"><span class="inverse-icon" aria-hidden="true"></span>Inverse</button>
                         </div>
                         <div class="palette" id="palette" aria-label="Terminal colours"></div>
                         <div class="color-actions">

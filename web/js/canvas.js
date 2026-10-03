@@ -87,6 +87,8 @@ class CanvasRenderer {
         this.selectedChar = null;
         this.fgColor = defaultFG();
         this.bgColor = defaultBG();
+        this.bold = false;          // text style drawn cells get (see applyCurrentColors)
+        this.inverse = false;
         this.isDrawing = false;
         this.lastPoint = null;     // Previous point of a draw/erase/symbol stroke
         this.toolbar = null; // Set by app.js
@@ -437,14 +439,17 @@ class CanvasRenderer {
         if (cursor && this.tool === 'text') this.setTextCursor(cursor.x, cursor.y);
     }
 
-    // Give a cell the currently picked colours
+    // Give a cell the currently picked colours and text style
     applyCurrentColors(cell) {
         cell.fg = { ...this.fgColor };
         cell.bg = { ...this.bgColor };
+        cell.bold = this.bold;
+        cell.inverse = this.inverse;
     }
 
-    loadCanvas() {
-        this.canvas = createCanvas(80, 60);
+    // Start with `canvas` (a restored autosave), or an empty 80x60 one
+    loadCanvas(canvas = createCanvas(80, 60)) {
+        this.canvas = canvas;
         this.render();
         this.updateStatus();
     }
@@ -692,7 +697,8 @@ class CanvasRenderer {
             : lineHeightCss.endsWith('px') ? parseFloat(lineHeightCss)
             : parseFloat(lineHeightCss) * parseFloat(cs.fontSize); // bare multiplier
         const baseline = -lineHeight / 2 + ascent + Math.floor((lineHeight - ascent - descent) / 2);
-        style = { font, transform, baseline };
+        const boldFont = `${cs.fontStyle} bold ${cs.fontSize} ${cs.fontFamily}`;
+        style = { font, boldFont, transform, baseline };
         this._glyphStyles.set(cls, style);
         return style;
     }
@@ -721,14 +727,18 @@ class CanvasRenderer {
         const ctx = this.ctx;
         const g = this.cellGeometry(x, y, isWideHead(cell) ? 2 * CELL_W : CELL_W);
 
+        // Inverse swaps the colours as the terminal shows them
+        let fg = cell.fg.default ? this.theme.fg : `rgb(${cell.fg.r},${cell.fg.g},${cell.fg.b})`;
+        let bg = cell.bg.default ? this.theme.cellBg : `rgb(${cell.bg.r},${cell.bg.g},${cell.bg.b})`;
+        if (cell.inverse) [fg, bg] = [bg, fg];
+
         ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.fillStyle = cell.bg.default ? this.theme.cellBg : `rgb(${cell.bg.r},${cell.bg.g},${cell.bg.b})`;
+        ctx.fillStyle = bg;
         ctx.fillRect(...g.rect);
 
         const char = cellToChar(cell);
         if (char !== ' ') {
             const code = char.codePointAt(0);
-            const fg = cell.fg.default ? this.theme.fg : `rgb(${cell.fg.r},${cell.fg.g},${cell.fg.b})`;
             ctx.save();
             ctx.beginPath();
             ctx.rect(...g.rect);
@@ -740,7 +750,7 @@ class CanvasRenderer {
             } else if (hasGlyphShape(code)) {
                 this.drawShape(code, g);
             } else {
-                this.drawGlyph(char, g);
+                this.drawGlyph(char, g, cell.bold);
             }
             ctx.restore();
         }
@@ -810,7 +820,7 @@ class CanvasRenderer {
     }
 
     // Font glyph, styled by its .glyph-* class and centred like the old DOM cells
-    drawGlyph(char, g) {
+    drawGlyph(char, g, bold = false) {
         const ctx = this.ctx;
         const style = this.glyphStyle(glyphClass(char.codePointAt(0)));
         this.ensureFontLoaded(style.font, char);
@@ -822,7 +832,7 @@ class CanvasRenderer {
         ctx.scale(CELL_W / GLYPH_CELL_W, 1);
         const t = style.transform;
         ctx.transform(t.a, t.b, t.c, t.d, t.e, t.f);
-        ctx.font = style.font;
+        ctx.font = bold ? style.boldFont : style.font;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'alphabetic';
         ctx.fillText(char, 0, style.baseline);
@@ -1222,6 +1232,7 @@ class CanvasRenderer {
         const cell = row[c.cellX].type === 'wide-tail' ? row[c.cellX - 1] : row[c.cellX];
 
         if (this.toolbar) {
+            this.toolbar.setStyle(!!cell.bold, !!cell.inverse);
             this.toolbar.setColors(cell.fg, cell.bg);
         }
     }
@@ -1739,6 +1750,7 @@ class CanvasRenderer {
                 setCellSubpixel(cell, sp.row, sp.col, data.filled);
                 if (data.fg) cell.fg = { ...data.fg };
                 if (data.bg) cell.bg = { ...data.bg };
+                if (data.fg) Object.assign(cell, { bold: data.bold, inverse: data.inverse });
             }
         }
         return [...cells].map(([key, cell]) => {
@@ -1891,7 +1903,9 @@ class CanvasRenderer {
             // Extended chars have no subpixels
             filled: cell.type === 'sextant' && cell.subpixels[row][col],
             fg: { ...cell.fg },
-            bg: { ...cell.bg }
+            bg: { ...cell.bg },
+            bold: !!cell.bold,
+            inverse: !!cell.inverse
         };
     }
 
@@ -1948,6 +1962,7 @@ class CanvasRenderer {
                 setCellSubpixel(sp.cell, sp.row, sp.col, data.filled);
                 if (data.fg) sp.cell.fg = { ...data.fg };
                 if (data.bg) sp.cell.bg = { ...data.bg };
+                if (data.fg) Object.assign(sp.cell, { bold: data.bold, inverse: data.inverse });
             });
         });
 
@@ -2002,7 +2017,8 @@ class CanvasRenderer {
 
         // Nothing to do if the subpixel and the colours it sets already match
         if (cell.type === 'sextant' && cell.subpixels[row][col] === filled &&
-            colorsEqual(cell.bg, this.bgColor) && (!filled || colorsEqual(cell.fg, this.fgColor))) {
+            colorsEqual(cell.bg, this.bgColor) && (!filled || (colorsEqual(cell.fg, this.fgColor) &&
+            !!cell.bold === this.bold && !!cell.inverse === this.inverse))) {
             return null;
         }
 

@@ -18,8 +18,10 @@ import (
 // types that have one).
 
 type colors struct {
-	FG string `json:"fg,omitempty" jsonschema:"foreground colour: #rrggbb or default (the default)"`
-	BG string `json:"bg,omitempty" jsonschema:"background colour: #rrggbb or default (the default). Cells drawn on get it even where they had a colour: pass that colour to keep a background"`
+	Bold    bool   `json:"bold,omitempty" jsonschema:"bold text (cells drawn on get it, or lose it when false)"`
+	Inverse bool   `json:"inverse,omitempty" jsonschema:"fg and bg swapped as the terminal shows them, following the terminal's own colours where they are default (cells drawn on get it, or lose it when false)"`
+	FG      string `json:"fg,omitempty" jsonschema:"foreground colour: #rrggbb or default (the default)"`
+	BG      string `json:"bg,omitempty" jsonschema:"background colour: #rrggbb or default (the default). Cells drawn on get it even where they had a colour: pass that colour to keep a background"`
 }
 
 type region struct {
@@ -51,7 +53,7 @@ type display struct {
 
 type readArgs struct {
 	region
-	Format string `json:"format,omitempty" jsonschema:"text (the default): one line per row; subpixels: 3 lines per row, 2 chars per cell, # set, . clear, + a cell holding a character; cells: JSON for every non-blank cell with its char and colours"`
+	Format string `json:"format,omitempty" jsonschema:"text (the default): one line per row; subpixels: 3 lines per row, 2 chars per cell, # set, . clear, + a cell holding a character; cells: JSON for every non-blank cell with its char, colours, and bold / inverse when set"`
 }
 
 type bitmapArgs struct {
@@ -222,7 +224,7 @@ func addTools(s *mcp.Server, l *link) {
 	relay[copyArgs](s, l, "copy_region",
 		"Copy or move the rectangle (x1, y1)-(x2, y2), inclusive, to (to_x, to_y), like Select with copy/cut and paste.")
 	relay[importArgs](s, l, "import_ansi",
-		"Paste ANSI text, or load it as the whole canvas. Understands SGR colours: the 16 basic ones, 256-colour (xterm palette) and 24-bit; bold makes the basic colours bright; inverse swaps the colours, the terminal's own as fixed black and white. Other escape sequences are dropped.")
+		"Paste ANSI text, or load it as the whole canvas. Understands SGR colours (the 16 basic ones, 256-colour in the xterm palette, 24-bit), bold and inverse; other escape sequences are dropped.")
 	relay[imageArgs](s, l, "import_image",
 		"Place a picture as cells, like pasting an image into the editor: scaled, each cell given the two colours that best fit its 2x3 subpixels, and dithered. Transparent areas leave the canvas as it is.")
 	relay[exportArgs](s, l, "export",

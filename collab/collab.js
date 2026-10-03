@@ -52,8 +52,9 @@ function withState(state, fn) {
     }
 }
 
+// The colours and text style an operation draws with
 function colorState(a) {
-    return { fgColor: parseColor(a.fg, defaultFG), bgColor: parseColor(a.bg, defaultBG) };
+    return { fgColor: parseColor(a.fg, defaultFG), bgColor: parseColor(a.bg, defaultBG), bold: !!a.bold, inverse: !!a.inverse };
 }
 
 // x, y, width, height (all optional) clipped to the canvas
@@ -223,6 +224,8 @@ const OPS = {
                 tool: r.tool,
                 fg: colorName(r.fgColor),
                 bg: colorName(r.bgColor),
+                bold: r.bold,
+                inverse: r.inverse,
                 selection: r.selection,
                 subpixel_selection: r.subpixelSelection,
                 text_cursor: r.textCursor,
@@ -283,8 +286,11 @@ const OPS = {
                 const out = [];
                 rows.forEach((row, dy) => row.forEach((cell, dx) => {
                     const char = cellToChar(cell);
-                    if (char === '' || (char === ' ' && cell.bg.default)) return;
-                    out.push({ x: x1 + dx, y: y1 + dy, char, fg: colorName(cell.fg), bg: colorName(cell.bg) });
+                    if (char === '' || (char === ' ' && cell.bg.default && !cell.inverse)) return;
+                    const item = { x: x1 + dx, y: y1 + dy, char, fg: colorName(cell.fg), bg: colorName(cell.bg) };
+                    if (cell.bold) item.bold = true;
+                    if (cell.inverse) item.inverse = true;
+                    out.push(item);
                 }));
                 return out;
             }

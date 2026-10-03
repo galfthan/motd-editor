@@ -123,6 +123,9 @@ const KEY_TOOLS = {
     s: 'shape', l: 'line', v: 'selection', i: 'pick', p: 'pick'
 };
 
+// Where the canvas is autosaved (see Toolbar.autosave)
+const AUTOSAVE_KEY = 'motd-editor.canvas';
+
 // Zoom steps for + and -
 const ZOOMS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.25, 1.5, 2, 3, 4];
 
@@ -191,6 +194,7 @@ class Toolbar {
         this.setupZoom();
         this.setupTools();
         this.setupColors();
+        this.setupStyle();
         this.setupFileInputs();
         this.setupCharPalette();
         this.setupCommandPalette();
@@ -259,7 +263,10 @@ class Toolbar {
             case 'zoom-fit': this.zoomToFit(); break;
             case 'zoom-reset': this.setZoom(1); break;
             case 'swap-colors': this.setColors(r.bgColor, r.fgColor); break;
-            case 'default-colors': this.setColors(defaultFG(), defaultBG()); break;
+            case 'default-colors':
+                this.setStyle(false, false);
+                this.setColors(defaultFG(), defaultBG());
+                break;
             case 'pick': this.setTool('pick'); break;
             case 'commands': this.openCommandPalette(); break;
             case 'toggle-inspector': document.getElementById('inspector').classList.toggle('open'); break;
@@ -277,7 +284,10 @@ class Toolbar {
             undoBtn.title = history.undoLabel() ? `Undo ${history.undoLabel()} (⌘Z)` : 'Undo (⌘Z)';
             redoBtn.title = history.redoLabel() ? `Redo ${history.redoLabel()} (⇧⌘Z)` : 'Redo (⇧⌘Z)';
         };
-        history.onChange = update;
+        history.onChange = () => {
+            update();
+            this.scheduleAutosave();
+        };
         update();
     }
 
@@ -533,6 +543,72 @@ class Toolbar {
         }
     }
 
+    // --- Text style ---
+
+    setupStyle() {
+        document.querySelectorAll('[data-style-toggle]').forEach(btn => btn.addEventListener('click', () => {
+            const r = this.renderer;
+            if (btn.dataset.styleToggle === 'bold') this.setStyle(!r.bold, r.inverse);
+            else this.setStyle(r.bold, !r.inverse);
+        }));
+    }
+
+    // Make bold / inverse the style drawn cells get, and show it
+    setStyle(bold, inverse) {
+        this.renderer.bold = bold;
+        this.renderer.inverse = inverse;
+        document.querySelector('[data-style-toggle="bold"]').setAttribute('aria-pressed', String(bold));
+        document.querySelector('[data-style-toggle="inverse"]').setAttribute('aria-pressed', String(inverse));
+    }
+
+    // --- Autosave: the canvas is kept in this browser (as ANSI text, with
+    // its size and file name) and comes back when the editor is reopened ---
+
+    // The saved canvas, or undefined; applies the saved file name
+    savedCanvas() {
+        try {
+            const saved = JSON.parse(loadSetting(AUTOSAVE_KEY));
+            if (!saved) return undefined;
+            const canvas = parseANSIText(saved.ansi);
+            resizeCanvas(canvas, saved.width, saved.height);
+            if (saved.name) this.setFilename(saved.name);
+            return canvas;
+        } catch (e) {
+            return undefined;   // none, or unreadable: start empty
+        }
+    }
+
+    // Save a moment after the last change (and when the page goes away)
+    scheduleAutosave() {
+        clearTimeout(this._autosaveTimer);
+        this._autosaveTimer = setTimeout(() => this.autosave(), 500);
+        if (!this._autosaveOnLeave) {
+            this._autosaveOnLeave = true;
+            window.addEventListener('pagehide', () => {
+                if (this._autosaveTimer) this.autosave();
+            });
+        }
+    }
+
+    autosave() {
+        clearTimeout(this._autosaveTimer);
+        this._autosaveTimer = null;
+        const c = this.renderer.canvas;
+        const state = document.getElementById('save-state');
+        try {
+            localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({
+                v: 1, width: c.width, height: c.height, name: this.saveFilename, ansi: canvasToANSI(c)
+            }));
+            state.textContent = 'Autosaved';
+            state.title = 'Kept in this browser: it comes back when you reopen the editor. Export to save a file.';
+            state.classList.remove('failed');
+        } catch (e) {
+            state.textContent = 'Not autosaved';
+            state.title = "This browser can't keep the canvas (storage full, or not allowed). Export to save it.";
+            state.classList.add('failed');
+        }
+    }
+
     // --- Save / open / resize ---
 
     setFilename(name) {
@@ -777,6 +853,8 @@ class Toolbar {
             ['Edit', 'Redo', '⇧⌘Z', act('redo')],
             ['Colour', 'Swap ink and paper', 'X', act('swap-colors')],
             ['Colour', "Reset to the terminal's colours", '', act('default-colors')],
+            ['Style', r.bold ? 'Bold off' : 'Bold on', '', () => this.setStyle(!r.bold, r.inverse)],
+            ['Style', r.inverse ? 'Inverse off' : 'Inverse on', '', () => this.setStyle(r.bold, !r.inverse)],
             ['View', r.showGrid ? 'Hide grid' : 'Show grid', '', act('toggle-grid')],
             ['View', r.lightTerminal ? 'Preview in a dark terminal' : 'Preview in a light terminal', '', act('toggle-light-terminal')],
             ['View', 'Zoom in', '+', act('zoom-in')],

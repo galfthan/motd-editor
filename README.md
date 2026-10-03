@@ -21,7 +21,9 @@ npx serve web
   and emoji, searchable by name
 - Box and line drawing with light/heavy/double borders
 - Ink (foreground) and paper (background) colours, the 16 terminal colours,
-  or the terminal's own
+  or the terminal's own; bold and inverse text
+- Autosave: the canvas is kept in the browser and comes back when you reopen
+  the editor (Export saves a file)
 - Import/export ANSI text files
 - Copy/paste with system clipboard integration
 - Image import: paste (Ctrl+V), drop or Import image a picture, then place
