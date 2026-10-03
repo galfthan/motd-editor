@@ -13,7 +13,7 @@ const SUB_X_EDGES = [0, CELL_W / 2, CELL_W];
 const SUB_Y_EDGES = [0, CELL_H / 3, 2 * CELL_H / 3, CELL_H];
 
 // Overlays on the overlay canvas, bottom to top (see setOverlay)
-const OVERLAY_ORDER = ['hover', 'paste', 'paste-subpixel', 'box', 'selection', 'subpixel-selection'];
+const OVERLAY_ORDER = ['hover', 'hover-subpixel', 'paste', 'paste-subpixel', 'box', 'selection', 'subpixel-selection'];
 
 // Left / top edge (CSS px) of subpixel column sx / row sy
 function subpixelEdgeX(sx) { return Math.floor(sx / 2) * CELL_W + SUB_X_EDGES[sx % 2]; }
@@ -111,6 +111,7 @@ class CanvasRenderer {
         this._overlayRects = {};        // kind → { rects, subpixel }
         this._overlayDrawn = {};        // kind → device-pixel rects drawing it
         this._hover = null;             // hover box rect, or null
+        this._hoverSub = null;          // hovered subpixel (subpixel tools), or null
         this._cursorEl = null;          // the text cursor's element
         this._pastePreviewKey = null; // Last previewed paste position
 
@@ -124,7 +125,10 @@ class CanvasRenderer {
 
     setupEventListeners() {
         this.container.addEventListener('mousedown', (e) => this.handleMouseDown(e));
-        this.container.addEventListener('mouseleave', () => this.updateHover(null));
+        this.container.addEventListener('mouseleave', () => {
+            this.updateHover(null);
+            this.updatePointerInfo(null);
+        });
 
         // Moves and releases are handled at window level, so a drag keeps
         // going when the pointer leaves the canvas: select, box and line drags
@@ -171,6 +175,11 @@ class CanvasRenderer {
             this.clearTextCursor();
         }
         this.history.breakGroup();
+        // The hover box and readout depend on the tool (subpixel or not)
+        if (this._hoverEvent) {
+            this.updateHover(this._hoverEvent);
+            this.updatePointerInfo(this._hoverEvent);
+        }
     }
 
     isSelectTool() {
@@ -366,6 +375,7 @@ class CanvasRenderer {
         this._overlayRects = {};
         this._overlayDrawn = {};
         this._hover = null;
+        this._hoverSub = null;
         this._cursorEl = null;
         this._pastePreviewKey = null;
 
@@ -472,6 +482,7 @@ class CanvasRenderer {
             fg: style.color,
             overlay: {
                 hover: { line: style.getPropertyValue('--overlay-hover').trim() },
+                'hover-subpixel': { line: style.getPropertyValue('--overlay-hover').trim() },
                 paste: { line: style.getPropertyValue('--overlay-paste').trim() },
                 'paste-subpixel': { line: style.getPropertyValue('--overlay-paste').trim() },
                 box: { line: style.getPropertyValue('--overlay-preview').trim() },
@@ -1000,10 +1011,15 @@ class CanvasRenderer {
         } else {
             this.handleDrawTool(e);
         }
+        this._lastPointerEvent = e;
+        this.updateDragLabel(e);
+        this.updatePointerInfo(e);
     }
 
     handleMouseMove(e) {
+        this._lastPointerEvent = e;
         this.updateHover(e);
+        this.updatePointerInfo(e);
         if (this.pasteMode) {
             this.showPastePreview(e);
             return;
@@ -1032,6 +1048,7 @@ class CanvasRenderer {
         } else if (this.tool !== 'pick' && this.tool !== 'text') {
             this.handleDrawTool(e);
         }
+        this.updateDragLabel(e);
     }
 
     handleMouseUp() {
@@ -1046,6 +1063,8 @@ class CanvasRenderer {
         this.isDrawing = false;
         this.lastPoint = null;
         this.endStroke();
+        this.updateDragLabel(null);
+        this.updatePointerInfo(this._lastPointerEvent);
     }
 
     handlePickTool(e) {
@@ -1266,23 +1285,101 @@ class CanvasRenderer {
     }
 
     // Outline the cell under the pointer (both halves of a wide char) so it's
-    // clear which cell a tool acts on; hidden off the canvas and while placing
-    // a paste (the paste preview shows where it goes)
+    // clear which cell a tool acts on, and with the subpixel tools also the
+    // subpixel a click would select or paint; hidden off the canvas and while
+    // placing a paste (the paste preview shows where it goes)
     updateHover(e) {
-        let rect = null;
+        let rect = null, sub = null;
         if (e && this.canvas && !this.pasteMode && this.container.contains(e.target)) {
             const c = this.cellCoordsFromEvent(e);
             const row = this.canvas.cells[c.cellY];
             let x = c.cellX;
             if (row[x].type === 'wide-tail' && x > 0) x--;
             rect = { x1: x, y1: c.cellY, x2: isWideHead(row[x]) ? x + 1 : x, y2: c.cellY, whole: true };
+            if (this.usesSubpixels()) {
+                const sp = this.subpixelCoordsFromEvent(e);
+                sub = { x1: sp.sx, y1: sp.sy, x2: sp.sx, y2: sp.sy };
+            }
         }
         this._hoverEvent = rect ? e : null;
-        const cur = this._hover;
-        if (rect && cur && rect.x1 === cur.x1 && rect.x2 === cur.x2 && rect.y1 === cur.y1) return;
-        if (!rect && !cur) return;
-        this._hover = rect;
-        this.setOverlay('hover', rect ? [rect] : []);
+        const same = (a, b) => (!a && !b) || (a && b && a.x1 === b.x1 && a.x2 === b.x2 && a.y1 === b.y1);
+        if (!same(rect, this._hover)) {
+            this._hover = rect;
+            this.setOverlay('hover', rect ? [rect] : []);
+        }
+        if (!same(sub, this._hoverSub)) {
+            this._hoverSub = sub;
+            this.setOverlay('hover-subpixel', sub ? [sub] : [], true);
+        }
+    }
+
+    // --- Pointer position and selection size readouts ---
+
+    // Whether the current tool works on subpixels rather than whole cells
+    usesSubpixels() {
+        return this.tool === 'select-subpixel' ||
+            ((this.tool === 'draw' || this.tool === 'erase') && !this.brushCell);
+    }
+
+    // Size of a rect as "W×H"
+    rectSizeText(r, subpixel = false) {
+        return `${r.x2 - r.x1 + 1}×${r.y2 - r.y1 + 1}` + (subpixel ? ' sub' : '');
+    }
+
+    // Menu bar readout: the cell under the pointer (and the subpixel, for the
+    // subpixel tools), and the selection's size if there is one. Coordinates
+    // start at 0 in the top-left corner.
+    updatePointerInfo(e) {
+        const el = document.getElementById('cursor-pos');
+        if (!el) return;
+        const parts = [];
+        if (e && this.canvas && this.container.contains(e.target)) {
+            const c = this.cellCoordsFromEvent(e);
+            parts.push(`x ${c.cellX}, y ${c.cellY}`);
+            if (this.usesSubpixels()) {
+                const sp = this.subpixelCoordsFromEvent(e);
+                parts.push(`sub ${sp.sx}, ${sp.sy}`);
+            }
+        }
+        if (this.isSubpixelMode() && this.subpixelSelection) {
+            parts.push('sel ' + this.rectSizeText(this.subpixelSelection, true));
+        } else if (this.selection) {
+            parts.push('sel ' + this.rectSizeText(this.selection));
+        }
+        const text = parts.join('  ·  ');
+        if (el.textContent !== text) el.textContent = text;
+    }
+
+    // While dragging a selection or a box, a label next to the pointer with
+    // its size (cells, or subpixels for the subpixel selection)
+    updateDragLabel(e) {
+        let text = '';
+        if (e && this.isDrawing) {
+            if (this.subpixelSelectionStart && this.subpixelSelection) {
+                text = this.rectSizeText(this.subpixelSelection, true);
+            } else if (this.selectionStart && this.selection) {
+                text = this.rectSizeText(this.selection);
+            } else if (this.tool === 'box' && this.dragStart && this.dragEnd) {
+                text = this.rectSizeText(normRect(this.dragStart, this.dragEnd));
+            }
+        }
+        if (!text) {
+            if (this._dragLabel) this._dragLabel.style.display = 'none';
+            return;
+        }
+        if (!this._dragLabel) {
+            this._dragLabel = document.createElement('div');
+            this._dragLabel.className = 'drag-size';
+            document.body.appendChild(this._dragLabel);
+        }
+        const label = this._dragLabel;
+        label.textContent = text;
+        label.style.display = 'block';
+        // Above-right of the pointer, kept inside the window
+        const x = Math.min(e.clientX + 14, window.innerWidth - label.offsetWidth - 4);
+        const y = Math.max(4, e.clientY - label.offsetHeight - 10);
+        label.style.left = x + 'px';
+        label.style.top = y + 'px';
     }
 
     // Clip a rect to the canvas (in cells, or subpixels); null if nothing is left
@@ -1298,6 +1395,7 @@ class CanvasRenderer {
 
     updateSelectionDisplay() {
         this.setOverlay('selection', this.selection ? [this.selection] : []);
+        this.updatePointerInfo(this._lastPointerEvent);
     }
 
     clearSelection() {
@@ -1309,6 +1407,7 @@ class CanvasRenderer {
     // Subpixel selection display - outlines individual subpixels
     updateSubpixelSelectionDisplay() {
         this.setOverlay('subpixel-selection', this.subpixelSelection ? [this.subpixelSelection] : [], true);
+        this.updatePointerInfo(this._lastPointerEvent);
     }
 
     clearSubpixelSelection() {

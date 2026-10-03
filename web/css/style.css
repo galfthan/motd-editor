@@ -61,6 +61,26 @@ body {
     font-size: 0.875rem;
 }
 
+.cursor-pos {
+    font-variant-numeric: tabular-nums;
+    white-space: pre;
+}
+
+/* Size label next to the pointer while dragging a selection or a box */
+.drag-size {
+    position: fixed;
+    z-index: 1000;
+    pointer-events: none;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background-color: rgba(20, 20, 20, 0.85);
+    border: 1px solid #2ec4b6; /* the selection colour */
+    color: #fff;
+    font: 12px/1.4 'Cascadia Code', 'Consolas', monospace;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
 .github-link {
     color: var(--text-secondary);
     display: inline-flex;
