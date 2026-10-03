@@ -679,8 +679,12 @@ class CanvasRenderer {
         probe.className = cls;
         probe.style.cssText = 'position:absolute;visibility:hidden;display:block';
         document.body.appendChild(probe);
+        // Read everything before removing the probe: a detached element's
+        // computed style is empty
         const cs = getComputedStyle(probe);
         const font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+        const boldFont = `${cs.fontStyle} bold ${cs.fontSize} ${cs.fontFamily}`;
+        const fontSize = parseFloat(cs.fontSize);
         const transform = cs.transform === 'none' ? new DOMMatrix() : new DOMMatrix(cs.transform);
         const lineHeightCss = cs.lineHeight;
         probe.remove();
@@ -695,9 +699,8 @@ class CanvasRenderer {
         const descent = m.fontBoundingBoxDescent;
         const lineHeight = lineHeightCss === 'normal' ? ascent + descent
             : lineHeightCss.endsWith('px') ? parseFloat(lineHeightCss)
-            : parseFloat(lineHeightCss) * parseFloat(cs.fontSize); // bare multiplier
+            : parseFloat(lineHeightCss) * fontSize; // bare multiplier
         const baseline = -lineHeight / 2 + ascent + Math.floor((lineHeight - ascent - descent) / 2);
-        const boldFont = `${cs.fontStyle} bold ${cs.fontSize} ${cs.fontFamily}`;
         style = { font, boldFont, transform, baseline };
         this._glyphStyles.set(cls, style);
         return style;
@@ -823,7 +826,7 @@ class CanvasRenderer {
     drawGlyph(char, g, bold = false) {
         const ctx = this.ctx;
         const style = this.glyphStyle(glyphClass(char.codePointAt(0)));
-        this.ensureFontLoaded(style.font, char);
+        this.ensureFontLoaded(bold ? style.boldFont : style.font, char);
         // The glyph is laid out in CSS px; CSS transforms apply around its
         // centre (transform-origin)
         ctx.setTransform(g.kx, 0, 0, g.ky, -g.ox, -g.oy);
@@ -1806,7 +1809,7 @@ class CanvasRenderer {
         if (systemText && systemText.trim().length > 0) {
             const cells = systemText.includes('\x1b[')
                 ? ansiTextToRows(systemText)
-                : parseTextToCells(systemText, this.fgColor, this.bgColor);
+                : parseTextToCells(systemText, this.fgColor, this.bgColor, this.bold, this.inverse);
             if (cells.length > 0) {
                 this.clipboard = cells;
                 this.pasteMode = true;
@@ -2016,15 +2019,20 @@ class CanvasRenderer {
         const { cell, cellX, cellY, row, col } = sp;
 
         // Nothing to do if the subpixel and the colours it sets already match
-        if (cell.type === 'sextant' && cell.subpixels[row][col] === filled &&
-            colorsEqual(cell.bg, this.bgColor) && (!filled || (colorsEqual(cell.fg, this.fgColor) &&
-            !!cell.bold === this.bold && !!cell.inverse === this.inverse))) {
+        if (cell.type === 'sextant' && cell.subpixels[row][col] === filled && colorsEqual(cell.bg, this.bgColor) &&
+            (filled ? colorsEqual(cell.fg, this.fgColor) && !!cell.bold === this.bold && !!cell.inverse === this.inverse
+                : !cell.bold && !cell.inverse)) {
             return null;
         }
 
         this.beforeChange(cellX, cellY, cellX, cellY);
-        if (filled) this.applyCurrentColors(cell);
-        else cell.bg = { ...this.bgColor };
+        if (filled) {
+            this.applyCurrentColors(cell);
+        } else {
+            // Erased, the cell shows plainly (an inverse blank would be a block)
+            cell.bg = { ...this.bgColor };
+            cell.bold = cell.inverse = false;
+        }
         detachWide(this.canvas.cells, cellX, cellY);
         setCellSubpixel(cell, row, col, filled);
         return sp;

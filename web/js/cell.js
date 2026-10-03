@@ -109,6 +109,8 @@ function claimWideTail(cells, x, y) {
     makeWideTail(tail);
     tail.fg = { ...row[x].fg };
     tail.bg = { ...row[x].bg };
+    tail.bold = !!row[x].bold;
+    tail.inverse = !!row[x].inverse;
 }
 
 // Set cell (x, y) to a character, keeping wide chars consistent
@@ -282,7 +284,7 @@ function canvasToPlain(canvas) {
     return canvas.cells.map(row => row.map(cellToChar).join('').trimEnd()).join('\n') + '\n';
 }
 
-function parseTextToCells(text, fgColor, bgColor) {
+function parseTextToCells(text, fgColor, bgColor, bold = false, inverse = false) {
     // NFC composes e.g. e + U+0301 into é, which fits in one cell
     text = text.normalize('NFC').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     let lines = text.split('\n');
@@ -293,6 +295,6 @@ function parseTextToCells(text, fgColor, bgColor) {
     }
 
     return lines.map(line => charsToRow(
-        Array.from(line, ch => ({ code: ch.codePointAt(0), fg: fgColor, bg: bgColor }))
+        Array.from(line, ch => ({ code: ch.codePointAt(0), fg: fgColor, bg: bgColor, bold, inverse }))
     ));
 }

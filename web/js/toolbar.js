@@ -568,20 +568,26 @@ class Toolbar {
     savedCanvas() {
         try {
             const saved = JSON.parse(loadSetting(AUTOSAVE_KEY));
-            if (!saved) return undefined;
+            const size = (v, max) => Number.isInteger(v) && v >= 1 && v <= max;
+            // None, or not something this version saved: start empty
+            if (!saved || saved.v !== 1 || typeof saved.ansi !== 'string' ||
+                !size(saved.width, 500) || !size(saved.height, 200)) return undefined;
             const canvas = parseANSIText(saved.ansi);
             resizeCanvas(canvas, saved.width, saved.height);
-            if (saved.name) this.setFilename(saved.name);
+            if (typeof saved.name === 'string' && saved.name) this.setFilename(saved.name, false);
             return canvas;
         } catch (e) {
-            return undefined;   // none, or unreadable: start empty
+            return undefined;   // unreadable: start empty
         }
     }
 
-    // Save a moment after the last change (and when the page goes away)
+    // Save a moment after the last change (and when the page goes away);
+    // big canvases take a while to save, so wait longer for them
     scheduleAutosave() {
         clearTimeout(this._autosaveTimer);
-        this._autosaveTimer = setTimeout(() => this.autosave(), 500);
+        const c = this.renderer.canvas;
+        const delay = c && c.width * c.height > 20000 ? 3000 : 500;
+        this._autosaveTimer = setTimeout(() => this.autosave(), delay);
         if (!this._autosaveOnLeave) {
             this._autosaveOnLeave = true;
             window.addEventListener('pagehide', () => {
@@ -611,9 +617,10 @@ class Toolbar {
 
     // --- Save / open / resize ---
 
-    setFilename(name) {
+    setFilename(name, save = true) {
         this.saveFilename = name;
         document.getElementById('file-name').textContent = name;
+        if (save) this.scheduleAutosave();
     }
 
     doSave() {
