@@ -71,7 +71,9 @@
 }
 
 /* Cells the agent just changed */
-.overlay-ai {
-    --c: #c58aff;
-    background-color: rgba(197, 138, 255, 0.15);
+.ai-flash {
+    position: absolute;
+    outline: 2px solid #ff4fa3;
+    outline-offset: -1px;
+    background-color: rgba(255, 79, 163, 0.15);
 }

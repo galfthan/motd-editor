@@ -49,7 +49,8 @@ The agent gets tools mirroring the editor's: `draw_bitmap` and
 `draw_strokes` (subpixels), `place_symbols`, `write_text`, `draw_box`,
 `draw_line`, `copy_region`, `import_ansi`/`export`, `resize_canvas`,
 `new_canvas`, `undo`/`redo` and `batch`, plus `get_state`, `read_region`
-(text, subpixel bitmap or per-cell colours) and `view_canvas` (a PNG).
+(text, subpixel bitmap or per-cell colours), `view_canvas` (a PNG, in dark
+or light terminal colours) and `set_display` (Show Grid / Light Terminal).
 
 How it works: the browser tab holds the canvas. The server relays each tool
 call to the tab over Server-Sent Events, the tab runs it with the editor's own

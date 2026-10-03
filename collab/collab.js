@@ -10,13 +10,12 @@
 const STYLES = { none: 0, light: 1, heavy: 2, double: 3 };
 const FILLS = { none: 0, fill: 1, recolor: 2 };
 
-// Operations that only read the canvas: no undo step, no highlight
-const READ_ONLY = new Set(['get_state', 'view_canvas', 'read_region', 'export']);
+// Operations that don't edit the canvas: no undo step
+const NO_EDIT = new Set(['get_state', 'view_canvas', 'read_region', 'export', 'set_display']);
 
 let r;          // the editor's CanvasRenderer
 let panel;      // activity panel elements
 let flashRects = [];
-let flashTimer = null;
 
 // --- Helpers ---
 
@@ -92,12 +91,20 @@ function flash(rect) {
     if (c) flashRects.push(c);
 }
 
+// Shown as elements in the editor's overlay layer (which a re-render
+// replaces, taking them along)
 function showFlash() {
     if (flashRects.length === 0) return;
-    r.setOverlay('ai', flashRects);
+    const els = flashRects.map(c => {
+        const el = document.createElement('div');
+        el.className = 'ai-flash';
+        el.style.cssText = `left:${c.x1 * CELL_W}px;top:${c.y1 * CELL_H}px;` +
+            `width:${(c.x2 - c.x1 + 1) * CELL_W}px;height:${(c.y2 - c.y1 + 1) * CELL_H}px`;
+        r.overlayLayer.appendChild(el);
+        return el;
+    });
     flashRects = [];
-    clearTimeout(flashTimer);
-    flashTimer = setTimeout(() => r.setOverlay('ai', []), 800);
+    setTimeout(() => els.forEach(el => el.remove()), 800);
 }
 
 // Set or clear subpixels ({ x, y, filled } in subpixel coords, off-canvas
@@ -123,13 +130,37 @@ function setSize(a) {
 
 // --- Rendering for view_canvas ---
 
-// A PNG (base64) of the cells in `rect`, cropped from the editor's own grid
-// canvas, `scale` image px per CSS px, with optional rulers and a line every
-// 10th cell
-function renderPNG(rect, scale, rulers) {
-    const src = r.ctx.canvas;
-    const kx = src.width / (r.canvas.width * CELL_W);
-    const ky = src.height / (r.canvas.height * CELL_H);
+// A PNG (base64) of the cells in `rect`, drawn by the editor's own code
+// with the grid and terminal colours asked for, `scale` image px per CSS px,
+// with optional rulers and a line every 10th cell
+function renderPNG(rect, scale, rulers, grid, light) {
+    const cells = [];
+    for (let y = rect.y1; y <= rect.y2; y++) {
+        const row = r.canvas.cells[y];
+        for (let x = rect.x1; x <= rect.x2; x++) {
+            // A wide char is drawn from its head, also when only its tail is in view
+            if (row[x].type === 'wide-tail') {
+                if (x === rect.x1 && x > 0) cells.push({ x: x - 1, y, cell: row[x - 1] });
+                continue;
+            }
+            cells.push({ x, y, cell: row[x] });
+        }
+    }
+    // The terminal colours come from the canvas's CSS class (see
+    // CanvasRenderer.setLightTerminal); switch it just while drawing
+    const shown = { showGrid: r.showGrid, light: r.lightTerminal };
+    r.showGrid = grid;
+    r.container.classList.toggle('light-terminal', light);
+    r.readTheme();
+    let src;
+    try {
+        src = r.drawCellsImage(cells, rect, undefined, true).image;
+    } finally {
+        r.showGrid = shown.showGrid;
+        r.container.classList.toggle('light-terminal', shown.light);
+        r.readTheme();
+    }
+
     const x0 = rect.x1 * CELL_W, y0 = rect.y1 * CELL_H;
     const w = (rect.x2 - rect.x1 + 1) * CELL_W, h = (rect.y2 - rect.y1 + 1) * CELL_H;
     const ml = rulers ? 24 : 0, mt = rulers ? 14 : 0;
@@ -139,7 +170,7 @@ function renderPNG(rect, scale, rulers) {
     const g = out.getContext('2d');
     g.fillStyle = '#000';
     g.fillRect(0, 0, out.width, out.height);
-    g.drawImage(src, x0 * kx, y0 * ky, w * kx, h * ky, ml, mt, w * scale, h * scale);
+    g.drawImage(src, ml, mt, w * scale, h * scale);
 
     if (rulers) {
         g.font = '10px monospace';
@@ -181,8 +212,16 @@ const OPS = {
                 subpixel_selection: r.subpixelSelection,
                 text_cursor: r.textCursor,
                 note: panel.note.value
-            }
+            },
+            display: { grid: r.showGrid, light_terminal: r.lightTerminal }
         };
+    },
+
+    // Through the toolbar, so the Canvas menu shows (and remembers) it
+    set_display(a) {
+        if (a.grid !== undefined && a.grid !== r.showGrid) toolbar.toggleGrid();
+        if (a.light_terminal !== undefined && a.light_terminal !== r.lightTerminal) toolbar.toggleLightTerminal();
+        return { grid: r.showGrid, light_terminal: r.lightTerminal };
     },
 
     view_canvas(a) {
@@ -190,12 +229,14 @@ const OPS = {
         const w = (rect.x2 - rect.x1 + 1) * CELL_W, h = (rect.y2 - rect.y1 + 1) * CELL_H;
         // Keep the image within about 1600px on its longer side
         const scale = Math.min((a.cell_px || CELL_W) / CELL_W, 1600 / Math.max(w, h));
-        const rulers = !a.no_grid;
+        const rulers = !a.no_rulers;
+        const grid = a.grid ?? r.showGrid;
+        const light = a.light_terminal ?? r.lightTerminal;
         return {
-            image: renderPNG(rect, scale, rulers),
+            image: renderPNG(rect, scale, rulers, grid, light),
             info: `Cells x ${rect.x1}-${rect.x2}, y ${rect.y1}-${rect.y2}, ` +
-                `${(CELL_W * scale).toFixed(1)}x${(CELL_H * scale).toFixed(1)} px each, as shown in the editor ` +
-                '(thin cell borders; empty cells dark grey).' +
+                `${(CELL_W * scale).toFixed(1)}x${(CELL_H * scale).toFixed(1)} px each, ` +
+                `${light ? 'light' : 'dark'} terminal${grid ? ', with cell grid' : ''}.` +
                 (rulers ? ' Rulers and blue lines mark every 10th cell.' : '')
         };
     },
@@ -386,7 +427,7 @@ const OPS = {
 // synchronous, so the user's own edits can't end up inside the step.
 function run(op, args) {
     if (!Object.hasOwn(OPS, op)) throw new Error(`unknown operation "${op}"`);
-    if (READ_ONLY.has(op) || op === 'undo' || op === 'redo') return OPS[op](args);
+    if (NO_EDIT.has(op) || op === 'undo' || op === 'redo') return OPS[op](args);
     return r.recordEdit(`AI ${op}`, () => OPS[op](args));
 }
 

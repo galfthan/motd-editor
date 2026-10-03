@@ -26,8 +26,14 @@ type rect struct {
 
 type viewArgs struct {
 	region
-	CellPx int  `json:"cell_px,omitempty" jsonschema:"cell width in image pixels; cells are 18x34 in the editor (default 18, reduced to keep the image within 1600 px)"`
-	NoGrid bool `json:"no_grid,omitempty" jsonschema:"leave out the coordinate rulers and the lines every 10 cells"`
+	CellPx   int  `json:"cell_px,omitempty" jsonschema:"cell width in image pixels; cells are 18x34 in the editor (default 18, reduced to keep the image within 1600 px)"`
+	NoRulers bool `json:"no_rulers,omitempty" jsonschema:"leave out the coordinate rulers and the lines every 10 cells"`
+	display
+}
+
+type display struct {
+	Grid          *bool `json:"grid,omitempty" jsonschema:"thin lines around every cell (default: as the editor shows it)"`
+	LightTerminal *bool `json:"light_terminal,omitempty" jsonschema:"the colours of a light-background terminal instead of a dark one (default: as the editor shows it)"`
 }
 
 type readArgs struct {
@@ -110,9 +116,11 @@ type batchArgs struct {
 
 func addTools(s *mcp.Server, e *editor) {
 	relay[struct{}](s, e, "get_state",
-		"Canvas size in cells and subpixels, and what the user is doing: current tool and colours, cell or subpixel selection, text cursor, and the note they left for you.")
+		"Canvas size in cells and subpixels; what the user is doing: current tool and colours, cell or subpixel selection, text cursor, and the note they left for you; and the editor's display settings.")
 	relay[viewArgs](s, e, "view_canvas",
-		"The canvas, or a region of it, as a PNG image exactly as the editor shows it.")
+		"The canvas, or a region of it, as a PNG image drawn by the editor. MOTDs show in both dark and light terminals: check both with light_terminal.")
+	relay[display](s, e, "set_display",
+		"Change how the editor shows the canvas to the user (the Canvas menu's Show Grid and Light Terminal). Doesn't change the art.")
 	relay[readArgs](s, e, "read_region",
 		"Read the exact content of the canvas or a region as text, a subpixel bitmap, or per-cell JSON with colours.")
 	relay[bitmapArgs](s, e, "draw_bitmap",
