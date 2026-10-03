@@ -121,7 +121,7 @@ func addTools(s *mcp.Server, l *link) {
 	relay[viewArgs](s, l, "view_canvas",
 		"The canvas, or a region of it, as a PNG image drawn by the editor. MOTDs show in both dark and light terminals: check both with light_terminal.")
 	relay[display](s, l, "set_display",
-		"Change how the editor shows the canvas to the user (the Canvas menu's Show Grid, Light Terminal and cell aspect). Doesn't change the art or the export.")
+		"Change how the editor shows the canvas to the user (the Canvas menu's Show Grid, Light Terminal and cell aspect); leave a setting out to keep it. Doesn't change the art or the export.")
 	relay[readArgs](s, l, "read_region",
 		"Read the exact content of the canvas or a region as text, a subpixel bitmap, or per-cell JSON with colours.")
 	relay[bitmapArgs](s, l, "draw_bitmap",

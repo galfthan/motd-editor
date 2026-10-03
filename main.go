@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -289,7 +290,12 @@ func toolResult(raw json.RawMessage) *mcp.CallToolResult {
 // relay adds a tool that runs the tab operation of the same name. In only
 // describes and validates the arguments; the tab gets them as sent.
 func relay[In any](s *mcp.Server, l *link, name, description string) {
-	mcp.AddTool(s, &mcp.Tool{Name: name, Description: description},
+	schema, err := jsonschema.For[In](nil)
+	if err != nil {
+		panic(err)
+	}
+	notNull(schema)
+	mcp.AddTool(s, &mcp.Tool{Name: name, Description: description, InputSchema: schema},
 		func(ctx context.Context, req *mcp.CallToolRequest, _ In) (*mcp.CallToolResult, any, error) {
 			res, err := l.call(ctx, name, req.Params.Arguments)
 			if err != nil {
@@ -297,6 +303,23 @@ func relay[In any](s *mcp.Server, l *link, name, description string) {
 			}
 			return toolResult(res), nil, nil
 		})
+}
+
+// notNull gives the nullable types inferred for Go pointers and slices
+// (["null", "boolean"]) their plain type: some clients (Claude Desktop) drop
+// a list of types, leaving the argument untyped. Absent arguments, not null
+// ones, mean "default".
+func notNull(s *jsonschema.Schema) {
+	if s == nil {
+		return
+	}
+	if len(s.Types) == 2 && s.Types[0] == "null" {
+		s.Type, s.Types = s.Types[1], nil
+	}
+	notNull(s.Items)
+	for _, p := range s.Properties {
+		notNull(p)
+	}
 }
 
 func main() {
