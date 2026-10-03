@@ -32,8 +32,9 @@ type viewArgs struct {
 }
 
 type display struct {
-	Grid          *bool `json:"grid,omitempty" jsonschema:"thin lines around every cell (default: as the editor shows it)"`
-	LightTerminal *bool `json:"light_terminal,omitempty" jsonschema:"the colours of a light-background terminal instead of a dark one (default: as the editor shows it)"`
+	Grid          *bool    `json:"grid,omitempty" jsonschema:"thin lines around every cell (default: as the editor shows it)"`
+	LightTerminal *bool    `json:"light_terminal,omitempty" jsonschema:"the colours of a light-background terminal instead of a dark one (default: as the editor shows it)"`
+	CellAspect    *float64 `json:"cell_aspect,omitempty" jsonschema:"cell width / height, 0.3-0.8, as in the terminal the art is for, e.g. 0.47 for Windows Terminal's 9x19 px cells (default: as the editor shows it; the editor's own default is 0.5)"`
 }
 
 type readArgs struct {
@@ -120,7 +121,7 @@ func addTools(s *mcp.Server, l *link) {
 	relay[viewArgs](s, l, "view_canvas",
 		"The canvas, or a region of it, as a PNG image drawn by the editor. MOTDs show in both dark and light terminals: check both with light_terminal.")
 	relay[display](s, l, "set_display",
-		"Change how the editor shows the canvas to the user (the Canvas menu's Show Grid and Light Terminal). Doesn't change the art.")
+		"Change how the editor shows the canvas to the user (the Canvas menu's Show Grid, Light Terminal and cell aspect). Doesn't change the art or the export.")
 	relay[readArgs](s, l, "read_region",
 		"Read the exact content of the canvas or a region as text, a subpixel bitmap, or per-cell JSON with colours.")
 	relay[bitmapArgs](s, l, "draw_bitmap",

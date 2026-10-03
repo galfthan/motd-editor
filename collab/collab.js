@@ -122,6 +122,20 @@ function paintSubpixels(points) {
     }
 }
 
+function checkAspect(aspect) {
+    if (!(aspect >= 0.3 && aspect <= 0.8)) throw new Error('cell_aspect must be 0.3-0.8 (cell width / height)');
+    return aspect;
+}
+
+function displayState() {
+    return {
+        grid: r.showGrid,
+        light_terminal: r.lightTerminal,
+        cell_aspect: +r.cellAspect.toFixed(4),
+        cell_px: { width: +CELL_W.toFixed(2), height: CELL_H }
+    };
+}
+
 function setSize(a) {
     if (!(a.width >= 1 && a.width <= 500 && a.height >= 1 && a.height <= 200)) {
         throw new Error('size must be 1-500 x 1-200 cells');
@@ -213,7 +227,7 @@ const OPS = {
                 text_cursor: r.textCursor,
                 note: panel.note.value
             },
-            display: { grid: r.showGrid, light_terminal: r.lightTerminal }
+            display: displayState()
         };
     },
 
@@ -221,24 +235,32 @@ const OPS = {
     set_display(a) {
         if (a.grid !== undefined && a.grid !== r.showGrid) toolbar.toggleGrid();
         if (a.light_terminal !== undefined && a.light_terminal !== r.lightTerminal) toolbar.toggleLightTerminal();
-        return { grid: r.showGrid, light_terminal: r.lightTerminal };
+        if (a.cell_aspect !== undefined) toolbar.setCellAspect(checkAspect(a.cell_aspect));
+        return displayState();
     },
 
     view_canvas(a) {
         const rect = regionRect(a);
-        const w = (rect.x2 - rect.x1 + 1) * CELL_W, h = (rect.y2 - rect.y1 + 1) * CELL_H;
-        // Keep the image within about 1600px on its longer side
-        const scale = Math.min((a.cell_px || CELL_W) / CELL_W, 1600 / Math.max(w, h));
         const rulers = !a.no_rulers;
         const grid = a.grid ?? r.showGrid;
         const light = a.light_terminal ?? r.lightTerminal;
-        return {
-            image: renderPNG(rect, scale, rulers, grid, light),
-            info: `Cells x ${rect.x1}-${rect.x2}, y ${rect.y1}-${rect.y2}, ` +
-                `${(CELL_W * scale).toFixed(1)}x${(CELL_H * scale).toFixed(1)} px each, ` +
-                `${light ? 'light' : 'dark'} terminal${grid ? ', with cell grid' : ''}.` +
-                (rulers ? ' Rulers and blue lines mark every 10th cell.' : '')
-        };
+        const aspect = a.cell_aspect === undefined ? r.cellAspect : checkAspect(a.cell_aspect);
+        // A one-off aspect only while drawing (the editor's cells keep theirs)
+        setCellWidthForAspect(aspect);
+        try {
+            const w = (rect.x2 - rect.x1 + 1) * CELL_W, h = (rect.y2 - rect.y1 + 1) * CELL_H;
+            // Keep the image within about 1600px on its longer side
+            const scale = Math.min((a.cell_px || CELL_W) / CELL_W, 1600 / Math.max(w, h));
+            return {
+                image: renderPNG(rect, scale, rulers, grid, light),
+                info: `Cells x ${rect.x1}-${rect.x2}, y ${rect.y1}-${rect.y2}, ` +
+                    `${(CELL_W * scale).toFixed(1)}x${(CELL_H * scale).toFixed(1)} px each (aspect ${aspect.toFixed(3)}), ` +
+                    `${light ? 'light' : 'dark'} terminal${grid ? ', with cell grid' : ''}.` +
+                    (rulers ? ' Rulers and blue lines mark every 10th cell.' : '')
+            };
+        } finally {
+            setCellWidthForAspect(r.cellAspect);
+        }
     },
 
     read_region(a) {

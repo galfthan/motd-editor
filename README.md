@@ -24,6 +24,8 @@ npx serve web
 - Copy/paste with system clipboard integration
 - Text tool for typing characters directly
 - Color picker tool
+- Preview for dark or light terminals and for the cell shape (width ÷ height)
+  of the terminal the art is for (Canvas menu)
 
 ## Working with an AI agent (optional)
 
@@ -63,7 +65,8 @@ The agent gets tools mirroring the editor's: `draw_bitmap` and
 `draw_line`, `copy_region`, `import_ansi`/`export`, `resize_canvas`,
 `new_canvas`, `undo`/`redo` and `batch`, plus `get_state`, `read_region`
 (text, subpixel bitmap or per-cell colours), `view_canvas` (a PNG, in dark
-or light terminal colours) and `set_display` (Show Grid / Light Terminal).
+or light terminal colours and any cell aspect) and `set_display` (Show Grid,
+Light Terminal, cell aspect).
 
 How it works: the browser tab holds the canvas. The server relays each tool
 call to the tab over Server-Sent Events, the tab runs it with the editor's own

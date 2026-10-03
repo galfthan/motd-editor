@@ -37,7 +37,7 @@ const instructions = `Edit the MOTD banner open in the user's browser, together 
 
 The canvas is a grid of terminal character cells, addressed (x, y) from the top-left. Each cell is also 2x3 subpixels, addressed (sx, sy) = (2x + col, 3y + row), drawn with Unicode sextant characters; a cell holds either subpixels or one other character (text, box drawing, symbols). Colours are "#rrggbb" or "default" (the terminal's default; the default when omitted).
 
-Start with get_state (canvas size, the user's selection and note to you). Look with view_canvas; use read_region for exact content. The banner will be shown in users' terminals, with dark or light backgrounds: "default" colours follow the terminal, so check both. Every drawing tool is one undo step for the user. Use batch to apply many operations at once.`
+Start with get_state (canvas size, the user's selection and note to you). Look with view_canvas; use read_region for exact content. The banner will be shown in users' terminals, with dark or light backgrounds: "default" colours follow the terminal, so check both. Terminals also differ in cell shape: get_state's display.cell_aspect (cell width / height) is what the editor previews, so check it before doing geometry (circles, diagonals, converting images to subpixels), and compare aspects with view_canvas's cell_aspect. Every drawing tool is one undo step for the user. Use batch to apply many operations at once.`
 
 type editor struct {
 	url     string // where the editor is served
