@@ -168,7 +168,8 @@ function renderPNG(rect, scale, rulers, grid, light) {
     r.readTheme();
     let src;
     try {
-        src = r.drawCellsImage(cells, rect, undefined, true).image;
+        // At the output's scale, not the editor's zoom
+        src = withState({ _scaleX: scale, _scaleY: scale }, () => r.drawCellsImage(cells, rect, undefined, true).image);
     } finally {
         r.showGrid = shown.showGrid;
         r.container.classList.toggle('light-terminal', shown.light);
@@ -184,7 +185,7 @@ function renderPNG(rect, scale, rulers, grid, light) {
     const g = out.getContext('2d');
     g.fillStyle = '#000';
     g.fillRect(0, 0, out.width, out.height);
-    g.drawImage(src, ml, mt, w * scale, h * scale);
+    g.drawImage(src, ml, mt);
 
     if (rulers) {
         g.font = '10px monospace';
@@ -231,12 +232,13 @@ const OPS = {
         };
     },
 
-    // Through the toolbar, so the Canvas menu shows (and remembers) it
+    // Through the toolbar, so its controls show it; not remembered, so the
+    // user's own saved choices stay as they were
     set_display(a) {
         // Absent or null: leave as is
-        if (a.cell_aspect != null) toolbar.setCellAspect(checkAspect(a.cell_aspect));
-        if (a.grid != null && a.grid !== r.showGrid) toolbar.toggleGrid();
-        if (a.light_terminal != null && a.light_terminal !== r.lightTerminal) toolbar.toggleLightTerminal();
+        if (a.cell_aspect != null) toolbar.setCellAspect(checkAspect(a.cell_aspect), false);
+        if (a.grid != null && a.grid !== r.showGrid) toolbar.toggleGrid(false);
+        if (a.light_terminal != null && a.light_terminal !== r.lightTerminal) toolbar.toggleLightTerminal(false);
         return displayState();
     },
 
@@ -268,8 +270,11 @@ const OPS = {
         const { x1, y1, x2, y2 } = regionRect(a);
         const rows = r.canvas.cells.slice(y1, y2 + 1).map(row => row.slice(x1, x2 + 1));
         switch (a.format || 'text') {
-            case 'text':
-                return rows.map(row => row.map(cellToChar).join('')).join('\n');
+            case 'text': {
+                // Trailing spaces dropped, as in the export
+                const text = rows.map(row => row.map(cellToChar).join('').trimEnd()).join('\n');
+                return text.trim() ? text : `(${rows.length} blank rows)`;
+            }
             case 'subpixels':
                 return rows.flatMap(row => [0, 1, 2].map(sr => row.map(cell =>
                     cell.type === 'sextant' ? cell.subpixels[sr].map(on => on ? '#' : '.').join('') : '++'
@@ -310,7 +315,16 @@ const OPS = {
         withState(colorState(a), () => {
             for (const { x, y, char } of a.items) {
                 checkCell(x, y);
-                r.setTextCell(x, y, char.codePointAt(0));
+                // One character; zero-width ones after it (a variation
+                // selector) have no cell and are dropped
+                const [code, ...rest] = [...char].map(c => c.codePointAt(0));
+                if (code === undefined || rest.some(c => charWidth(c) !== 0)) {
+                    throw new Error(`char must be one character, not "${char}"`);
+                }
+                if (charWidth(code) === 2 && x === r.canvas.width - 1) {
+                    throw new Error(`"${char}" is two cells wide and doesn't fit at x ${x}, the last column`);
+                }
+                r.setTextCell(x, y, code);
                 flash({ x1: x, y1: y, x2: x + 1, y2: y });
             }
         });
@@ -336,7 +350,9 @@ const OPS = {
     },
 
     draw_box(a) {
-        const rect = argRect(a);
+        // Not clipped: the parts past the edges are left out
+        const rect = normRect({ x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 });
+        if (!r.clipRect(rect)) throw new Error('rectangle is outside the canvas');
         withState({
             ...colorState(a),
             dragStart: { x: rect.x1, y: rect.y1 },
@@ -456,10 +472,14 @@ const OPS = {
     batch(a) {
         const results = [];
         if (!Array.isArray(a.ops)) throw new Error('ops must be a list of {op, args}');
-        for (const [i, { op, args }] of a.ops.entries()) {
-            if (['batch', 'view_canvas', 'undo', 'redo', 'import_image'].includes(op) || !Object.hasOwn(OPS, op)) {
-                throw new Error(`ops[${i}]: "${op}" can't be used in a batch`);
+        // Every op is checked before any runs
+        for (const [i, { op }] of a.ops.entries()) {
+            if (!Object.hasOwn(OPS, op)) throw new Error(`ops[${i}]: unknown operation "${op}"; nothing was changed`);
+            if (['batch', 'view_canvas', 'undo', 'redo', 'import_image'].includes(op)) {
+                throw new Error(`ops[${i}]: "${op}" can't be used in a batch; nothing was changed`);
             }
+        }
+        for (const [i, { op, args }] of a.ops.entries()) {
             try {
                 results.push(OPS[op](args || {}) ?? 'ok');
             } catch (e) {

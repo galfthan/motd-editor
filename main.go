@@ -37,7 +37,7 @@ const inject = `<link rel="stylesheet" href="collab/collab.css">
 
 const instructions = `Edit the MOTD banner open in the user's browser, together with the user, who may be drawing at the same time and sees every change live.
 
-The canvas is a grid of terminal character cells, addressed (x, y) from the top-left. Each cell is also 2x3 subpixels, addressed (sx, sy) = (2x + col, 3y + row), drawn with Unicode sextant characters; a cell holds either subpixels or one other character (text, box drawing, symbols). Colours are "#rrggbb" or "default" (the terminal's default; the default when omitted).
+The canvas is a grid of terminal character cells, addressed (x, y) from the top-left. Each cell is also 2x3 subpixels, addressed (sx, sy) = (2x + col, 3y + row), drawn with Unicode sextant characters; a cell holds either subpixels or one other character (text, box drawing, symbols). Colours are "#rrggbb" or "default" (the terminal's default; the default when omitted). Drawing tools give the cells they draw on both colours, so to draw over a coloured background pass its colour as bg.
 
 Start with get_state (canvas size, the user's selection and note to you). Look with view_canvas; use read_region for exact content. The banner will be shown in users' terminals, with dark or light backgrounds: "default" colours follow the terminal, so check both. Terminals also differ in cell shape: get_state's display.cell_aspect (cell width / height) is what the editor previews, so check it before doing geometry (circles, diagonals), and compare aspects with view_canvas's cell_aspect. Put photos and other pictures on the canvas with import_image. Every drawing tool is one undo step for the user. Use batch to apply many operations at once.`
 
@@ -76,7 +76,7 @@ func (e *editor) call(ctx context.Context, op string, args json.RawMessage) (jso
 	}
 	e.mu.Unlock()
 	if !sent {
-		return nil, fmt.Errorf("no editor tab is connected: ask the user to open %s", e.url)
+		return nil, fmt.Errorf("no editor tab is connected, so nothing was changed: ask the user to open %s", e.url)
 	}
 	defer func() {
 		e.mu.Lock()
@@ -93,7 +93,7 @@ func (e *editor) call(ctx context.Context, op string, args json.RawMessage) (jso
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-time.After(30 * time.Second):
-		return nil, errors.New("the editor tab did not answer within 30 s")
+		return nil, errors.New("the editor tab did not answer within 30 s; the change may still have been made: check with get_state or read_region")
 	}
 }
 
@@ -350,8 +350,16 @@ func main() {
 	webFS, _ := fs.Sub(files, "web")
 
 	e := &editor{url: "http://" + *addr + "/", pending: map[int64]chan reply{}}
-	server := mcp.NewServer(&mcp.Implementation{Name: "motd-editor", Version: "0.1.0"},
-		&mcp.ServerOptions{Instructions: instructions})
+	var server *mcp.Server
+	var l *link
+	server = mcp.NewServer(&mcp.Implementation{Name: "motd-editor", Version: "0.1.0"}, &mcp.ServerOptions{
+		Instructions: instructions + fmt.Sprintf(
+			"\n\nThe editor runs at %s, in a browser tab the user keeps open. If a tool says no editor tab is connected, nothing was changed: ask the user to open that address.", e.url),
+		// A client that reconnects, e.g. to a rebuilt server, may keep the
+		// tool descriptions it had: adding the tools again tells every client
+		// the list changed, so clients that follow that fetch it again
+		InitializedHandler: func(context.Context, *mcp.InitializedRequest) { addTools(server, l) },
+	})
 
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil))
@@ -370,7 +378,7 @@ func main() {
 	mux.Handle("/collab/", http.FileServerFS(files))
 	mux.Handle("/", http.FileServerFS(webFS))
 
-	l := &link{e: e, addr: *addr, handler: localOnly(mux)}
+	l = &link{e: e, addr: *addr, handler: localOnly(mux)}
 	addTools(server, l)
 
 	if !*stdio {

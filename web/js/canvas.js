@@ -124,6 +124,8 @@ class CanvasRenderer {
         this.showGrid = false;          // 1px grid lines over the cells (see setShowGrid)
         this.lightTerminal = false;     // simulate a light terminal (see setLightTerminal)
         this.cellAspect = DEFAULT_CELL_ASPECT; // cell width / height (see setCellAspect)
+        this.zoom = 1;                  // view scale (see setZoom)
+        this.onRender = null;           // called after each render (the toolbar's rulers)
         this._onPixelRatioChange = () => this.render();
         this._glyphStyles = new Map();  // .glyph-* class → { font, transform, baseline }
         this._shadePatterns = new WeakMap(); // context → shade + colour → CanvasPattern (see fillShape)
@@ -178,7 +180,8 @@ class CanvasRenderer {
         // Image paste: the wheel over the canvas resizes it (Ctrl+wheel still
         // zooms the page)
         window.addEventListener('wheel', (e) => {
-            if (!this.isImagePaste() || e.ctrlKey || !this.container.parentElement.contains(e.target)) return;
+            const area = this.container.closest('.canvas-scroll') || this.container.parentElement;
+            if (!this.isImagePaste() || e.ctrlKey || !area.contains(e.target)) return;
             e.preventDefault();
             // Shift+wheel scrolls sideways in some browsers
             this._wheel += (e.deltaY || e.deltaX) * (e.deltaMode ? 33 : 1);
@@ -449,11 +452,14 @@ class CanvasRenderer {
     render() {
         if (!this.canvas) return;
 
+        // Drawing is in unzoomed CSS px (width x height); the zoom only
+        // changes how many device pixels they get
         const width = this.canvas.width * CELL_W;
         const height = this.canvas.height * CELL_H;
+        const z = this.zoom;
         this.container.innerHTML = '';
-        this.container.style.width = width + 'px';
-        this.container.style.height = height + 'px';
+        this.container.style.width = width * z + 'px';
+        this.container.style.height = height * z + 'px';
 
         // Reset caches (innerHTML = '' removed the overlays too)
         this._overlayRects = {};
@@ -468,13 +474,13 @@ class CanvasRenderer {
         // 16.7M pixels), so very large grids get a lower resolution instead.
         this._dpr = window.devicePixelRatio || 1;
         this.watchPixelRatio();
-        const scale = Math.min(this._dpr, Math.sqrt(MAX_CANVAS_PIXELS / (width * height)));
+        const scale = Math.min(this._dpr * z, Math.sqrt(MAX_CANVAS_PIXELS / (width * height)));
         const gridCanvas = document.createElement('canvas');
         gridCanvas.className = 'grid-canvas';
         gridCanvas.width = Math.round(width * scale);
         gridCanvas.height = Math.round(height * scale);
-        gridCanvas.style.width = width + 'px';
-        gridCanvas.style.height = height + 'px';
+        gridCanvas.style.width = width * z + 'px';
+        gridCanvas.style.height = height * z + 'px';
         // After a GPU reset the browser restores a blank canvas
         gridCanvas.addEventListener('contextrestored', () => this.drawAll());
         this.container.appendChild(gridCanvas);
@@ -492,8 +498,8 @@ class CanvasRenderer {
         overlayCanvas.className = 'overlay-canvas';
         overlayCanvas.width = gridCanvas.width;
         overlayCanvas.height = gridCanvas.height;
-        overlayCanvas.style.width = width + 'px';
-        overlayCanvas.style.height = height + 'px';
+        overlayCanvas.style.width = width * z + 'px';
+        overlayCanvas.style.height = height * z + 'px';
         this.container.appendChild(overlayCanvas);
         this.overlayCtx = overlayCanvas.getContext('2d');
         overlayCanvas.addEventListener('contextrestored', () => this.repaintOverlay());
@@ -503,6 +509,7 @@ class CanvasRenderer {
         this.overlayLayer.className = 'overlay-layer';
         this.overlayLayer.style.width = width + 'px';
         this.overlayLayer.style.height = height + 'px';
+        this.overlayLayer.style.transform = `scale(${z})`;
         this.container.appendChild(this.overlayLayer);
 
         this.drawAll();
@@ -517,6 +524,7 @@ class CanvasRenderer {
             this.textCursor.y = Math.min(this.textCursor.y, this.canvas.height - 1);
             this.updateTextCursorDisplay();
         }
+        if (this.onRender) this.onRender();
     }
 
     // Re-render at the new resolution when the device pixel ratio changes
@@ -551,6 +559,12 @@ class CanvasRenderer {
     setCellAspect(aspect) {
         this.cellAspect = aspect;
         setCellWidthForAspect(aspect);
+        this.render();
+    }
+
+    // Show the canvas at `zoom` times its size, redrawn at that resolution
+    setZoom(zoom) {
+        this.zoom = zoom;
         this.render();
     }
 
@@ -596,32 +610,56 @@ class CanvasRenderer {
                 this.drawCell(x, y, false);
             }
         }
-        if (this.showGrid) {
+        if (this.gridLines().show) {
             this.drawGridLines();
             // A wide char has no grid line between its halves
             for (const [x, y] of wide) this.drawCell(x, y);
         }
     }
 
-    // All the cells' grid rings at once, as one line per cell edge across the
+    // How the grid is drawn at this scale: a ring of bx x by device px over
+    // each cell's outermost pixels where there are 2 or more device px per
+    // CSS px, else (`thin`) one device px along each cell's top and left (and
+    // the canvas's right and bottom edges), shared by neighbouring cells; not
+    // at all (`show` false) once cells are too small for lines to help
+    gridLines() {
+        const kx = this._scaleX, ky = this._scaleY;
+        return {
+            show: this.showGrid && CELL_W * kx >= 4,
+            thin: kx < 2 || ky < 2,
+            bx: Math.max(1, Math.floor(kx)),
+            by: Math.max(1, Math.floor(ky))
+        };
+    }
+
+    // All the cells' grid lines at once, as one line per cell edge across the
     // whole canvas: the same pixels as drawCell's per-cell rings
     drawGridLines() {
         const ctx = this.ctx;
         const kx = this._scaleX, ky = this._scaleY;
-        const bx = Math.max(1, Math.floor(kx)), by = Math.max(1, Math.floor(ky));
-        const width = Math.round(this.canvas.width * CELL_W * kx);
-        const height = Math.round(this.canvas.height * CELL_H * ky);
+        const { thin, bx, by } = this.gridLines();
+        const cols = this.canvas.width, rows = this.canvas.height;
+        const width = Math.round(cols * CELL_W * kx);
+        const height = Math.round(rows * CELL_H * ky);
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.fillStyle = this.theme.border;
-        for (let x = 0; x <= this.canvas.width; x++) {
+        for (let x = 0; x <= cols; x++) {
             const dx = Math.round(x * CELL_W * kx);
+            if (thin) {
+                ctx.fillRect(x < cols ? dx : dx - 1, 0, 1, height);
+                continue;
+            }
             if (x > 0) ctx.fillRect(dx - bx, 0, bx, height);                // right edge of column x - 1
-            if (x < this.canvas.width) ctx.fillRect(dx, 0, bx, height);     // left edge of column x
+            if (x < cols) ctx.fillRect(dx, 0, bx, height);                  // left edge of column x
         }
-        for (let y = 0; y <= this.canvas.height; y++) {
+        for (let y = 0; y <= rows; y++) {
             const dy = Math.round(y * CELL_H * ky);
+            if (thin) {
+                ctx.fillRect(0, y < rows ? dy : dy - 1, width, 1);
+                continue;
+            }
             if (y > 0) ctx.fillRect(0, dy - by, width, by);
-            if (y < this.canvas.height) ctx.fillRect(0, dy, width, by);
+            if (y < rows) ctx.fillRect(0, dy, width, by);
         }
     }
 
@@ -707,17 +745,25 @@ class CanvasRenderer {
             ctx.restore();
         }
 
-        // Grid lines: a 1 CSS px ring painted over the cell's outermost pixels
-        // (drawAll draws them for all cells at once instead)
-        if (this.showGrid && gridRing) {
+        // Grid lines painted over the cell's outermost pixels, as gridLines
+        // says (drawAll draws them for all cells at once instead)
+        const grid = this.gridLines();
+        if (grid.show && gridRing) {
             const [x0, y0, w, h] = g.rect;
-            const bx = Math.max(1, Math.floor(g.kx)), by = Math.max(1, Math.floor(g.ky));
             ctx.setTransform(1, 0, 0, 1, 0, 0);
             ctx.fillStyle = this.theme.border;
-            ctx.fillRect(x0, y0, w, by);
-            ctx.fillRect(x0, y0 + h - by, w, by);
-            ctx.fillRect(x0, y0, bx, h);
-            ctx.fillRect(x0 + w - bx, y0, bx, h);
+            if (grid.thin) {
+                ctx.fillRect(x0, y0, w, 1);
+                ctx.fillRect(x0, y0, 1, h);
+                if (x + (isWideHead(cell) ? 2 : 1) >= this.canvas.width) ctx.fillRect(x0 + w - 1, y0, 1, h);
+                if (y + 1 >= this.canvas.height) ctx.fillRect(x0, y0 + h - 1, w, 1);
+            } else {
+                const { bx, by } = grid;
+                ctx.fillRect(x0, y0, w, by);
+                ctx.fillRect(x0, y0 + h - by, w, by);
+                ctx.fillRect(x0, y0, bx, h);
+                ctx.fillRect(x0 + w - bx, y0, bx, h);
+            }
         }
     }
 
@@ -1087,6 +1133,12 @@ class CanvasRenderer {
             return;
         }
 
+        // Alt-click picks the colours under the pointer, with any tool
+        if (e.altKey) {
+            this.handlePickTool(e);
+            return;
+        }
+
         this.isDrawing = true;
         // Tools that change nothing (select, pick, text click) leave an empty
         // step, which is dropped
@@ -1183,8 +1235,8 @@ class CanvasRenderer {
     cellCoordsFromEvent(e) {
         if (!this.canvas) return null;
         const rect = this.container.getBoundingClientRect();
-        const cellX = this.cellIndexAt(e.clientX - rect.left, CELL_W, this._scaleX, this.canvas.width);
-        const cellY = this.cellIndexAt(e.clientY - rect.top, CELL_H, this._scaleY, this.canvas.height);
+        const cellX = this.cellIndexAt((e.clientX - rect.left) / this.zoom, CELL_W, this._scaleX, this.canvas.width);
+        const cellY = this.cellIndexAt((e.clientY - rect.top) / this.zoom, CELL_H, this._scaleY, this.canvas.height);
         return { cellX, cellY };
     }
 
@@ -1204,8 +1256,8 @@ class CanvasRenderer {
     subpixelCoordsFromEvent(e) {
         if (!this.canvas) return null;
         const rect = this.container.getBoundingClientRect();
-        const relX = Math.max(0, Math.min(this.canvas.width  * CELL_W - 0.01, e.clientX - rect.left));
-        const relY = Math.max(0, Math.min(this.canvas.height * CELL_H - 0.01, e.clientY - rect.top));
+        const relX = Math.max(0, Math.min(this.canvas.width  * CELL_W - 0.01, (e.clientX - rect.left) / this.zoom));
+        const relY = Math.max(0, Math.min(this.canvas.height * CELL_H - 0.01, (e.clientY - rect.top) / this.zoom));
         const cellX = this.cellIndexAt(relX, CELL_W, this._scaleX, this.canvas.width);
         const cellY = this.cellIndexAt(relY, CELL_H, this._scaleY, this.canvas.height);
         // Compare in device pixels against the same rounded edges drawCell
@@ -1270,11 +1322,11 @@ class CanvasRenderer {
     // --- Overlays ---
 
     // Show `rects` (grid coordinates, inclusive; in subpixels, 2x3 per cell,
-    // with `subpixel`) as the given kind of overlay: outlines of every cell or
-    // subpixel in them, drawn exactly like the grid lines but in the kind's
-    // colour (see OVERLAY_ORDER and the --overlay-* CSS variables). A rect
-    // with `whole` gets one outline around all of it (a wide char). An empty
-    // list hides the overlay.
+    // with `subpixel`) as the given kind of overlay, in the kind's colour (see
+    // OVERLAY_ORDER and the --overlay-* CSS variables): an outline as thick
+    // as the grid lines, and hairlines between the cells or subpixels in it
+    // while they are big enough. A rect with `whole` is one unit (a wide
+    // char). An empty list hides the overlay.
     // `images` ({ image, x, y } at device positions, from drawCellsImage) are
     // drawn under the outlines (the paste preview's content).
     setOverlay(kind, rects, subpixel = false, images = []) {
@@ -1293,15 +1345,21 @@ class CanvasRenderer {
     }
 
     // Where an overlay kind changed from `a` to `b`, as device-pixel rects.
-    // Outlines are drawn per cell (or subpixel), so units in both look the
-    // same before and after: for single rects (selections, the hover box,
-    // filled box previews) only the units in one but not the other change,
-    // e.g. the new row when a selection grows by one.
+    // For single rects (selections, the hover box, filled box previews) only
+    // the units in one but not the other change, plus the rows and columns
+    // along both outlines, e.g. the new row and the old bottom row when a
+    // selection grows by one.
     overlayChangedAreas(a, b) {
         const subpixel = (a || b).subpixel;
         const single = (e) => e && e.rects.length === 1 && !e.rects[0].whole && !e.images.length;
+        // The rows and columns along a rect's edges, where its outline is
+        // thicker than the lines inside it
+        const edges = (r) => [
+            { ...r, y2: r.y1 }, { ...r, y1: r.y2 }, { ...r, x2: r.x1 }, { ...r, x1: r.x2 }
+        ];
         const units = single(a) && single(b)
-            ? [...rectMinus(a.rects[0], b.rects[0]), ...rectMinus(b.rects[0], a.rects[0])]
+            ? [...rectMinus(a.rects[0], b.rects[0]), ...rectMinus(b.rects[0], a.rects[0]),
+                ...edges(a.rects[0]), ...edges(b.rects[0])]
             : [...(a ? a.rects : []), ...(b ? b.rects : [])];
         const edgeX = subpixel ? subpixelEdgeX : (x) => x * CELL_W;
         const edgeY = subpixel ? subpixelEdgeY : (y) => y * CELL_H;
@@ -1359,22 +1417,23 @@ class CanvasRenderer {
         const DX = (x) => Math.round(edgeX(x) * kx);
         const DY = (y) => Math.round(edgeY(y) * ky);
         const bx = Math.max(1, Math.floor(kx)), by = Math.max(1, Math.floor(ky)); // as the grid
+        // Lines between the units inside a rect: one device px, and none
+        // once the units are too small for them to help
+        const unitW = (subpixel ? CELL_W / 2 : CELL_W) * kx, unitH = (subpixel ? CELL_H / 3 : CELL_H) * ky;
+        const inner = unitW >= 8 && unitH >= 8;
         const out = [...images];
         for (const r of rects) {
             const left = DX(r.x1), right = DX(r.x2 + 1);
             const top = DY(r.y1), bottom = DY(r.y2 + 1);
             if (style.fill) out.push([left, top, right - left, bottom - top, style.fill]);
-            // Unit spans along each axis: every cell/subpixel, or the whole
-            // rect as one unit (a wide char's hover box)
-            const spans = (a, b) => r.whole ? [[a, b]] : Array.from({ length: b - a + 1 }, (_, i) => [a + i, a + i]);
-            for (const [a, b] of spans(r.x1, r.x2)) {
-                out.push([DX(a), top, bx, bottom - top, style.line]);
-                out.push([DX(b + 1) - bx, top, bx, bottom - top, style.line]);
-            }
-            for (const [a, b] of spans(r.y1, r.y2)) {
-                out.push([left, DY(a), right - left, by, style.line]);
-                out.push([left, DY(b + 1) - by, right - left, by, style.line]);
-            }
+            out.push([left, top, bx, bottom - top, style.line]);
+            out.push([right - bx, top, bx, bottom - top, style.line]);
+            out.push([left, top, right - left, by, style.line]);
+            out.push([left, bottom - by, right - left, by, style.line]);
+            // `whole`: one outline around all of it (a wide char's hover box)
+            if (r.whole || !inner) continue;
+            for (let x = r.x1 + 1; x <= r.x2; x++) out.push([DX(x), top, 1, bottom - top, style.line]);
+            for (let y = r.y1 + 1; y <= r.y2; y++) out.push([left, DY(y), right - left, 1, style.line]);
         }
         return out;
     }
@@ -1730,9 +1789,12 @@ class CanvasRenderer {
             }
         }
 
-        // System clipboard has different/new content — parse it into cells
+        // System clipboard has different/new content — parse it into cells:
+        // ANSI art with its colours, plain text in the current ones
         if (systemText && systemText.trim().length > 0) {
-            const cells = parseTextToCells(systemText, this.fgColor, this.bgColor);
+            const cells = systemText.includes('\x1b[')
+                ? ansiTextToRows(systemText)
+                : parseTextToCells(systemText, this.fgColor, this.bgColor);
             if (cells.length > 0) {
                 this.clipboard = cells;
                 this.pasteMode = true;
@@ -2007,12 +2069,15 @@ class CanvasRenderer {
     commitBox() {
         const { x1, y1, x2, y2 } = normRect(this.dragStart, this.dragEnd);
 
-        // Fill: when there is a border, fill the interior only; otherwise fill the whole area
-        if (this.boxFillMode > 0) {
-            const inset = this.boxLineStyle > 0 ? 1 : 0;
-            this.beforeChange(x1 + inset, y1 + inset, x2 - inset, y2 - inset);
-            for (let y = y1 + inset; y <= y2 - inset; y++) {
-                for (let x = x1 + inset; x <= x2 - inset; x++) {
+        // Fill: when there is a border, fill the interior only; otherwise fill
+        // the whole area. The box may reach past the canvas (the collab add-on
+        // draws boxes there): only cells on it change.
+        const inset = this.boxLineStyle > 0 ? 1 : 0;
+        const inside = this.clipRect({ x1: x1 + inset, y1: y1 + inset, x2: x2 - inset, y2: y2 - inset });
+        if (this.boxFillMode > 0 && inside) {
+            this.beforeChange(inside.x1, inside.y1, inside.x2, inside.y2);
+            for (let y = inside.y1; y <= inside.y2; y++) {
+                for (let x = inside.x1; x <= inside.x2; x++) {
                     const cell = this.canvas.cells[y][x];
                     if (this.boxFillMode === 1) {
                         detachWide(this.canvas.cells, x, y);
@@ -2218,7 +2283,7 @@ class CanvasRenderer {
     updateStatus() {
         const status = document.getElementById('status');
         if (status && this.canvas) {
-            status.textContent = `${this.canvas.mode.charAt(0).toUpperCase() + this.canvas.mode.slice(1)} Mode | ${this.canvas.width}×${this.canvas.height} chars`;
+            status.textContent = `${this.canvas.width} × ${this.canvas.height}`;
         }
     }
 

@@ -211,17 +211,25 @@ function computeBoxChars(x1, y1, x2, y2, style, canvasCells, lookup) {
     // Single cell - no valid box char
     if (x1 === x2 && y1 === y2) return result;
 
-    for (let y = y1; y <= y2; y++) {
-        for (let x = x1; x <= x2; x++) {
-            // Only border cells
-            if (x !== x1 && x !== x2 && y !== y1 && y !== y2) continue;
-
-            const conn = getNewBoxConnections(x, y, x1, y1, x2, y2, style);
-            const existingCell = canvasCells[y] && canvasCells[y][x];
-            const charCode = mergeWithExisting(conn, existingCell, style, lookup);
-            if (charCode !== null) {
-                result.push({ x, y, charCode });
-            }
+    // The border cells (top and bottom rows, then the sides between them)
+    // that are on the canvas: a box may reach past its edges
+    const w = canvasCells[0].length, h = canvasCells.length;
+    const border = [];
+    for (let x = Math.max(x1, 0); x <= Math.min(x2, w - 1); x++) {
+        border.push([x, y1]);
+        if (y2 > y1) border.push([x, y2]);
+    }
+    for (let y = Math.max(y1 + 1, 0); y <= Math.min(y2 - 1, h - 1); y++) {
+        border.push([x1, y]);
+        if (x2 > x1) border.push([x2, y]);
+    }
+    for (const [x, y] of border) {
+        const existingCell = canvasCells[y] && canvasCells[y][x];
+        if (!existingCell) continue;
+        const conn = getNewBoxConnections(x, y, x1, y1, x2, y2, style);
+        const charCode = mergeWithExisting(conn, existingCell, style, lookup);
+        if (charCode !== null) {
+            result.push({ x, y, charCode });
         }
     }
 
@@ -285,20 +293,19 @@ function computeLineChars(x1, y1, x2, y2, style, canvasCells, lookup) {
             else if (next.y < y) conn.up = style;
         }
 
-        // Endpoints: extend to form full line segments (no half-line chars exist)
-        if (i === 0) {
-            const next = path[1];
-            if (next.x !== x) { conn.left = style; conn.right = style; }
-            if (next.y !== y) { conn.up = style; conn.down = style; }
-        }
-        if (i === path.length - 1) {
-            const prev = path[i - 1];
-            if (prev.x !== x) { conn.left = style; conn.right = style; }
-            if (prev.y !== y) { conn.up = style; conn.down = style; }
-        }
-
         const existingCell = canvasCells[y] && canvasCells[y][x];
-        const charCode = mergeWithExisting(conn, existingCell, style, lookup);
+        let charCode = null;
+
+        // Endpoints: joined to a line already there (a T: ╠, ┯), or else
+        // extended to a full segment (no half-line chars exist)
+        const end = i === 0 ? path[1] : i === path.length - 1 ? path[i - 1] : null;
+        if (end) {
+            const joins = existingCell && existingCell.type !== 'sextant' && lookup.getConnections(existingCell.charCode);
+            if (joins) charCode = mergeWithExisting(conn, existingCell, style, lookup);
+            if (end.x !== x) { conn.left = style; conn.right = style; }
+            if (end.y !== y) { conn.up = style; conn.down = style; }
+        }
+        if (charCode === null) charCode = mergeWithExisting(conn, existingCell, style, lookup);
         if (charCode !== null) {
             result.push({ x, y, charCode });
         }

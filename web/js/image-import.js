@@ -37,7 +37,8 @@ function fitImageCols(image, aspect, maxCols, maxRows) {
 // The image (anything drawImage takes) as a cols x rows array of cells, null
 // where it is transparent (pasting leaves those cells alone). In cells along
 // its edge, the transparent subpixels are cleared and the rest get one colour
-// on the terminal's default background, so outlines keep subpixel detail.
+// on the background already there (bg marked `keep`, see placeCell), so
+// outlines keep subpixel detail.
 // Options: mono (only the colours fg and bg), fg, bg and dither (a key of
 // IMAGE_DITHERS).
 function imageToCells(image, cols, rows, { mono = false, fg, bg, dither = 'floyd-steinberg' } = {}) {
@@ -63,8 +64,12 @@ function imageToCells(image, cols, rows, { mono = false, fg, bg, dither = 'floyd
 
     const toLinear = (col) => [col.r, col.g, col.b].map(v => SRGB_TO_LINEAR[v]);
     const monoPair = mono ? [toLinear(bg), toLinear(fg)] : null;
+    // Mono dithers one value per subpixel: where it lies from bg (0) to fg
+    // (1), as perceived. In colour, error the two colours can't pay off (a
+    // yellow's blue, for grey ink) would pile up and darken everything.
+    const level = mono ? monoLevels(px, W * H, ...monoPair) : null;
     const kernel = IMAGE_DITHERS[dither].kernel;
-    const toColor = (v) => v ? { r: linearToSrgb(v[0]), g: linearToSrgb(v[1]), b: linearToSrgb(v[2]), default: false } : defaultBG();
+    const toColor = (v) => v ? { r: linearToSrgb(v[0]), g: linearToSrgb(v[1]), b: linearToSrgb(v[2]), default: false } : { ...defaultBG(), keep: true };
     const out = [];
 
     for (let cy = 0; cy < rows; cy++) {
@@ -92,6 +97,16 @@ function imageToCells(image, cols, rows, { mono = false, fg, bg, dither = 'floyd
                 const pair = pairs[sx >> 1];
                 const i = sy * W + sx;
                 if (!pair || !opaque[i]) continue;
+                if (level) {
+                    const v = clamp(level[i] + err[3 * i]);
+                    const on = v >= 0.5 ? 1 : 0;
+                    bits[(sx >> 1) * 6 + r * 2 + (sx & 1)] = on;
+                    for (let t = 0; t < kernel.length; t++) {
+                        const x = sx + kernel[t][0] * dir, y = sy + kernel[t][1];
+                        if (x >= 0 && x < W && y < H) err[3 * (y * W + x)] += (v - on) * kernel[t][2];
+                    }
+                    continue;
+                }
                 // Clamped, so error can't pile up where no colour can pay it off
                 const v0 = clamp(px[3 * i] + err[3 * i]);
                 const v1 = clamp(px[3 * i + 1] + err[3 * i + 1]);
@@ -135,6 +150,21 @@ function imageToCells(image, cols, rows, { mono = false, fg, bg, dither = 'floyd
         }));
     }
     return out;
+}
+
+// Each of n pixels' position from colour a (0) to b (1), projected onto the
+// line between them with the channels weighted as in dist
+function monoLevels(px, n, a, b) {
+    const d = [0, 1, 2].map(c => b[c] - a[c]);
+    const len = LUMA[0] * d[0] * d[0] + LUMA[1] * d[1] * d[1] + LUMA[2] * d[2] * d[2];
+    const level = new Float32Array(n);
+    if (len === 0) return level;
+    for (let i = 0; i < n; i++) {
+        let t = 0;
+        for (let c = 0; c < 3; c++) t += LUMA[c] * (px[3 * i + c] - a[c]) * d[c];
+        level[i] = clamp(t / len);
+    }
+    return level;
 }
 
 function clamp(v) {

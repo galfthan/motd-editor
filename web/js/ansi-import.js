@@ -26,11 +26,13 @@ function color256ToRGB(index) {
     if (index < 8) return { ...BASIC_COLORS[index], default: false };
     if (index < 16) return { ...BRIGHT_COLORS[index - 8], default: false };
     if (index < 232) {
+        // xterm's 6x6x6 colour cube
+        const level = (n) => n === 0 ? 0 : 55 + n * 40;
         const i = index - 16;
         return {
-            r: Math.floor(i / 36) % 6 * 51,
-            g: Math.floor(i / 6) % 6 * 51,
-            b: i % 6 * 51,
+            r: level(Math.floor(i / 36) % 6),
+            g: level(Math.floor(i / 6) % 6),
+            b: level(i % 6),
             default: false
         };
     }
@@ -42,40 +44,48 @@ function color256ToRGB(index) {
 // interpreted; cursor moves, erase-line, mode switches etc. are dropped.
 const ansiRegex = /\x1b\[([0-?]*)([ -\/]*)([@-~])/g;
 
+// SGR state: colours, bold, inverse, and which basic colour (0-7) fg is
+// if it is one (bold shows those bright, as terminals do)
+function initialSGR() {
+    return { fg: defaultFG(), bg: defaultBG(), bold: false, inverse: false, basic: -1 };
+}
+
+// The colours text gets in SGR state `s`. Cells have no bold or inverse, so
+// bold brightens a basic fg colour and inverse swaps the colours (the
+// terminal's own ones as the editor shows them)
+function sgrColors(s) {
+    let fg = s.bold && s.basic >= 0 ? { ...BRIGHT_COLORS[s.basic], default: false } : s.fg;
+    let bg = s.bg;
+    if (s.inverse) {
+        const solid = (c) => ({ r: c.r, g: c.g, b: c.b, default: false });
+        [fg, bg] = [solid(bg), solid(fg)];
+    }
+    return { fg, bg };
+}
+
 function parseLine(line) {
     const cells = [];
-    let fg = defaultFG();
-    let bg = defaultBG();
+    let state = initialSGR();
     let lastIndex = 0;
+    const addText = (text) => {
+        const { fg, bg } = sgrColors(state);
+        for (const ch of text) cells.push({ code: ch.codePointAt(0), fg, bg });
+    };
 
     ansiRegex.lastIndex = 0;
     let match;
     while ((match = ansiRegex.exec(line)) !== null) {
         // Process text before this escape
-        if (match.index > lastIndex) {
-            const text = line.slice(lastIndex, match.index);
-            for (const ch of text) {
-                cells.push({ code: ch.codePointAt(0), fg, bg });
-            }
-        }
+        if (match.index > lastIndex) addText(line.slice(lastIndex, match.index));
 
         // Parse the SGR codes
-        if (match[3] === 'm' && match[2] === '') {
-            const result = parseCodes(match[1], fg, bg);
-            fg = result.fg;
-            bg = result.bg;
-        }
+        if (match[3] === 'm' && match[2] === '') state = parseCodes(match[1], state);
 
         lastIndex = ansiRegex.lastIndex;
     }
 
     // Process remaining text after last escape
-    if (lastIndex < line.length) {
-        const text = line.slice(lastIndex);
-        for (const ch of text) {
-            cells.push({ code: ch.codePointAt(0), fg, bg });
-        }
-    }
+    if (lastIndex < line.length) addText(line.slice(lastIndex));
 
     return cells;
 }
@@ -102,13 +112,10 @@ function parseExtendedColor(parts, i) {
     return null;
 }
 
-function parseCodes(codes, fg, bg) {
-    fg = { ...fg };
-    bg = { ...bg };
+function parseCodes(codes, state) {
+    let { fg, bg, bold, inverse, basic } = state;
 
-    if (codes === '' || codes === '0') {
-        return { fg: defaultFG(), bg: defaultBG() };
-    }
+    if (codes === '' || codes === '0') return initialSGR();
 
     const parts = codes.split(';');
     let i = 0;
@@ -118,11 +125,23 @@ function parseCodes(codes, fg, bg) {
 
         switch (code) {
             case 0:
-                fg = defaultFG();
-                bg = defaultBG();
+                ({ fg, bg, bold, inverse, basic } = initialSGR());
+                break;
+            case 1:
+                bold = true;
+                break;
+            case 22:
+                bold = false;
+                break;
+            case 7:
+                inverse = true;
+                break;
+            case 27:
+                inverse = false;
                 break;
             case 39:
                 fg = defaultFG();
+                basic = -1;
                 break;
             case 49:
                 bg = defaultBG();
@@ -131,8 +150,12 @@ function parseCodes(codes, fg, bg) {
             case 48: { // Extended BG
                 const ext = parseExtendedColor(parts, i);
                 if (ext) {
-                    if (code === 38) fg = ext.color;
-                    else bg = ext.color;
+                    if (code === 38) {
+                        fg = ext.color;
+                        basic = -1;
+                    } else {
+                        bg = ext.color;
+                    }
                     i += ext.skip;
                 }
                 break;
@@ -140,10 +163,12 @@ function parseCodes(codes, fg, bg) {
             default:
                 if (code >= 30 && code <= 37) {
                     fg = { ...BASIC_COLORS[code - 30], default: false };
+                    basic = code - 30;
                 } else if (code >= 40 && code <= 47) {
                     bg = { ...BASIC_COLORS[code - 40], default: false };
                 } else if (code >= 90 && code <= 97) {
                     fg = { ...BRIGHT_COLORS[code - 90], default: false };
+                    basic = -1;
                 } else if (code >= 100 && code <= 107) {
                     bg = { ...BRIGHT_COLORS[code - 100], default: false };
                 }
@@ -152,10 +177,12 @@ function parseCodes(codes, fg, bg) {
         i++;
     }
 
-    return { fg, bg };
+    return { fg, bg, bold, inverse, basic };
 }
 
-function parseANSIText(text) {
+// ANSI text as rows of cells, each as long as its line (wide chars take two
+// cells, so a row's width is its width in columns)
+function ansiTextToRows(text) {
     // NFC composes e.g. e + U+0301 into é, which fits in one cell
     text = text.normalize('NFC').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     const lines = text.split('\n');
@@ -164,13 +191,14 @@ function parseANSIText(text) {
     if (lines.length > 0 && lines[lines.length - 1] === '') {
         lines.pop();
     }
+    return lines.map(line => charsToRow(parseLine(line)));
+}
 
-    if (lines.length === 0) {
+function parseANSIText(text) {
+    const rows = ansiTextToRows(text);
+    if (rows.length === 0) {
         return createCanvas(1, 1);
     }
-
-    // Wide chars take two cells, so a row's width is its width in columns
-    const rows = lines.map(line => charsToRow(parseLine(line)));
     const canvas = createCanvas(Math.max(1, ...rows.map(row => row.length)), rows.length);
     rows.forEach((row, y) => row.forEach((cell, x) => { canvas.cells[y][x] = cell; }));
 

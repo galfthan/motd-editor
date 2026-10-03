@@ -117,8 +117,11 @@ function setGridChar(cells, x, y, charCode) {
 // Write a copy of `src` into (x, y), keeping wide chars consistent. A tail
 // whose head wasn't copied along with it becomes a blank cell.
 function placeCell(cells, x, y, src) {
+    // A background marked `keep` (an image's edge cells) is the one there
+    const bg = src.bg.keep ? { ...cells[y][x].bg } : null;
     detachWide(cells, x, y);
     const cell = structuredClone(src);
+    if (bg) cell.bg = bg;
     if (cell.type === 'wide-tail') clearCell(cell);
     cells[y][x] = cell;
     if (isWideHead(cell)) claimWideTail(cells, x, y);
@@ -209,6 +212,15 @@ function sgrColor(color, isBg) {
     return `\x1b[${isBg ? 48 : 38};2;${color.r};${color.g};${color.b}m`;
 }
 
+// Cells in a row up to its last visible one: trailing blanks on the
+// terminal's own background are left out of exports, so lines don't wrap in
+// terminals narrower than the canvas
+function visibleLength(row) {
+    let n = row.length;
+    while (n > 0 && cellToChar(row[n - 1]) === ' ' && row[n - 1].bg.default) n--;
+    return n;
+}
+
 function canvasToANSI(canvas) {
     const lines = [];
 
@@ -217,8 +229,9 @@ function canvasToANSI(canvas) {
         let lastFG = defaultFG();
         let lastBG = defaultBG();
         let lineHasColor = false;
+        const length = visibleLength(canvas.cells[y]);
 
-        for (let x = 0; x < canvas.width; x++) {
+        for (let x = 0; x < length; x++) {
             const cell = canvas.cells[y][x];
             if (cell.type === 'wide-tail') continue;
             const ch = cellToChar(cell);
@@ -246,7 +259,7 @@ function canvasToANSI(canvas) {
 }
 
 function canvasToPlain(canvas) {
-    return canvas.cells.map(row => row.map(cellToChar).join('')).join('\n') + '\n';
+    return canvas.cells.map(row => row.map(cellToChar).join('').trimEnd()).join('\n') + '\n';
 }
 
 function parseTextToCells(text, fgColor, bgColor) {

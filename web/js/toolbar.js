@@ -1,4 +1,5 @@
-// Toolbar and controls functionality
+// The editor's interface around the canvas: top bar, tool dock, inspector,
+// colours, zoom and rulers, menus, dialogs and the command palette (⌘K)
 
 // Additional Symbols for Legacy Computing characters (U+1FB70-U+1FBFA)
 // Grouped by category for the character palette tabs
@@ -95,11 +96,42 @@ const LEGACY_CHARS = {
     ],
 };
 
-// Single-key tool shortcuts (Shift+S is handled separately)
-const TOOL_SHORTCUTS = {
-    d: 'draw', e: 'erase', c: 'char', t: 'text',
-    b: 'box', l: 'line', s: 'select', p: 'pick'
+// The dock's tools and the editor tools each one covers (the first is its
+// default; the inspector switches between them)
+const TOOL_GROUPS = {
+    brush: ['draw', 'erase'],
+    glyph: ['char'],
+    text: ['text'],
+    shape: ['box', 'line'],
+    selection: ['select', 'select-subpixel'],
+    pick: ['pick']
 };
+
+const GROUP_INFO = {
+    brush: { title: 'Brush', key: 'B' },
+    glyph: { title: 'Glyph', key: 'G' },
+    text: { title: 'Text', key: 'T' },
+    shape: { title: 'Shape', key: 'S' },
+    selection: { title: 'Select', key: 'V' },
+    pick: { title: 'Pick colour', key: 'I' }
+};
+
+// Single-key shortcuts: a tool, or a dock tool (its last used mode). D, C
+// and P are the older keys for draw, symbol and pick.
+const KEY_TOOLS = {
+    b: 'brush', e: 'erase', d: 'draw', g: 'glyph', c: 'glyph', t: 'text',
+    s: 'shape', l: 'line', v: 'selection', i: 'pick', p: 'pick'
+};
+
+// Zoom steps for + and -
+const ZOOMS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.25, 1.5, 2, 3, 4];
+
+const ANSI_COLORS = [
+    ['Black', '#000000'], ['Red', '#cd3131'], ['Green', '#0dbc79'], ['Yellow', '#e5e510'],
+    ['Blue', '#2472c8'], ['Magenta', '#bc3fbc'], ['Cyan', '#11a8cd'], ['White', '#e5e5e5'],
+    ['Bright black', '#666666'], ['Bright red', '#f14c4c'], ['Bright green', '#23d18b'], ['Bright yellow', '#f5f543'],
+    ['Bright blue', '#3b8eea'], ['Bright magenta', '#d670d6'], ['Bright cyan', '#29b8db'], ['Bright white', '#ffffff']
+];
 
 const toHex = ({ r, g, b }) => '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
 
@@ -109,221 +141,404 @@ const hexToRgb = (hex) => ({
     b: parseInt(hex.slice(5, 7), 16)
 });
 
-// Wire a group of mutually exclusive buttons: clicking one marks it active
-// and calls onPick with it
-function bindButtonGroup(buttons, onPick) {
-    buttons.forEach(btn => {
-        btn.addEventListener('click', () => {
-            buttons.forEach(b => b.classList.toggle('active', b === btn));
-            onPick(btn);
-        });
-    });
+// Read and write a remembered setting; storage may be unavailable (e.g. a
+// private window), and then nothing is remembered
+function loadSetting(key) {
+    try { return localStorage.getItem(key); } catch (e) { return null; }
+}
+
+function saveSetting(key, value) {
+    try { localStorage.setItem(key, String(value)); } catch (e) { /* not saved */ }
+}
+
+// "LOWER LEFT BLOCK" and "grinning face" as "Lower left block", "Grinning
+// face"; mixed-case names stay as they are
+function sentenceCase(name) {
+    if (name !== name.toUpperCase() && name !== name.toLowerCase()) return name;
+    return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
+}
+
+// Mark one of `buttons` pressed (aria-pressed)
+function pressOne(buttons, pressed) {
+    buttons.forEach(b => b.setAttribute('aria-pressed', String(b === pressed)));
 }
 
 class Toolbar {
     constructor(canvasRenderer) {
         this.renderer = canvasRenderer;
         this.currentTab = 'diagonal';
-        this.openMenu = null;
         this.saveFilename = 'motd.txt';
         this.saveFormat = 'ansi';
+        this.colorTarget = 'fg';
+        this.lastTool = { brush: 'draw', shape: 'box', selection: 'select' };
+        this.lastChar = null;
+        this.toolBeforePick = null;
 
-        this.setupMenuBar();
-        this.setupEditMenu();
-        // Canvas menu check items, remembered in this browser once toggled
-        this.toggleGrid = this.setupCanvasToggle('toggle-grid', 'motd-editor.grid', false,
-            on => this.renderer.setShowGrid(on));
-        this.toggleLightTerminal = this.setupCanvasToggle('toggle-light-terminal', 'motd-editor.lightTerminal', false,
-            on => this.renderer.setLightTerminal(on));
+        this.setupMenus();
+        this.setupActions();
+        this.setupHistoryButtons();
+        // View settings, remembered in this browser once changed
+        this.toggleGrid = this.setupToggle('motd-editor.grid', false, (on) => {
+            this.renderer.setShowGrid(on);
+            document.querySelector('[data-action="toggle-grid"]').setAttribute('aria-pressed', String(on));
+        });
+        this.toggleLightTerminal = this.setupToggle('motd-editor.lightTerminal', false, (on) => {
+            this.renderer.setLightTerminal(on);
+            document.querySelector('[data-action="dark-terminal"]').setAttribute('aria-pressed', String(!on));
+            document.querySelector('[data-action="light-terminal"]').setAttribute('aria-pressed', String(on));
+        });
         this.setupCellAspect();
-        this.setupToolButtons();
-        this.setupColorPickers();
+        this.setupZoom();
+        this.setupTools();
+        this.setupColors();
         this.setupFileInputs();
         this.setupCharPalette();
-        this.renderCharPalette();
+        this.setupCommandPalette();
+        this.setupKeyboard();
+        this.setTool('draw');
     }
 
-    // --- Menu Bar ---
+    // --- Menus (file name, cell aspect) ---
 
-    setupMenuBar() {
-        const menuItems = document.querySelectorAll('.menu-item');
-
-        // Click to open/close
-        menuItems.forEach(item => {
-            const trigger = item.querySelector('.menu-trigger');
+    setupMenus() {
+        const menus = [...document.querySelectorAll('.menu')];
+        const close = () => menus.forEach(m => {
+            m.classList.remove('open');
+            m.querySelector('.menu-trigger').setAttribute('aria-expanded', 'false');
+        });
+        this.closeMenus = close;
+        menus.forEach(menu => {
+            const trigger = menu.querySelector('.menu-trigger');
             trigger.addEventListener('click', (e) => {
                 e.stopPropagation();
-                if (this.openMenu === item) {
-                    this.closeMenus();
-                } else {
-                    this.openMenuDropdown(item);
+                const open = !menu.classList.contains('open');
+                close();
+                menu.classList.toggle('open', open);
+                trigger.setAttribute('aria-expanded', String(open));
+            });
+            // Items close the menu (their actions are wired separately)
+            menu.querySelector('.menu-list').addEventListener('click', close);
+        });
+        document.addEventListener('click', close);
+    }
+
+    // --- Actions: buttons with data-action, the command palette, shortcuts ---
+
+    setupActions() {
+        document.querySelectorAll('[data-action]').forEach(btn => {
+            btn.addEventListener('click', () => this.handleAction(btn.dataset.action));
+        });
+    }
+
+    handleAction(action) {
+        const r = this.renderer;
+        switch (action) {
+            case 'undo': r.undo(); break;
+            case 'redo': r.redo(); break;
+            case 'new':
+                if (confirm('Create a new canvas? Unsaved changes will be lost.')) {
+                    r.createNew(80, 60, 'sextant');
+                    this.setFilename('motd.txt');
+                    this.saveFormat = 'ansi';
                 }
-            });
-
-            // Hover-switch when a menu is already open
-            trigger.addEventListener('mouseenter', () => {
-                if (this.openMenu && this.openMenu !== item) {
-                    this.openMenuDropdown(item);
-                }
-            });
-        });
-
-        // Click outside closes menus
-        document.addEventListener('click', () => this.closeMenus());
-
-        // Prevent dropdown clicks from bubbling (action buttons close explicitly)
-        document.querySelectorAll('.menu-dropdown').forEach(dd => {
-            dd.addEventListener('click', (e) => e.stopPropagation());
-        });
-
-        // Wire up menu actions
-        document.querySelectorAll('.menu-dropdown button[data-action]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const action = btn.dataset.action;
-                this.closeMenus();
-                this.handleMenuAction(action);
-            });
-        });
+                break;
+            case 'open': document.getElementById('file-input').click(); break;
+            case 'import-image': document.getElementById('image-input').click(); break;
+            case 'save': this.doSave(); break;
+            case 'save-as': this.showSaveAsDialog(); break;
+            case 'resize': this.showResizeDialog(); break;
+            case 'clear':
+                if (confirm('Clear the entire canvas?')) r.clear();
+                break;
+            case 'toggle-grid': this.toggleGrid(); break;
+            case 'dark-terminal': if (r.lightTerminal) this.toggleLightTerminal(); break;
+            case 'light-terminal': if (!r.lightTerminal) this.toggleLightTerminal(); break;
+            case 'toggle-light-terminal': this.toggleLightTerminal(); break;
+            case 'zoom-in': this.stepZoom(1); break;
+            case 'zoom-out': this.stepZoom(-1); break;
+            case 'zoom-fit': this.zoomToFit(); break;
+            case 'zoom-reset': this.setZoom(1); break;
+            case 'swap-colors': this.setColors(r.bgColor, r.fgColor); break;
+            case 'default-colors': this.setColors(defaultFG(), defaultBG()); break;
+            case 'pick': this.setTool('pick'); break;
+            case 'commands': this.openCommandPalette(); break;
+            case 'toggle-inspector': document.getElementById('inspector').classList.toggle('open'); break;
+        }
     }
 
-    openMenuDropdown(item) {
-        this.closeMenus();
-        item.classList.add('open');
-        this.openMenu = item;
-    }
-
-    closeMenus() {
-        document.querySelectorAll('.menu-item.open').forEach(item => {
-            item.classList.remove('open');
-        });
-        this.openMenu = null;
-    }
-
-    // Keep Undo/Redo enabled only when there is something to undo/redo
-    setupEditMenu() {
-        const undoBtn = document.querySelector('button[data-action="undo"]');
-        const redoBtn = document.querySelector('button[data-action="redo"]');
+    // Undo/redo buttons are enabled only when there is something to undo/redo
+    setupHistoryButtons() {
+        const undoBtn = document.querySelector('[data-action="undo"]');
+        const redoBtn = document.querySelector('[data-action="redo"]');
         const history = this.renderer.history;
         const update = () => {
             undoBtn.disabled = !history.canUndo();
             redoBtn.disabled = !history.canRedo();
-            undoBtn.title = history.undoLabel() ? `Undo ${history.undoLabel()}` : '';
-            redoBtn.title = history.redoLabel() ? `Redo ${history.redoLabel()}` : '';
+            undoBtn.title = history.undoLabel() ? `Undo ${history.undoLabel()} (⌘Z)` : 'Undo (⌘Z)';
+            redoBtn.title = history.redoLabel() ? `Redo ${history.redoLabel()} (⇧⌘Z)` : 'Redo (⇧⌘Z)';
         };
         history.onChange = update;
         update();
     }
 
-    // A check item in the Canvas menu: applies the saved choice (or the
-    // default) now and returns a function that toggles it. The choice is only
-    // saved once the user toggles it, so changing a default reaches everyone
-    // who never chose. Storage may be unavailable (e.g. a private window):
-    // then the default is used and nothing is remembered.
-    setupCanvasToggle(action, key, defaultOn, apply) {
-        const btn = document.querySelector(`button[data-action="${action}"]`);
-        const set = (on) => {
-            btn.setAttribute('aria-checked', String(on));
+    // A view setting: applies the saved choice (or the default) now and
+    // returns a function that toggles it. The choice is only saved once the
+    // user toggles it, so changing a default reaches everyone who never chose;
+    // with save false (the AI's changes) it isn't saved at all.
+    setupToggle(key, defaultOn, apply) {
+        const saved = loadSetting(key);
+        let on = saved === null ? defaultOn : saved === 'true';
+        apply(on);
+        return (save = true) => {
+            on = !on;
             apply(on);
-        };
-        let on = defaultOn;
-        try {
-            const saved = localStorage.getItem(key);
-            if (saved !== null) on = saved === 'true';
-        } catch (e) { /* default */ }
-        set(on);
-        return () => {
-            const next = btn.getAttribute('aria-checked') !== 'true';
-            set(next);
-            try { localStorage.setItem(key, String(next)); } catch (e) { /* not saved */ }
+            if (save) saveSetting(key, on);
         };
     }
 
-    // Canvas menu cell aspect (width / height) presets and Custom…, to preview
-    // cells as a given terminal draws them. Remembered like the toggles.
+    // Cell aspect (width / height) presets and Custom…, to preview cells as a
+    // given terminal draws them. Remembered like the toggles.
     setupCellAspect() {
         const key = 'motd-editor.cellAspect';
-        const items = [...document.querySelectorAll('button[data-cell-aspect]')];
+        const items = [...document.querySelectorAll('[data-cell-aspect]')];
         const custom = items.find(b => b.dataset.cellAspect === 'custom');
-        const value = (b) => parseFloat(b.dataset.cellAspect);
         const presets = items.filter(b => b !== custom);
+        const value = (b) => parseFloat(b.dataset.cellAspect);
 
         // Show and apply `aspect` (see isCellAspect); with `save`, remember it
         this.setCellAspect = (aspect, save = true) => {
             const preset = presets.find(b => Math.abs(value(b) - aspect) < 0.0005);
             items.forEach(b => b.setAttribute('aria-checked', String(b === (preset || custom))));
-            custom.querySelector('.menu-label').textContent =
-                preset ? 'Cells: Custom…' : `Cells: Custom (${aspect.toFixed(3)})…`;
+            custom.querySelector('.menu-label').textContent = preset ? 'Custom…' : `Custom (${aspect.toFixed(3)})…`;
+            document.getElementById('aspect-value').textContent = aspect.toFixed(2);
             this.renderer.setCellAspect(aspect);
-            if (save) {
-                try { localStorage.setItem(key, String(aspect)); } catch (e) { /* not saved */ }
-            }
+            if (save) saveSetting(key, aspect);
         };
-
-        items.forEach(b => b.addEventListener('click', () => {
-            this.closeMenus();
-            if (b !== custom) {
-                this.setCellAspect(value(b));
-                return;
-            }
+        this.customCellAspect = () => {
             const answer = prompt(`Cell width ÷ height, ${CELL_ASPECT_RANGE.join('-')} (e.g. 9x19 px terminal cells: 0.47)`,
                 this.renderer.cellAspect.toFixed(3));
             const aspect = parseFloat(answer);
             if (isCellAspect(aspect)) this.setCellAspect(aspect);
+        };
+
+        items.forEach(b => b.addEventListener('click', () => {
+            if (b === custom) this.customCellAspect();
+            else this.setCellAspect(value(b));
         }));
 
-        let aspect = DEFAULT_CELL_ASPECT;
-        try {
-            const saved = parseFloat(localStorage.getItem(key));
-            if (isCellAspect(saved)) aspect = saved;
-        } catch (e) { /* default */ }
-        this.setCellAspect(aspect, false);
+        const saved = parseFloat(loadSetting(key));
+        this.setCellAspect(isCellAspect(saved) ? saved : DEFAULT_CELL_ASPECT, false);
     }
 
-    handleMenuAction(action) {
-        switch (action) {
-            case 'undo':
-                this.renderer.undo();
-                break;
-            case 'redo':
-                this.renderer.redo();
-                break;
-            case 'new':
-                if (confirm('Create a new canvas? Unsaved changes will be lost.')) {
-                    this.renderer.createNew(80, 60, 'sextant');
-                    this.saveFilename = 'motd.txt';
-                    this.saveFormat = 'ansi';
-                }
-                break;
-            case 'open':
-                document.getElementById('file-input').click();
-                break;
-            case 'import-image':
-                document.getElementById('image-input').click();
-                break;
-            case 'save':
-                this.doSave();
-                break;
-            case 'save-as':
-                this.showSaveAsDialog();
-                break;
-            case 'toggle-grid':
-                this.toggleGrid();
-                break;
-            case 'toggle-light-terminal':
-                this.toggleLightTerminal();
-                break;
-            case 'resize':
-                this.showResizeDialog();
-                break;
-            case 'clear':
-                if (confirm('Clear the entire canvas?')) {
-                    this.renderer.clear();
-                }
-                break;
+    // --- Zoom and rulers ---
+
+    setupZoom() {
+        this.scroller = document.getElementById('canvas-scroll');
+        this.renderer.onRender = () => this.renderRulers();
+        const saved = parseFloat(loadSetting('motd-editor.zoom'));
+        if (saved >= ZOOMS[0] && saved <= ZOOMS[ZOOMS.length - 1]) this.renderer.zoom = saved;
+        this.showZoom();
+
+        // Ctrl/⌘+wheel over the canvas zooms around the pointer
+        this.scroller.addEventListener('wheel', (e) => {
+            if (!e.ctrlKey && !e.metaKey) return;
+            e.preventDefault();
+            this._zoomWheel = (this._zoomWheel || 0) + e.deltaY;
+            if (Math.abs(this._zoomWheel) < 40) return;
+            this.stepZoom(this._zoomWheel < 0 ? 1 : -1, e);
+            this._zoomWheel = 0;
+        }, { passive: false });
+    }
+
+    // Zoom to `zoom`, keeping the canvas point under `at` (a pointer event;
+    // default the middle of the view) where it is
+    setZoom(zoom, at = null) {
+        const r = this.renderer, s = this.scroller;
+        zoom = Math.min(ZOOMS[ZOOMS.length - 1], Math.max(ZOOMS[0], zoom));
+        if (zoom === r.zoom) return;
+        const box = s.getBoundingClientRect();
+        const px = at ? at.clientX - box.left : s.clientWidth / 2;
+        const py = at ? at.clientY - box.top : s.clientHeight / 2;
+        const canvasBox = r.container.getBoundingClientRect();
+        const cx = (box.left + px - canvasBox.left) / r.zoom;
+        const cy = (box.top + py - canvasBox.top) / r.zoom;
+        r.setZoom(zoom);
+        const after = r.container.getBoundingClientRect();
+        s.scrollLeft += after.left + cx * zoom - (box.left + px);
+        s.scrollTop += after.top + cy * zoom - (box.top + py);
+        saveSetting('motd-editor.zoom', zoom);
+        this.showZoom();
+    }
+
+    stepZoom(dir, at) {
+        const z = this.renderer.zoom;
+        const next = dir > 0 ? ZOOMS.find(v => v > z + 0.001) : [...ZOOMS].reverse().find(v => v < z - 0.001);
+        if (next) this.setZoom(next, at);
+    }
+
+    // The largest zoom that shows the whole canvas
+    zoomToFit() {
+        const r = this.renderer, s = this.scroller;
+        const cs = getComputedStyle(s);
+        const w = s.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+        const h = s.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+        this.setZoom(Math.min(w / (r.canvas.width * CELL_W), h / (r.canvas.height * CELL_H)));
+    }
+
+    showZoom() {
+        document.getElementById('zoom-value').textContent = Math.round(this.renderer.zoom * 100) + '%';
+    }
+
+    // Column numbers above the canvas and row numbers to its left, as far
+    // apart as keeps them readable at this zoom
+    renderRulers() {
+        const r = this.renderer;
+        if (!r.canvas) return;
+        const cw = CELL_W * r.zoom, ch = CELL_H * r.zoom;
+        const stepX = [10, 20, 50, 100].find(n => n * cw >= 48) || 100;
+        const stepY = [5, 10, 20, 50].find(n => n * ch >= 28) || 50;
+        const top = document.getElementById('ruler-top');
+        const left = document.getElementById('ruler-left');
+        top.style.width = r.canvas.width * cw + 'px';
+        left.style.height = r.canvas.height * ch + 'px';
+        top.replaceChildren(...this.rulerMarks(r.canvas.width, stepX, n => ({ left: n * cw + 'px' })));
+        left.replaceChildren(...this.rulerMarks(r.canvas.height, stepY, n => ({ top: (n + 0.5) * ch + 'px' })));
+    }
+
+    rulerMarks(count, step, position) {
+        const marks = [];
+        for (let n = 0; n < count; n += step) {
+            const span = document.createElement('span');
+            span.textContent = n;
+            Object.assign(span.style, position(n));
+            marks.push(span);
+        }
+        return marks;
+    }
+
+    // --- Tools ---
+
+    setupTools() {
+        document.querySelectorAll('.dock-btn[data-tool]').forEach(btn => {
+            btn.addEventListener('click', () => this.setTool(btn.dataset.tool));
+        });
+        // Modes within a dock tool (Paint / Erase, Box / Line, Cells / Subpixels)
+        document.querySelectorAll('[data-tool-set]').forEach(btn => {
+            btn.addEventListener('click', () => this.setTool(btn.dataset.toolSet));
+        });
+
+        const styles = [...document.querySelectorAll('.tile[data-style]')];
+        styles.forEach(btn => btn.addEventListener('click', () => {
+            pressOne(styles, btn);
+            this.renderer.boxLineStyle = parseInt(btn.dataset.style);
+        }));
+        const fills = [...document.querySelectorAll('[data-fill]')];
+        fills.forEach(btn => btn.addEventListener('click', () => {
+            pressOne(fills, btn);
+            this.renderer.boxFillMode = parseInt(btn.dataset.fill);
+        }));
+        const brushes = [...document.querySelectorAll('[data-brush]')];
+        brushes.forEach(btn => btn.addEventListener('click', () => {
+            pressOne(brushes, btn);
+            this.renderer.brushCell = btn.dataset.brush === 'cell';
+        }));
+    }
+
+    // Switch to an editor tool ('draw', 'box', …) or a dock tool ('brush',
+    // 'shape', …: its last used mode)
+    setTool(tool) {
+        if (TOOL_GROUPS[tool] && !TOOL_GROUPS[tool].includes(tool)) {
+            tool = this.lastTool[tool] || TOOL_GROUPS[tool][0];
+        }
+        const group = Object.keys(TOOL_GROUPS).find(g => TOOL_GROUPS[g].includes(tool));
+        if (!group) return;
+        const r = this.renderer;
+        if (tool === 'pick' && r.tool !== 'pick') this.toolBeforePick = r.tool;
+        if (group in this.lastTool) this.lastTool[group] = tool;
+
+        r.setTool(tool);
+        if (tool === 'char' && this.lastChar !== null) r.setSelectedChar(this.lastChar);
+
+        document.querySelectorAll('.dock-btn[data-tool]').forEach(b => {
+            b.classList.toggle('active', b.dataset.tool === group);
+            b.setAttribute('aria-pressed', String(b.dataset.tool === group));
+        });
+        document.querySelectorAll('.inspector section[data-panel]').forEach(s => s.classList.toggle('active', s.dataset.panel === group));
+        document.querySelectorAll('[data-tool-set]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.toolSet === tool)));
+        document.getElementById('tool-title').textContent = GROUP_INFO[group].title;
+        document.getElementById('tool-key').textContent = GROUP_INFO[group].key;
+
+        // Fill applies to boxes only, and a line needs a border
+        document.querySelector('.box-only').hidden = tool !== 'box';
+        const none = document.querySelector('.tile[data-style="0"]');
+        none.hidden = tool === 'line';
+        if (tool === 'line' && r.boxLineStyle === 0) document.querySelector('.tile[data-style="1"]').click();
+    }
+
+    // --- Colours ---
+
+    setupColors() {
+        const palette = document.getElementById('palette');
+        const add = (label, color, cls) => {
+            const btn = document.createElement('button');
+            btn.title = label;
+            btn.setAttribute('aria-label', label);
+            if (cls) btn.className = cls;
+            else btn.style.background = color;
+            btn.addEventListener('click', () => this.setColor(this.colorTarget,
+                color ? { ...hexToRgb(color), default: false } : (this.colorTarget === 'fg' ? defaultFG() : defaultBG())));
+            palette.appendChild(btn);
+        };
+        add("Terminal's own colour", null, 'default-swatch');
+        ANSI_COLORS.forEach(([name, hex]) => add(name, hex));
+
+        for (const which of ['fg', 'bg']) {
+            const input = document.getElementById(`${which}-color`);
+            input.addEventListener('input', () => this.setColor(which, { ...hexToRgb(input.value), default: false }));
+            input.addEventListener('click', () => this.setColorTarget(which));
+            document.querySelector(`[data-target-pick="${which}"]`).addEventListener('click', () => this.setColorTarget(which));
+        }
+        this.setColors(this.renderer.fgColor, this.renderer.bgColor);
+    }
+
+    // Which colour the palette sets: 'fg' (ink) or 'bg' (paper)
+    setColorTarget(which) {
+        this.colorTarget = which;
+        document.querySelectorAll('[data-target-pick]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.targetPick === which)));
+    }
+
+    // Make `color` the current fg/bg colour and show it
+    setColor(which, color) {
+        if (which === 'fg') this.renderer.setFgColor(color);
+        else this.renderer.setBgColor(color);
+        const input = document.getElementById(`${which}-color`);
+        input.value = toHex(color);
+        const swatch = input.parentElement;
+        swatch.classList.toggle('default', color.default);
+        swatch.style.setProperty('--swatch', toHex(color));
+        document.getElementById(`${which}-value`).textContent = color.default ? 'Terminal' : toHex(color);
+        const chip = document.getElementById(`dock-${which}`);
+        chip.classList.toggle('default', color.default);
+        chip.style.background = color.default ? '' : toHex(color);
+    }
+
+    // Set both colours (the pick tool, swap, reset); a pick made with the
+    // Pick tool goes back to the tool used before it
+    setColors(fg, bg) {
+        this.setColor('fg', { ...fg });
+        this.setColor('bg', { ...bg });
+        if (this.renderer.tool === 'pick' && this.toolBeforePick) {
+            this.setTool(this.toolBeforePick);
+            this.toolBeforePick = null;
         }
     }
 
-    // --- Save / Save As ---
+    // --- Save / open / resize ---
+
+    setFilename(name) {
+        this.saveFilename = name;
+        document.getElementById('file-name').textContent = name;
+    }
 
     doSave() {
         const text = this.saveFormat === 'ansi'
@@ -336,43 +551,34 @@ class Toolbar {
         const dialog = document.getElementById('save-as-dialog');
         const form = document.getElementById('save-as-form');
         const filenameInput = document.getElementById('save-filename');
-        const cancelBtn = document.getElementById('save-as-cancel');
 
         filenameInput.value = this.saveFilename;
         form.querySelectorAll('input[name="save-format"]').forEach(r => {
             r.checked = (r.value === this.saveFormat);
         });
-
-        cancelBtn.onclick = () => dialog.close();
-
+        document.getElementById('save-as-cancel').onclick = () => dialog.close();
         form.onsubmit = (e) => {
             e.preventDefault();
-            this.saveFilename = filenameInput.value || 'motd.txt';
+            this.setFilename(filenameInput.value || 'motd.txt');
             this.saveFormat = form.querySelector('input[name="save-format"]:checked').value;
             dialog.close();
             this.doSave();
         };
-
         dialog.showModal();
         filenameInput.select();
     }
-
-    // --- Resize Dialog ---
 
     showResizeDialog() {
         const dialog = document.getElementById('resize-dialog');
         const form = document.getElementById('resize-form');
         const widthInput = document.getElementById('resize-width');
         const heightInput = document.getElementById('resize-height');
-        const cancelBtn = document.getElementById('resize-cancel');
 
         if (this.renderer.canvas) {
             widthInput.value = this.renderer.canvas.width;
             heightInput.value = this.renderer.canvas.height;
         }
-
-        cancelBtn.onclick = () => dialog.close();
-
+        document.getElementById('resize-cancel').onclick = () => dialog.close();
         form.onsubmit = (e) => {
             e.preventDefault();
             const width = parseInt(widthInput.value) || 80;
@@ -380,135 +586,19 @@ class Toolbar {
             this.renderer.resize(width, height);
             dialog.close();
         };
-
         dialog.showModal();
     }
 
-    // --- Tool Buttons ---
-
-    setupToolButtons() {
-        // Tool buttons have ids "tool-<name>"
-        const toolBtns = [...document.querySelectorAll('.tool-btn[id^="tool-"]')];
-        const charPaletteSection = document.getElementById('char-palette-section');
-        const boxStyleSection = document.getElementById('box-style-section');
-        const boxFillSection = document.getElementById('box-fill-section');
-        const brushSection = document.getElementById('brush-section');
-        const noneStyleBtn = document.querySelector('.box-style-btn[data-style="0"]');
-        const lightStyleBtn = document.querySelector('.box-style-btn[data-style="1"]');
-
-        this.setTool = (tool) => {
-            toolBtns.forEach(btn => btn.classList.toggle('active', btn.id === `tool-${tool}`));
-
-            charPaletteSection.style.display = tool === 'char' ? 'block' : 'none';
-            boxStyleSection.style.display = (tool === 'box' || tool === 'line') ? 'block' : 'none';
-            boxFillSection.style.display = tool === 'box' ? 'block' : 'none';
-            brushSection.style.display = (tool === 'draw' || tool === 'erase') ? 'block' : 'none';
-
-            // "None" line style is a no-op for the line tool, so hide it there.
-            // If it was selected, fall back to Light.
-            noneStyleBtn.style.display = (tool === 'line') ? 'none' : '';
-            if (tool === 'line' && this.renderer.boxLineStyle === 0) {
-                lightStyleBtn.click();
-            }
-
-            this.renderer.setTool(tool);
-        };
-
-        toolBtns.forEach(btn => {
-            btn.addEventListener('click', () => this.setTool(btn.id.slice('tool-'.length)));
-        });
-
-        bindButtonGroup(document.querySelectorAll('.box-style-btn'), btn => {
-            this.renderer.boxLineStyle = parseInt(btn.dataset.style);
-        });
-        bindButtonGroup(document.querySelectorAll('.box-fill-btn'), btn => {
-            this.renderer.boxFillMode = parseInt(btn.dataset.fill);
-        });
-        bindButtonGroup(document.querySelectorAll('.brush-btn'), btn => {
-            this.renderer.brushCell = btn.dataset.brush === 'cell';
-        });
-
-        // Keyboard shortcuts
-        document.addEventListener('keydown', (e) => {
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-
-            // Ctrl+S: Save, Ctrl+Shift+S: Save As
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-                e.preventDefault();
-                if (e.shiftKey) {
-                    this.showSaveAsDialog();
-                } else {
-                    this.doSave();
-                }
-                return;
-            }
-
-            // Escape: close menus first
-            if (e.key === 'Escape' && this.openMenu) {
-                this.closeMenus();
-                return;
-            }
-
-            // Skip tool shortcuts when modifier keys are held (Ctrl+C, etc.)
-            if (e.ctrlKey || e.metaKey || e.altKey) return;
-            // Skip tool shortcuts when text cursor is active (typing goes to canvas)
-            if (this.renderer.tool === 'text' && this.renderer.textCursor) return;
-            // ... and while placing an image (its keys, see CanvasRenderer)
-            if (this.renderer.isImagePaste()) return;
-
-            const key = e.key.toLowerCase();
-            const tool = (e.shiftKey && key === 's') ? 'select-subpixel' : TOOL_SHORTCUTS[key];
-            if (tool) this.setTool(tool);
-        });
-    }
-
-    // --- Color Pickers ---
-
-    setupColorPickers() {
-        for (const which of ['fg', 'bg']) {
-            const input = document.getElementById(`${which}-color`);
-            const isDefault = document.getElementById(`${which}-default`);
-            const update = () => this.setColor(which, { ...hexToRgb(input.value), default: isDefault.checked });
-            input.addEventListener('input', update);
-            isDefault.addEventListener('change', update);
-            update();
-        }
-    }
-
-    // Make `color` the current fg/bg colour ("Def" colours grey out the picker)
-    setColor(which, color) {
-        document.getElementById(`${which}-color-row`).classList.toggle('color-inactive', color.default);
-        if (which === 'fg') {
-            this.renderer.setFgColor(color);
-        } else {
-            this.renderer.setBgColor(color);
-        }
-    }
-
-    // Set both colours, updating the pickers to match (used by the pick tool)
-    setColors(fg, bg) {
-        for (const [which, color] of [['fg', fg], ['bg', bg]]) {
-            document.getElementById(`${which}-color`).value = toHex(color);
-            document.getElementById(`${which}-default`).checked = color.default;
-            this.setColor(which, color);
-        }
-    }
-
-    // --- File Inputs ---
-
     setupFileInputs() {
         const fileInput = document.getElementById('file-input');
-
-        fileInput.addEventListener('change', (e) => {
-            const file = e.target.files[0];
+        fileInput.addEventListener('change', () => {
+            const file = fileInput.files[0];
             if (!file) return;
-
             const reader = new FileReader();
             reader.onload = () => {
                 try {
-                    const canvas = parseANSIText(reader.result);
-                    this.renderer.setCanvas(canvas);
-                    this.saveFilename = file.name;
+                    this.renderer.setCanvas(parseANSIText(reader.result));
+                    this.setFilename(file.name);
                     this.saveFormat = 'ansi';
                 } catch (error) {
                     alert('Failed to open: ' + error.message);
@@ -526,58 +616,72 @@ class Toolbar {
         });
     }
 
-    // --- Character Palette ---
+    // --- Glyph palette ---
 
     setupCharPalette() {
-        const tabs = document.querySelectorAll('.char-tabs .tab-btn');
-
-        tabs.forEach(tab => {
-            tab.addEventListener('click', () => {
-                tabs.forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
-                this.currentTab = tab.dataset.tab;
-                this.renderCharPalette();
-            });
-        });
-
-        document.getElementById('emoji-search').addEventListener('input', () => this.renderCharPalette());
+        const tabs = [...document.querySelectorAll('#glyph-tabs button')];
+        const search = document.getElementById('glyph-search');
+        tabs.forEach(tab => tab.addEventListener('click', () => {
+            tabs.forEach(t => t.setAttribute('aria-selected', String(t === tab)));
+            this.currentTab = tab.dataset.tab;
+            search.value = '';
+            this.renderCharPalette();
+        }));
+        search.addEventListener('input', () => this.renderCharPalette());
+        this.renderCharPalette();
     }
 
-    // Palette sections [{ title, chars: [{ code, name }] }] for a tab. Only the
-    // emoji tab has titled sections (its Unicode groups), filtered by `query`.
-    getPaletteSections(tab, query) {
-        if (tab === 'emoji') {
-            return EMOJI_GROUPS
-                .map(group => ({
-                    title: group.name,
-                    chars: group.emoji
-                        .filter(([, name]) => name.includes(query))
-                        .map(([code, name]) => ({ code, name }))
-                }))
-                .filter(section => section.chars.length > 0);
+    // Every glyph the palette offers, by tab: [{ code, name }]; emoji also
+    // carry their Unicode group
+    glyphTabs() {
+        if (!this._glyphTabs) {
+            const named = ([code, name]) => ({ code, name });
+            this._glyphTabs = {
+                diagonal: DIAGONAL_CHARS,
+                triangle: TRIANGLE_CHARS,
+                ...Object.fromEntries(Object.entries(LEGACY_CHARS).map(([tab, list]) => [tab, list.map(named)])),
+                emoji: EMOJI_GROUPS.flatMap(g => g.emoji.map(([code, name]) => ({ code, name, group: g.name })))
+            };
         }
-        if (tab === 'diagonal') return [{ chars: DIAGONAL_CHARS }];
-        if (tab === 'triangle') return [{ chars: TRIANGLE_CHARS }];
-        return [{ chars: (LEGACY_CHARS[tab] || []).map(([code, name]) => ({ code, name })) }];
+        return this._glyphTabs;
+    }
+
+    // Glyphs whose name contains every word of `query`, from all tabs
+    searchGlyphs(query, limit = Infinity) {
+        const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+        const out = [];
+        for (const list of Object.values(this.glyphTabs())) {
+            for (const g of list) {
+                const name = g.name.toLowerCase();
+                if (words.every(w => name.includes(w))) out.push(g);
+                if (out.length >= limit) return out;
+            }
+        }
+        return out;
+    }
+
+    // Palette sections [{ title, chars }]: the search results, or the current
+    // tab (emoji by Unicode group)
+    getPaletteSections() {
+        const query = document.getElementById('glyph-search').value.trim();
+        if (query) return [{ chars: this.searchGlyphs(query, 300) }];
+        const list = this.glyphTabs()[this.currentTab];
+        if (this.currentTab !== 'emoji') return [{ chars: list }];
+        return EMOJI_GROUPS.map(g => ({ title: g.name, chars: list.filter(c => c.group === g.name) }));
     }
 
     renderCharPalette() {
         const palette = document.getElementById('char-palette');
-        const search = document.getElementById('emoji-search');
-        const isEmoji = this.currentTab === 'emoji';
-        search.style.display = isEmoji ? '' : 'none';
-        palette.classList.toggle('emoji-grid', isEmoji);
-        palette.innerHTML = '';
+        const sections = this.getPaletteSections();
+        palette.classList.toggle('emoji-grid', sections.some(s => s.chars.some(c => charWidth(c.code) === 2)));
+        palette.replaceChildren();
 
-        const query = isEmoji ? search.value.trim().toLowerCase() : '';
-        const sections = this.getPaletteSections(this.currentTab, query);
-        if (sections.length === 0) {
+        if (!sections.some(s => s.chars.length)) {
             const empty = document.createElement('div');
             empty.className = 'char-group-title';
             empty.textContent = 'No matches';
             palette.appendChild(empty);
         }
-
         for (const section of sections) {
             if (section.title) {
                 const title = document.createElement('div');
@@ -589,20 +693,220 @@ class Toolbar {
                 const btn = document.createElement('button');
                 btn.title = charInfo.name || `U+${charInfo.code.toString(16).toUpperCase()}`;
                 btn.classList.toggle('selected', charInfo.code === this.renderer.selectedChar);
-
                 const span = document.createElement('span');
                 span.className = glyphClass(charInfo.code);
                 span.textContent = String.fromCodePoint(charInfo.code);
                 btn.appendChild(span);
-
-                btn.addEventListener('click', () => {
-                    palette.querySelectorAll('button').forEach(b => b.classList.remove('selected'));
-                    btn.classList.add('selected');
-                    this.renderer.setSelectedChar(charInfo.code);
-                });
+                btn.addEventListener('click', () => this.selectGlyph(charInfo.code));
                 palette.appendChild(btn);
             }
         }
+    }
+
+    // Stamp `code` with the glyph tool
+    selectGlyph(code) {
+        this.lastChar = code;
+        this.setTool('char');
+        this.renderer.setSelectedChar(code);
+        document.querySelectorAll('#char-palette button').forEach(b => {
+            b.classList.toggle('selected', b.textContent === String.fromCodePoint(code));
+        });
+    }
+
+    // --- Command palette (⌘K) ---
+
+    setupCommandPalette() {
+        const dialog = document.getElementById('command-palette');
+        const input = document.getElementById('command-query');
+        const list = document.getElementById('command-list');
+
+        input.addEventListener('input', () => {
+            this.commandIndex = 0;
+            this.renderCommands();
+        });
+        input.addEventListener('keydown', (e) => {
+            const n = this.commandResults.length;
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (!n) return;
+                this.commandIndex = (this.commandIndex + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
+                this.renderCommands();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (n) this.runCommand(this.commandResults[this.commandIndex]);
+            }
+        });
+        list.addEventListener('mousemove', (e) => {
+            const li = e.target.closest('li[data-index]');
+            if (li && +li.dataset.index !== this.commandIndex) {
+                this.commandIndex = +li.dataset.index;
+                this.renderCommands();
+            }
+        });
+        list.addEventListener('click', (e) => {
+            const li = e.target.closest('li[data-index]');
+            if (li) this.runCommand(this.commandResults[+li.dataset.index]);
+        });
+        // A click on the backdrop closes it
+        dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
+    }
+
+    // Everything the editor can do, for the command palette
+    commands() {
+        const act = (action) => () => this.handleAction(action);
+        const tool = (t) => () => this.setTool(t);
+        const r = this.renderer;
+        const cmds = [
+            ['Tools', 'Brush', 'B', tool('draw')],
+            ['Tools', 'Erase', 'E', tool('erase')],
+            ['Tools', 'Glyph', 'G', tool('char')],
+            ['Tools', 'Text', 'T', tool('text')],
+            ['Tools', 'Box', 'S', tool('box')],
+            ['Tools', 'Line', 'L', tool('line')],
+            ['Tools', 'Select cells', 'V', tool('select')],
+            ['Tools', 'Select subpixels', '⇧V', tool('select-subpixel')],
+            ['Tools', 'Pick colour', 'I', tool('pick')],
+            ['Brush', 'Brush tip: subpixel', '', () => { this.setTool('brush'); document.querySelector('[data-brush="subpixel"]').click(); }],
+            ['Brush', 'Brush tip: whole cell', '', () => { this.setTool('brush'); document.querySelector('[data-brush="cell"]').click(); }],
+            ['File', 'New canvas', '', act('new')],
+            ['File', 'Open…', '', act('open')],
+            ['File', 'Save', '⌘S', act('save')],
+            ['File', 'Export / save as…', '⇧⌘S', act('save-as')],
+            ['File', 'Import image…', '', act('import-image')],
+            ['Edit', 'Undo', '⌘Z', act('undo')],
+            ['Edit', 'Redo', '⇧⌘Z', act('redo')],
+            ['Colour', 'Swap ink and paper', 'X', act('swap-colors')],
+            ['Colour', "Reset to the terminal's colours", '', act('default-colors')],
+            ['View', r.showGrid ? 'Hide grid' : 'Show grid', '', act('toggle-grid')],
+            ['View', r.lightTerminal ? 'Preview in a dark terminal' : 'Preview in a light terminal', '', act('toggle-light-terminal')],
+            ['View', 'Zoom in', '+', act('zoom-in')],
+            ['View', 'Zoom out', '−', act('zoom-out')],
+            ['View', 'Zoom to fit', '0', act('zoom-fit')],
+            ['View', 'Actual size (100%)', '', act('zoom-reset')],
+            ...[...document.querySelectorAll('[data-cell-aspect]')]
+                .filter(b => b.dataset.cellAspect !== 'custom')
+                .map(b => ['View', `Cell shape: ${b.firstChild.textContent} (${b.querySelector('kbd').textContent})`, '',
+                    () => this.setCellAspect(parseFloat(b.dataset.cellAspect))]),
+            ['View', 'Cell shape: custom…', '', () => this.customCellAspect()],
+            ['Canvas', 'Resize canvas…', '', act('resize')],
+            ['Canvas', 'Clear canvas', '', act('clear')]
+        ];
+        return cmds.map(([group, label, keys, run]) => ({ group, label, keys, run }));
+    }
+
+    openCommandPalette() {
+        const dialog = document.getElementById('command-palette');
+        if (dialog.open) return;
+        this.closeMenus();
+        const input = document.getElementById('command-query');
+        input.value = '';
+        this.commandIndex = 0;
+        this.renderCommands();
+        dialog.showModal();
+        input.focus();
+    }
+
+    // Commands matching the query (every word in the label or group), then
+    // glyphs whose name matches it
+    renderCommands() {
+        const query = document.getElementById('command-query').value.trim().toLowerCase();
+        const words = query.split(/\s+/).filter(Boolean);
+        const results = this.commands().filter(c => words.every(w => (c.label + ' ' + c.group).toLowerCase().includes(w)));
+        if (query.length >= 2) {
+            for (const g of this.searchGlyphs(query, 30)) {
+                results.push({
+                    group: 'Glyph', label: sentenceCase(g.name),
+                    glyph: g.code, run: () => this.selectGlyph(g.code)
+                });
+            }
+        }
+        this.commandResults = results;
+        this.commandIndex = Math.min(this.commandIndex, Math.max(0, results.length - 1));
+
+        const list = document.getElementById('command-list');
+        list.replaceChildren();
+        if (!results.length) {
+            const li = document.createElement('li');
+            li.className = 'cmd-empty';
+            li.textContent = 'Nothing matches';
+            list.appendChild(li);
+            return;
+        }
+        results.forEach((c, i) => {
+            const li = document.createElement('li');
+            li.dataset.index = i;
+            li.setAttribute('role', 'option');
+            li.setAttribute('aria-selected', String(i === this.commandIndex));
+            const icon = document.createElement('span');
+            icon.className = 'cmd-icon';
+            if (c.glyph) {
+                const g = document.createElement('span');
+                g.className = glyphClass(c.glyph);
+                g.textContent = String.fromCodePoint(c.glyph);
+                icon.appendChild(g);
+            } else {
+                icon.textContent = c.group.charAt(0);
+            }
+            const label = document.createElement('span');
+            label.className = 'cmd-label';
+            label.textContent = c.label;
+            const group = document.createElement('span');
+            group.className = 'cmd-group';
+            group.textContent = c.group;
+            li.append(icon, label, group);
+            if (c.keys) {
+                const kbd = document.createElement('kbd');
+                kbd.textContent = c.keys;
+                li.appendChild(kbd);
+            }
+            list.appendChild(li);
+        });
+        list.children[this.commandIndex].scrollIntoView({ block: 'nearest' });
+    }
+
+    runCommand(cmd) {
+        document.getElementById('command-palette').close();
+        cmd.run();
+    }
+
+    // --- Keyboard shortcuts ---
+
+    setupKeyboard() {
+        document.addEventListener('keydown', (e) => {
+            const mod = e.ctrlKey || e.metaKey;
+            const key = e.key.toLowerCase();
+
+            // ⌘K: commands, also while typing on the canvas
+            if (mod && key === 'k') {
+                e.preventDefault();
+                this.openCommandPalette();
+                return;
+            }
+            if (e.target.closest && e.target.closest('input, textarea, dialog')) return;
+
+            // ⌘S: save, ⇧⌘S: save as
+            if (mod && key === 's') {
+                e.preventDefault();
+                if (e.shiftKey) this.showSaveAsDialog();
+                else this.doSave();
+                return;
+            }
+            if (e.key === 'Escape') this.closeMenus();
+
+            if (mod || e.altKey) return;
+            // Typing goes to the canvas, and an image being placed has its own keys
+            if (this.renderer.tool === 'text' && this.renderer.textCursor) return;
+            if (this.renderer.isImagePaste()) return;
+
+            if (e.code === 'Equal' || e.code === 'NumpadAdd') this.stepZoom(1);
+            else if (e.code === 'Minus' || e.code === 'NumpadSubtract') this.stepZoom(-1);
+            else if (e.key === '0') this.zoomToFit();
+            else if (key === 'x') this.handleAction('swap-colors');
+            else if (e.shiftKey && (key === 'v' || key === 's')) this.setTool('select-subpixel');
+            else if (KEY_TOOLS[key]) this.setTool(KEY_TOOLS[key]);
+            else return;
+            e.preventDefault();
+        });
     }
 
     // --- Utilities ---
