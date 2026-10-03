@@ -175,9 +175,10 @@ class CanvasRenderer {
             });
         }
 
-        // Image paste: the wheel resizes it (Ctrl+wheel still zooms the page)
+        // Image paste: the wheel over the canvas resizes it (Ctrl+wheel still
+        // zooms the page)
         window.addEventListener('wheel', (e) => {
-            if (!this.isImagePaste() || e.ctrlKey) return;
+            if (!this.isImagePaste() || e.ctrlKey || !this.container.parentElement.contains(e.target)) return;
             e.preventDefault();
             // Shift+wheel scrolls sideways in some browsers
             this._wheel += (e.deltaY || e.deltaX) * (e.deltaMode ? 33 : 1);
@@ -232,6 +233,7 @@ class CanvasRenderer {
         if (tool !== 'select' && tool !== 'select-subpixel') {
             this.pasteMode = false;
             this.clearPastePreview();
+            this.endImagePaste();
         }
         if (tool !== 'text') {
             this.clearTextCursor();
@@ -254,7 +256,7 @@ class CanvasRenderer {
 
     setupKeyboardShortcuts() {
         document.addEventListener('keydown', (e) => {
-            if (e.target.tagName === 'INPUT') return;
+            if (e.target.closest && e.target.closest('input, textarea')) return;
 
             // Ctrl+Z - undo, Ctrl+Shift+Z / Ctrl+Y - redo (checked before the
             // text tool, so they also work while typing)
@@ -281,19 +283,26 @@ class CanvasRenderer {
                 return;
             }
 
-            // Image paste: +/- resize it, M switches colour / mono, D the dithering
+            // Image paste: +/- resize it (by key position, so Shift is free to
+            // make the step fine), M switches colour / mono, D the dithering
             if (this.isImagePaste() && !e.ctrlKey && !e.metaKey && !e.altKey) {
                 const p = this.imagePaste;
+                const grow = e.code === 'Equal' || e.code === 'NumpadAdd';
+                const shrink = e.code === 'Minus' || e.code === 'NumpadSubtract';
                 const k = e.key.toLowerCase();
-                if (k === '+' || k === '=' || k === '-') this.resizeImagePaste(k === '-' ? -1 : 1, e.shiftKey);
-                else if (k === 'm') p.mono = !p.mono;
-                else if (k === 'd') {
-                    const names = Object.keys(IMAGE_DITHERS);
-                    p.dither = names[(names.indexOf(p.dither) + 1) % names.length];
-                }
-                if ('+=-md'.includes(k)) {
+                if (grow || shrink || k === 'm' || k === 'd') {
                     e.preventDefault();
-                    if (k === 'm' || k === 'd') this.updateImagePaste();
+                    if (grow || shrink) {
+                        this.resizeImagePaste(grow ? 1 : -1, e.shiftKey);
+                        return;
+                    }
+                    if (k === 'm') {
+                        p.mono = !p.mono;
+                    } else {
+                        const names = Object.keys(IMAGE_DITHERS);
+                        p.dither = names[(names.indexOf(p.dither) + 1) % names.length];
+                    }
+                    this.updateImagePaste();
                     return;
                 }
             }
@@ -305,6 +314,7 @@ class CanvasRenderer {
                 this.clearSubpixelSelection();
                 this.pasteMode = false;
                 this.clearPastePreview();
+                this.endImagePaste();
                 return;
             }
 
@@ -1072,6 +1082,7 @@ class CanvasRenderer {
             } else if (this.clipboard) {
                 const c = this.cellCoordsFromEvent(e);
                 if (c) this.recordEdit('Paste', () => this.pasteAt(c.cellX, c.cellY));
+                if (c) this.endImagePaste();
             }
             return;
         }
@@ -1753,10 +1764,20 @@ class CanvasRenderer {
         }
         const area = this.selection || { x1: 0, y1: 0, x2: this.canvas.width - 1, y2: this.canvas.height - 1 };
         const cols = fitImageCols(image, this.cellAspect, area.x2 - area.x1 + 1, area.y2 - area.y1 + 1);
-        if (this.imagePaste) this.imagePaste.image.close();
+        this.endImagePaste();
+        this.clearTextCursor(); // its typing would take the image's keys
         this.imagePaste = { image, cols, mono: false, dither: 'floyd-steinberg' };
+        this._wheel = 0;
         this.pasteMode = true;
         this.updateImagePaste();
+    }
+
+    // Free the image once it is placed or cancelled (its cells stay on the
+    // clipboard, to paste again as they are)
+    endImagePaste() {
+        if (!this.imagePaste) return;
+        this.imagePaste.image.close();
+        this.imagePaste = null;
     }
 
     // Whether an image is being placed
@@ -1789,7 +1810,7 @@ class CanvasRenderer {
         const p = this.imagePaste;
         const step = fine ? 1 : Math.max(1, Math.round(p.cols / 10));
         const cols = Math.min(500, Math.max(1, p.cols + dir * step));
-        if (cols === p.cols) return;
+        if (cols === p.cols || (dir > 0 && imageRows(p.image, cols, this.cellAspect) > 200)) return;
         p.cols = cols;
         // Once per frame: a fast wheel turn sends many steps
         if (this._imageFrame) return;
@@ -2207,6 +2228,7 @@ class CanvasRenderer {
         this.clearSubpixelSelection();
         this.pasteMode = false;
         this.clearPastePreview();
+        this.endImagePaste();
         this.cancelDrag();
         this.isDrawing = false;
         this.lastPoint = null;

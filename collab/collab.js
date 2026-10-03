@@ -408,6 +408,8 @@ const OPS = {
     import_image(a) {
         const { image } = a;
         const x = a.x ?? 0, y = a.y ?? 0;
+        checkCell(x, y);
+        if (a.width < 0 || a.height < 0) throw new Error('width and height must be positive');
         if (!Object.hasOwn(IMAGE_DITHERS, a.dither || 'floyd-steinberg')) {
             throw new Error(`unknown dither "${a.dither}": use ${Object.keys(IMAGE_DITHERS).join(', ')}`);
         }
@@ -504,15 +506,17 @@ let queue = Promise.resolve();
 async function handle(event) {
     const { id, op, args } = JSON.parse(event.data);
     const t0 = performance.now();
-    let reply;
+    let reply, a;
     try {
-        const a = await prepare(op, args || {});
+        a = await prepare(op, args || {});
         // An edit made while the user drags (mouse button down) would end up
         // in the user's undo step: wait for the button to come up
         while (!NO_STEP.has(op) && r.isDrawing) await new Promise(res => setTimeout(res, 50));
         reply = { id, result: run(op, a) ?? 'ok' };
     } catch (e) {
         reply = { id, error: e.message };
+    } finally {
+        if (a && a.image) a.image.close();
     }
     // Operations borrow the selection state, so redraw the user's overlays
     r.updateSelectionDisplay();

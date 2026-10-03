@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -111,7 +112,7 @@ type importArgs struct {
 }
 
 type imageArgs struct {
-	Path   string `json:"path,omitempty" jsonschema:"image file on this computer: PNG, JPEG, GIF, WebP or BMP"`
+	Path   string `json:"path,omitempty" jsonschema:"absolute path of an image file on this computer: PNG, JPEG, GIF, WebP or BMP"`
 	URL    string `json:"url,omitempty" jsonschema:"or the image's http(s) URL"`
 	X      int    `json:"x,omitempty" jsonschema:"left cell (default 0)"`
 	Y      int    `json:"y,omitempty" jsonschema:"top cell (default 0)"`
@@ -130,7 +131,7 @@ func (a imageArgs) prepare(ctx context.Context) (any, error) {
 	var err error
 	switch {
 	case a.Path != "":
-		data, err = os.ReadFile(a.Path)
+		data, err = readFile(a.Path)
 	case a.URL != "":
 		data, err = download(ctx, a.URL)
 	default:
@@ -142,10 +143,24 @@ func (a imageArgs) prepare(ctx context.Context) (any, error) {
 	if len(data) > maxImage {
 		return nil, fmt.Errorf("the image is over %d MB", maxImage>>20)
 	}
+	mime := http.DetectContentType(data)
+	if !strings.HasPrefix(mime, "image/") {
+		return nil, fmt.Errorf("not an image (%s)", mime)
+	}
 	return struct {
 		imageArgs
 		Data string `json:"data"`
-	}{a, "data:" + http.DetectContentType(data) + ";base64," + base64.StdEncoding.EncodeToString(data)}, nil
+	}{a, "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)}, nil
+}
+
+// readFile reads at most maxImage+1 bytes, enough to tell it is too big
+func readFile(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, maxImage+1))
 }
 
 func download(ctx context.Context, url string) ([]byte, error) {
