@@ -10,8 +10,8 @@
 const STYLES = { none: 0, light: 1, heavy: 2, double: 3 };
 const FILLS = { none: 0, fill: 1, recolor: 2 };
 
-// Operations that don't edit the canvas: no undo step
-const NO_EDIT = new Set(['get_state', 'view_canvas', 'read_region', 'export', 'set_display']);
+// Operations that aren't an undo step of their own
+const NO_STEP = new Set(['get_state', 'view_canvas', 'read_region', 'export', 'set_display', 'undo', 'redo']);
 
 let r;          // the editor's CanvasRenderer
 let panel;      // activity panel elements
@@ -233,9 +233,10 @@ const OPS = {
 
     // Through the toolbar, so the Canvas menu shows (and remembers) it
     set_display(a) {
-        if (a.grid !== undefined && a.grid !== r.showGrid) toolbar.toggleGrid();
-        if (a.light_terminal !== undefined && a.light_terminal !== r.lightTerminal) toolbar.toggleLightTerminal();
-        if (a.cell_aspect !== undefined) toolbar.setCellAspect(checkAspect(a.cell_aspect));
+        // Absent or null: leave as is
+        if (a.cell_aspect != null) toolbar.setCellAspect(checkAspect(a.cell_aspect));
+        if (a.grid != null && a.grid !== r.showGrid) toolbar.toggleGrid();
+        if (a.light_terminal != null && a.light_terminal !== r.lightTerminal) toolbar.toggleLightTerminal();
         return displayState();
     },
 
@@ -244,7 +245,7 @@ const OPS = {
         const rulers = !a.no_rulers;
         const grid = a.grid ?? r.showGrid;
         const light = a.light_terminal ?? r.lightTerminal;
-        const aspect = a.cell_aspect === undefined ? r.cellAspect : checkAspect(a.cell_aspect);
+        const aspect = a.cell_aspect == null ? r.cellAspect : checkAspect(a.cell_aspect);
         // A one-off aspect only while drawing (the editor's cells keep theirs)
         setCellWidthForAspect(aspect);
         try {
@@ -378,6 +379,7 @@ const OPS = {
         const clipboard = r.canvas.cells.slice(src.y1, src.y2 + 1)
             .map(row => structuredClone(row.slice(src.x1, src.x2 + 1)));
         if (a.move) {
+            r.beforeChange(src.x1, src.y1, src.x2, src.y2);
             for (let y = src.y1; y <= src.y2; y++) {
                 for (let x = src.x1; x <= src.x2; x++) {
                     detachWide(r.canvas.cells, x, y);
@@ -431,8 +433,9 @@ const OPS = {
 
     batch(a) {
         const results = [];
+        if (!Array.isArray(a.ops)) throw new Error('ops must be a list of {op, args}');
         for (const [i, { op, args }] of a.ops.entries()) {
-            if (op === 'batch' || op === 'view_canvas' || !Object.hasOwn(OPS, op)) {
+            if (['batch', 'view_canvas', 'undo', 'redo'].includes(op) || !Object.hasOwn(OPS, op)) {
                 throw new Error(`ops[${i}]: "${op}" can't be used in a batch`);
             }
             try {
@@ -449,7 +452,7 @@ const OPS = {
 // synchronous, so the user's own edits can't end up inside the step.
 function run(op, args) {
     if (!Object.hasOwn(OPS, op)) throw new Error(`unknown operation "${op}"`);
-    if (NO_EDIT.has(op) || op === 'undo' || op === 'redo') return OPS[op](args);
+    if (NO_STEP.has(op)) return OPS[op](args);
     return r.recordEdit(`AI ${op}`, () => OPS[op](args));
 }
 
@@ -469,6 +472,9 @@ let queue = Promise.resolve();
 
 async function handle(event) {
     const { id, op, args } = JSON.parse(event.data);
+    // An edit made while the user drags (mouse button down) would end up in
+    // the user's undo step: wait for the button to come up
+    while (!NO_STEP.has(op) && r.isDrawing) await new Promise(res => setTimeout(res, 50));
     const t0 = performance.now();
     let reply;
     try {
@@ -494,7 +500,8 @@ function connect() {
     events.onopen = () => setStatus('AI link', 'on');
     events.onerror = () => setStatus('AI link: server offline', 'off');
         // One at a time, in order (replies are posted asynchronously)
-    events.onmessage = (event) => { queue = queue.then(() => handle(event)); };
+    // (a failed reply, e.g. the server just exited, mustn't stop the queue)
+    events.onmessage = (event) => { queue = queue.then(() => handle(event)).catch(() => {}); };
     events.addEventListener('replaced', () => {
         events.close();
         setStatus('AI link: in another tab (click to take over)', 'off');

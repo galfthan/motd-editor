@@ -18,6 +18,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -236,18 +237,22 @@ func (l *link) call(ctx context.Context, op string, args json.RawMessage) (json.
 	return r.Result, nil
 }
 
-// localOnly rejects requests from other sites' pages (cross-origin) and for
-// host names other than localhost (DNS rebinding), so only the editor page
-// and local tools can drive the editor
+// localOnly rejects requests from other sites' pages (cross-origin, any
+// method: opening /events takes the AI link over) and for host names other
+// than localhost (DNS rebinding), so only the editor page and local tools
+// can drive the editor
 func localOnly(h http.Handler) http.Handler {
-	h = http.NewCrossOriginProtection().Handler(h)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, _, err := net.SplitHostPort(r.Host)
 		if err != nil {
 			host = r.Host
 		}
-		if host != "localhost" && net.ParseIP(host) == nil {
-			http.Error(w, "forbidden host", http.StatusForbidden)
+		site := r.Header.Get("Sec-Fetch-Site")
+		origin, _ := url.Parse(r.Header.Get("Origin"))
+		if host != "localhost" && net.ParseIP(host) == nil ||
+			site == "cross-site" || site == "same-site" ||
+			origin != nil && origin.Host != "" && origin.Host != r.Host {
+			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
 		h.ServeHTTP(w, r)

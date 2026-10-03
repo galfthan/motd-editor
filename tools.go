@@ -110,7 +110,7 @@ type sizeArgs struct {
 
 type batchArgs struct {
 	Ops []struct {
-		Op   string         `json:"op" jsonschema:"name of any other tool except batch and view_canvas"`
+		Op   string         `json:"op" jsonschema:"name of any other tool except batch, view_canvas, undo and redo"`
 		Args map[string]any `json:"args,omitempty"`
 	} `json:"ops"`
 }
