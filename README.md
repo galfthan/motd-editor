@@ -40,6 +40,19 @@ this machine, or `make` for Linux, Windows and macOS binaries in `dist/`.
 claude mcp add --transport http motd http://localhost:8765/mcp
 ```
 
+For Claude Desktop, which starts local MCP servers itself, add it to
+`claude_desktop_config.json` (Settings > Developer > Edit Config) and
+restart Claude Desktop; the editor is then at http://localhost:8765/ while
+Claude Desktop runs:
+
+```json
+{
+  "mcpServers": {
+    "motd": { "command": "C:\\path\\to\\motd-editor-windows-amd64.exe", "args": ["-stdio"] }
+  }
+}
+```
+
 Then ask Claude to draw something. The **AI link** button in the menu bar
 opens a log of the agent's operations and a note box the agent can read; it
 can also see your current selection, so you can select an area and say

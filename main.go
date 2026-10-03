@@ -186,6 +186,7 @@ func relay[In any](s *mcp.Server, e *editor, name, description string) {
 func main() {
 	addr := flag.String("addr", "localhost:8765", "address to serve on")
 	dev := flag.Bool("dev", false, "serve web/ and collab/ from the working directory instead of the built-in copy")
+	stdio := flag.Bool("stdio", false, "talk MCP over stdin/stdout, for clients that start the server themselves (Claude Desktop)")
 	flag.Parse()
 
 	var files fs.FS = embedded
@@ -216,6 +217,14 @@ func main() {
 	mux.Handle("/", http.FileServerFS(webFS))
 
 	log.Printf("Editor:      http://%s/", *addr)
-	log.Printf("MCP server:  claude mcp add --transport http motd http://%s/mcp", *addr)
-	log.Fatal(http.ListenAndServe(*addr, mux))
+	if !*stdio {
+		log.Printf("MCP server:  claude mcp add --transport http motd http://%s/mcp", *addr)
+		log.Fatal(http.ListenAndServe(*addr, mux))
+	}
+	// The editor is still served over HTTP; the MCP session ends when the
+	// client closes stdin (log output goes to stderr)
+	go func() { log.Fatal(http.ListenAndServe(*addr, mux)) }()
+	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
+		log.Fatal(err)
+	}
 }
