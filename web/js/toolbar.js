@@ -495,7 +495,15 @@ class Toolbar {
         const key = document.getElementById('tool-key');
         key.textContent = image ? '' : GROUP_INFO[panel].key;
         key.hidden = image;
-        if (image) document.getElementById('inspector').classList.add('open'); // narrow windows
+        // Narrow windows: open the inspector for the image, close it after
+        const inspector = document.getElementById('inspector');
+        if (image && !inspector.classList.contains('open')) {
+            inspector.classList.add('open');
+            this._openedForImage = true;
+        } else if (!image && this._openedForImage) {
+            inspector.classList.remove('open');
+            this._openedForImage = false;
+        }
     }
 
     // --- Image panel ---
@@ -526,6 +534,13 @@ class Toolbar {
         const cols = document.getElementById('image-cols'), rows = document.getElementById('image-rows');
         cols.addEventListener('input', () => { if (cols.value >= 1) set({ cols: +cols.value }); });
         rows.addEventListener('input', () => { if (rows.value >= 1) set({ rows: +rows.value }); });
+        for (const input of [cols, rows]) {
+            // Leaving the field shows the size as it is (limits applied)
+            input.addEventListener('blur', () => r.imagePaste && this.showImagePanel(r.imagePaste));
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === 'Escape') input.blur();
+            });
+        }
         const lock = document.getElementById('image-lock');
         lock.addEventListener('click', () => set({ locked: lock.getAttribute('aria-pressed') !== 'true' }));
         document.querySelectorAll('[data-image-mono]').forEach(b => b.addEventListener('click', () => set({ mono: b.dataset.imageMono === 'true' })));

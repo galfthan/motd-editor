@@ -260,7 +260,7 @@ class CanvasRenderer {
 
     setupKeyboardShortcuts() {
         document.addEventListener('keydown', (e) => {
-            if (e.target.closest && e.target.closest('input, textarea')) return;
+            if (e.target.closest && e.target.closest('input, textarea, dialog')) return;
 
             // Ctrl+Z - undo, Ctrl+Shift+Z / Ctrl+Y - redo (checked before the
             // text tool, so they also work while typing)
@@ -439,10 +439,12 @@ class CanvasRenderer {
     // Run an undo/redo and repaint what it changed. Drags and selections are
     // dropped first (which also commits an open stroke, so it can be undone).
     applyHistoryChange(apply) {
-        this.resetInteractionState();
+        // An image being placed stays: it isn't on the canvas yet
+        this.resetInteractionState(true);
         const change = apply();
         if (!change) return;
         if (change.wholeCanvas) {
+            if (this.imagePaste) this.moveImageTo(this.imagePaste);   // the canvas may be smaller
             this.render();
             this.updateStatus();
         } else {
@@ -581,6 +583,8 @@ class CanvasRenderer {
         this.cellAspect = aspect;
         setCellWidthForAspect(aspect);
         this.render();
+        // An image being placed keeps its proportions in the new cells
+        if (this.imagePaste && this.imagePaste.locked) this.setImageOptions({ cols: this.imagePaste.cols, locked: true });
     }
 
     // Show the canvas at `zoom` times its size, redrawn at that resolution
@@ -596,6 +600,7 @@ class CanvasRenderer {
         this._pastePreviewKey = null;
         this.drawAll();
         this.repaintOverlay();
+        this.showImagePreview();
     }
 
     // Colours the grid is drawn with, from the page's CSS (they change with
@@ -1201,6 +1206,11 @@ class CanvasRenderer {
         this.updateHover(e);
         this.updatePointerInfo(e);
         if (this.imagePaste) {
+            // The button came up where we didn't see it: the drag is over
+            if (this._imageDrag && e.buttons === 0) {
+                this.handleMouseUp();
+                return;
+            }
             if (this._imageDrag) this.updateImageDrag(e);
             else this.updateImageCursor(e);
             this.updateDragLabel(e);
@@ -1895,17 +1905,17 @@ class CanvasRenderer {
     // Where a new image goes: its top-left at the drop point, or centred in
     // the part of the canvas in view
     imageStartPosition(at, cols, rows) {
-        if (at) {
+        // All of it on the canvas where it fits
+        const fit = (v, size, count) => Math.max(0, Math.min(v, count - size));
+        if (at && this.container.contains(at.target)) {
             const c = this.cellCoordsFromEvent(at);
-            return { x: c.cellX, y: c.cellY };
+            return { x: fit(c.cellX, cols, this.canvas.width), y: fit(c.cellY, rows, this.canvas.height) };
         }
         const view = (this.container.closest('.canvas-scroll') || this.container).getBoundingClientRect();
         const box = this.container.getBoundingClientRect();
         const left = Math.max(view.left, box.left), right = Math.min(view.right, box.right);
         const top = Math.max(view.top, box.top), bottom = Math.min(view.bottom, box.bottom);
         const c = this.cellCoordsFromEvent({ clientX: (left + right) / 2, clientY: (top + bottom) / 2 });
-        // All of it on the canvas where it fits
-        const fit = (v, size, count) => Math.max(0, Math.min(v, count - size));
         return {
             x: fit(c.cellX - Math.floor(cols / 2), cols, this.canvas.width),
             y: fit(c.cellY - Math.floor(rows / 2), rows, this.canvas.height)
@@ -1919,8 +1929,8 @@ class CanvasRenderer {
         p.y = Math.min(this.canvas.height - 1, Math.max(1 - p.rows, y));
     }
 
-    // Free the image once it is placed or cancelled (its cells stay on the
-    // clipboard, to paste again as they are)
+    // Free the image once it is placed or cancelled (placed, its cells stay
+    // on the clipboard, to paste again as they are)
     endImagePaste() {
         if (!this.imagePaste) return;
         this.imagePaste.image.close();
@@ -1985,7 +1995,8 @@ class CanvasRenderer {
         const box = this.clipRect(r);
         this.setOverlay('paste', box ? [{ ...box, whole: true }] : [], false,
             box ? [this.pastePreviewImage(p.x, p.y, p.cells)] : []);
-        const handle = this.clipRect({ x1: r.x2, y1: r.y2, x2: r.x2, y2: r.y2 });
+        const h = this.imageHandle();
+        const handle = h && this.clipRect({ x1: h.x, y1: h.y, x2: h.x, y2: h.y });
         this.setOverlay('image-handle', handle ? [{ ...handle, whole: true }] : []);
     }
 
@@ -1995,15 +2006,22 @@ class CanvasRenderer {
     setImageOptions(changes) {
         const p = this.imagePaste;
         if (!p) return;
+        const before = JSON.stringify({ ...p, image: 0, cells: 0 });
         Object.assign(p, changes);
-        if (p.locked && 'rows' in changes && !('cols' in changes)) {
-            p.cols = Math.max(1, Math.round(p.rows * p.image.width / (p.image.height * this.cellAspect)));
-        } else if (p.locked && ('cols' in changes || 'locked' in changes)) {
-            p.rows = imageRows(p.image, p.cols, this.cellAspect);
+        const clamp = (v, max) => Math.min(max, Math.max(1, Math.round(v)));
+        if (p.locked) {
+            // Width and height together, as large as asked within the limits
+            const colsPerRow = p.image.width / (p.image.height * this.cellAspect);
+            let cols = 'rows' in changes && !('cols' in changes) ? p.rows * colsPerRow : p.cols;
+            cols = Math.min(cols, 500, 200 * colsPerRow);
+            p.cols = clamp(cols, 500);
+            p.rows = clamp(imageRows(p.image, p.cols, this.cellAspect), 200);
+        } else {
+            p.cols = clamp(p.cols, 500);
+            p.rows = clamp(p.rows, 200);
         }
-        p.cols = Math.min(500, Math.max(1, Math.round(p.cols)));
-        p.rows = Math.min(200, Math.max(1, Math.round(p.rows)));
-        this.scheduleImageUpdate();
+        if (JSON.stringify({ ...p, image: 0, cells: 0 }) !== before) this.scheduleImageUpdate();
+        else if (this.onImagePaste) this.onImagePaste(p);   // fields the user typed past a limit show it again
     }
 
     // Grow (dir 1) or shrink (-1) the image by about a tenth, or by one
@@ -2016,14 +2034,26 @@ class CanvasRenderer {
         this.setImageOptions({ cols, ...(p.locked ? {} : { rows: Math.max(1, Math.round(p.rows * cols / p.cols)) }) });
     }
 
-    // Image dragging: from its handle (the bottom-right cell) resizes, from
-    // anywhere else moves it
+    // The resize handle: the image's bottom-right cell, or the cell nearest
+    // it on the canvas when that corner is off it; none on a 1x1 image,
+    // which is dragged to move it
+    imageHandle() {
+        const p = this.imagePaste, r = this.imageRect();
+        if (p.cols === 1 && p.rows === 1) return null;
+        return { x: Math.min(r.x2, this.canvas.width - 1), y: Math.min(r.y2, this.canvas.height - 1) };
+    }
+
+    onImageHandle(c) {
+        const h = this.imageHandle();
+        return !!h && c.cellX === h.x && c.cellY === h.y;
+    }
+
+    // Image dragging: from its handle resizes, from anywhere else moves it
     startImageDrag(e) {
         const p = this.imagePaste;
         const c = this.cellCoordsFromEvent(e);
-        const r = this.imageRect();
         this._imageDrag = {
-            mode: c.cellX === r.x2 && c.cellY === r.y2 ? 'resize' : 'move',
+            mode: this.onImageHandle(c) ? 'resize' : 'move',
             from: c, x: p.x, y: p.y, cols: p.cols, rows: p.rows
         };
         this.isDrawing = true;
@@ -2044,9 +2074,7 @@ class CanvasRenderer {
 
     // The pointer shows what a drag on the image does
     updateImageCursor(e) {
-        const c = this.cellCoordsFromEvent(e);
-        const r = this.imageRect();
-        const onHandle = c.cellX === r.x2 && c.cellY === r.y2 && this.container.contains(e.target);
+        const onHandle = this.onImageHandle(this.cellCoordsFromEvent(e)) && this.container.contains(e.target);
         this.container.classList.toggle('image-resize', onHandle);
         this.container.classList.toggle('image-move', !onHandle);
     }
@@ -2466,12 +2494,12 @@ class CanvasRenderer {
     }
 
     // Drop selections and in-progress drags; they refer to the old canvas extents.
-    resetInteractionState() {
+    resetInteractionState(keepImage = false) {
         this.clearSelection();
         this.clearSubpixelSelection();
         this.pasteMode = false;
         this.clearPastePreview();
-        this.endImagePaste();
+        if (!keepImage) this.endImagePaste();
         this.cancelDrag();
         this.isDrawing = false;
         this.lastPoint = null;
