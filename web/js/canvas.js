@@ -124,6 +124,8 @@ class CanvasRenderer {
         this.showGrid = false;          // 1px grid lines over the cells (see setShowGrid)
         this.lightTerminal = false;     // simulate a light terminal (see setLightTerminal)
         this.cellAspect = DEFAULT_CELL_ASPECT; // cell width / height (see setCellAspect)
+        this.zoom = 1;                  // view scale (see setZoom)
+        this.onRender = null;           // called after each render (the toolbar's rulers)
         this._onPixelRatioChange = () => this.render();
         this._glyphStyles = new Map();  // .glyph-* class → { font, transform, baseline }
         this._shadePatterns = new WeakMap(); // context → shade + colour → CanvasPattern (see fillShape)
@@ -449,11 +451,14 @@ class CanvasRenderer {
     render() {
         if (!this.canvas) return;
 
+        // Drawing is in unzoomed CSS px (width x height); the zoom only
+        // changes how many device pixels they get
         const width = this.canvas.width * CELL_W;
         const height = this.canvas.height * CELL_H;
+        const z = this.zoom;
         this.container.innerHTML = '';
-        this.container.style.width = width + 'px';
-        this.container.style.height = height + 'px';
+        this.container.style.width = width * z + 'px';
+        this.container.style.height = height * z + 'px';
 
         // Reset caches (innerHTML = '' removed the overlays too)
         this._overlayRects = {};
@@ -468,13 +473,13 @@ class CanvasRenderer {
         // 16.7M pixels), so very large grids get a lower resolution instead.
         this._dpr = window.devicePixelRatio || 1;
         this.watchPixelRatio();
-        const scale = Math.min(this._dpr, Math.sqrt(MAX_CANVAS_PIXELS / (width * height)));
+        const scale = Math.min(this._dpr * z, Math.sqrt(MAX_CANVAS_PIXELS / (width * height)));
         const gridCanvas = document.createElement('canvas');
         gridCanvas.className = 'grid-canvas';
         gridCanvas.width = Math.round(width * scale);
         gridCanvas.height = Math.round(height * scale);
-        gridCanvas.style.width = width + 'px';
-        gridCanvas.style.height = height + 'px';
+        gridCanvas.style.width = width * z + 'px';
+        gridCanvas.style.height = height * z + 'px';
         // After a GPU reset the browser restores a blank canvas
         gridCanvas.addEventListener('contextrestored', () => this.drawAll());
         this.container.appendChild(gridCanvas);
@@ -492,8 +497,8 @@ class CanvasRenderer {
         overlayCanvas.className = 'overlay-canvas';
         overlayCanvas.width = gridCanvas.width;
         overlayCanvas.height = gridCanvas.height;
-        overlayCanvas.style.width = width + 'px';
-        overlayCanvas.style.height = height + 'px';
+        overlayCanvas.style.width = width * z + 'px';
+        overlayCanvas.style.height = height * z + 'px';
         this.container.appendChild(overlayCanvas);
         this.overlayCtx = overlayCanvas.getContext('2d');
         overlayCanvas.addEventListener('contextrestored', () => this.repaintOverlay());
@@ -503,6 +508,7 @@ class CanvasRenderer {
         this.overlayLayer.className = 'overlay-layer';
         this.overlayLayer.style.width = width + 'px';
         this.overlayLayer.style.height = height + 'px';
+        this.overlayLayer.style.transform = `scale(${z})`;
         this.container.appendChild(this.overlayLayer);
 
         this.drawAll();
@@ -517,6 +523,7 @@ class CanvasRenderer {
             this.textCursor.y = Math.min(this.textCursor.y, this.canvas.height - 1);
             this.updateTextCursorDisplay();
         }
+        if (this.onRender) this.onRender();
     }
 
     // Re-render at the new resolution when the device pixel ratio changes
@@ -551,6 +558,12 @@ class CanvasRenderer {
     setCellAspect(aspect) {
         this.cellAspect = aspect;
         setCellWidthForAspect(aspect);
+        this.render();
+    }
+
+    // Show the canvas at `zoom` times its size, redrawn at that resolution
+    setZoom(zoom) {
+        this.zoom = zoom;
         this.render();
     }
 
@@ -1087,6 +1100,12 @@ class CanvasRenderer {
             return;
         }
 
+        // Alt-click picks the colours under the pointer, with any tool
+        if (e.altKey) {
+            this.handlePickTool(e);
+            return;
+        }
+
         this.isDrawing = true;
         // Tools that change nothing (select, pick, text click) leave an empty
         // step, which is dropped
@@ -1183,8 +1202,8 @@ class CanvasRenderer {
     cellCoordsFromEvent(e) {
         if (!this.canvas) return null;
         const rect = this.container.getBoundingClientRect();
-        const cellX = this.cellIndexAt(e.clientX - rect.left, CELL_W, this._scaleX, this.canvas.width);
-        const cellY = this.cellIndexAt(e.clientY - rect.top, CELL_H, this._scaleY, this.canvas.height);
+        const cellX = this.cellIndexAt((e.clientX - rect.left) / this.zoom, CELL_W, this._scaleX, this.canvas.width);
+        const cellY = this.cellIndexAt((e.clientY - rect.top) / this.zoom, CELL_H, this._scaleY, this.canvas.height);
         return { cellX, cellY };
     }
 
@@ -1204,8 +1223,8 @@ class CanvasRenderer {
     subpixelCoordsFromEvent(e) {
         if (!this.canvas) return null;
         const rect = this.container.getBoundingClientRect();
-        const relX = Math.max(0, Math.min(this.canvas.width  * CELL_W - 0.01, e.clientX - rect.left));
-        const relY = Math.max(0, Math.min(this.canvas.height * CELL_H - 0.01, e.clientY - rect.top));
+        const relX = Math.max(0, Math.min(this.canvas.width  * CELL_W - 0.01, (e.clientX - rect.left) / this.zoom));
+        const relY = Math.max(0, Math.min(this.canvas.height * CELL_H - 0.01, (e.clientY - rect.top) / this.zoom));
         const cellX = this.cellIndexAt(relX, CELL_W, this._scaleX, this.canvas.width);
         const cellY = this.cellIndexAt(relY, CELL_H, this._scaleY, this.canvas.height);
         // Compare in device pixels against the same rounded edges drawCell
@@ -2218,7 +2237,7 @@ class CanvasRenderer {
     updateStatus() {
         const status = document.getElementById('status');
         if (status && this.canvas) {
-            status.textContent = `${this.canvas.mode.charAt(0).toUpperCase() + this.canvas.mode.slice(1)} Mode | ${this.canvas.width}×${this.canvas.height} chars`;
+            status.textContent = `${this.canvas.width} × ${this.canvas.height}`;
         }
     }
 

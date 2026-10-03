@@ -17,20 +17,26 @@ npx serve web
 ## Features
 
 - Sextant character editing (2x3 subpixel grid per cell)
-- Extended diagonal and triangle characters (U+1FB3C-1FB6F)
-- Box and line drawing tools with light/heavy/double styles
-- Foreground/background color support
+- Extended diagonal and triangle characters (U+1FB3C-1FB6F), blocks, shades
+  and emoji, searchable by name
+- Box and line drawing with light/heavy/double borders
+- Ink (foreground) and paper (background) colours, the 16 terminal colours,
+  or the terminal's own
 - Import/export ANSI text files
 - Copy/paste with system clipboard integration
-- Image import: paste (Ctrl+V), drop or File > Import Image a picture, then
-  place it with a click. The mouse wheel or +/- resize it, M switches to two
-  colours (the current foreground and background) and D changes the
-  dithering. Each cell gets the two colours that best fit its subpixels;
-  transparent areas leave the canvas as it is.
-- Text tool for typing characters directly
-- Color picker tool
+- Image import: paste (Ctrl+V), drop or Import image a picture, then place
+  it with a click. The mouse wheel or +/- resize it, M switches to two
+  colours (the current ink and paper) and D changes the dithering. Each cell
+  gets the two colours that best fit its subpixels; transparent areas leave
+  the canvas as it is.
 - Preview for dark or light terminals and for the cell shape (width ÷ height)
-  of the terminal the art is for (Canvas menu)
+  of the terminal the art is for (the cells button in the status bar)
+- Zoom with + and −, Ctrl+wheel, or 0 to fit the window
+
+Tools are in the dock at the bottom; the panel on the right has the current
+tool's options and the colours. Shortcuts: B brush, E erase, G glyph, T text,
+S box, L line, V select (Shift+V subpixels), I pick a colour (or Alt-click
+with any tool), X swap colours. Ctrl+K (⌘K) finds any command or glyph.
 
 ## Working with an AI agent (optional)
 
@@ -60,7 +66,7 @@ Claude Desktop runs:
 }
 ```
 
-Then ask Claude to draw something. The **AI link** button in the menu bar
+Then ask Claude to draw something. The **AI link** button in the top bar
 opens a log of the agent's operations and a note box the agent can read; it
 can also see your current selection, so you can select an area and say
 "put a logo here".
