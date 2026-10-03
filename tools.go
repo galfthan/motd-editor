@@ -120,8 +120,8 @@ type imageArgs struct {
 	Height int    `json:"height,omitempty" jsonschema:"cells"`
 	Mono   bool   `json:"mono,omitempty" jsonschema:"use only the colours fg and bg (default: full colour, two colours per cell fitted to the image)"`
 	Dither string `json:"dither,omitempty" jsonschema:"floyd-steinberg (the default), atkinson (crisper) or none"`
-	FG     string `json:"fg,omitempty" jsonschema:"mono only: the colour for the image's light parts, #rrggbb or default (the default)"`
-	BG     string `json:"bg,omitempty" jsonschema:"mono only: the colour for its dark parts, #rrggbb or default (the default), also in cells the image only partly covers. Full colour ignores fg and bg and keeps the canvas background where the image is transparent"`
+	FG     string `json:"fg,omitempty" jsonschema:"mono only: one of the two colours, #rrggbb or default (the default); each subpixel gets the nearer one"`
+	BG     string `json:"bg,omitempty" jsonschema:"mono only: the other colour, #rrggbb or default (the default), also given to cells the image only partly covers. Full colour ignores fg and bg and keeps the canvas background where the image is transparent"`
 }
 
 const maxImage = 20 << 20
