@@ -34,7 +34,7 @@ function setCellWidthForAspect(aspect) {
 }
 
 // Overlays on the overlay canvas, bottom to top (see setOverlay)
-const OVERLAY_ORDER = ['hover', 'hover-subpixel', 'paste', 'paste-subpixel', 'box', 'selection', 'subpixel-selection'];
+const OVERLAY_ORDER = ['hover', 'hover-subpixel', 'paste', 'image-handle', 'paste-subpixel', 'box', 'selection', 'subpixel-selection'];
 
 // Left / top edge (CSS px) of subpixel column sx / row sy
 function subpixelEdgeX(sx) { return Math.floor(sx / 2) * CELL_W + SUB_X_EDGES[sx % 2]; }
@@ -87,6 +87,8 @@ class CanvasRenderer {
         this.selectedChar = null;
         this.fgColor = defaultFG();
         this.bgColor = defaultBG();
+        this.bold = false;          // text style drawn cells get (see applyCurrentColors)
+        this.inverse = false;
         this.isDrawing = false;
         this.lastPoint = null;     // Previous point of a draw/erase/symbol stroke
         this.toolbar = null; // Set by app.js
@@ -103,8 +105,11 @@ class CanvasRenderer {
         this.subpixelSelectionStart = null;
         this.subpixelClipboard = null;      // 2D array of {filled, fg, bg} objects
 
-        // Image being placed (see startImagePaste): { image, cols, mono, dither, cells }
+        // Image being placed (see startImagePaste): { image, cols, rows,
+        // locked, x, y, options, cells }; onImagePaste(it, or null when it
+        // ends) is called on every change (the toolbar's Image panel)
         this.imagePaste = null;
+        this.onImagePaste = null;
         this._wheel = 0;            // wheel movement not yet turned into a resize step
 
         // Text tool state
@@ -199,10 +204,7 @@ class CanvasRenderer {
             if (!e.dataTransfer.types.includes('Files')) return;
             e.preventDefault();
             const file = [...e.dataTransfer.files].find(f => f.type.startsWith('image/'));
-            if (file) {
-                this._lastPointerEvent = e;
-                this.startImagePaste(file);
-            }
+            if (file) this.startImagePaste(file, e);
         });
 
         // Ctrl+V: an image, text or the editor's own clipboard
@@ -236,7 +238,6 @@ class CanvasRenderer {
         if (tool !== 'select' && tool !== 'select-subpixel') {
             this.pasteMode = false;
             this.clearPastePreview();
-            this.endImagePaste();
         }
         if (tool !== 'text') {
             this.clearTextCursor();
@@ -259,7 +260,7 @@ class CanvasRenderer {
 
     setupKeyboardShortcuts() {
         document.addEventListener('keydown', (e) => {
-            if (e.target.closest && e.target.closest('input, textarea')) return;
+            if (e.target.closest && e.target.closest('input, textarea, dialog')) return;
 
             // Ctrl+Z - undo, Ctrl+Shift+Z / Ctrl+Y - redo (checked before the
             // text tool, so they also work while typing)
@@ -286,13 +287,29 @@ class CanvasRenderer {
                 return;
             }
 
-            // Image paste: +/- resize it (by key position, so Shift is free to
-            // make the step fine), M switches colour / mono, D the dithering
+            // Image paste: Enter places it, the arrows move it, +/- resize it
+            // (by key position, so Shift is free to make the step fine), M
+            // switches colour / mono, D the dithering
             if (this.isImagePaste() && !e.ctrlKey && !e.metaKey && !e.altKey) {
                 const p = this.imagePaste;
                 const grow = e.code === 'Equal' || e.code === 'NumpadAdd';
                 const shrink = e.code === 'Minus' || e.code === 'NumpadSubtract';
                 const k = e.key.toLowerCase();
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.placeImage();
+                    return;
+                }
+                if (e.key.startsWith('Arrow')) {
+                    // Nudge it a cell, or ten with Shift
+                    e.preventDefault();
+                    const n = e.shiftKey ? 10 : 1;
+                    const d = { ArrowLeft: [-n, 0], ArrowRight: [n, 0], ArrowUp: [0, -n], ArrowDown: [0, n] }[e.key];
+                    this.moveImageTo({ x: p.x + d[0], y: p.y + d[1] });
+                    this.showImagePreview();
+                    if (this.onImagePaste) this.onImagePaste(p);
+                    return;
+                }
                 if (grow || shrink || k === 'm' || k === 'd') {
                     e.preventDefault();
                     if (grow || shrink) {
@@ -422,10 +439,12 @@ class CanvasRenderer {
     // Run an undo/redo and repaint what it changed. Drags and selections are
     // dropped first (which also commits an open stroke, so it can be undone).
     applyHistoryChange(apply) {
-        this.resetInteractionState();
+        // An image being placed stays: it isn't on the canvas yet
+        this.resetInteractionState(true);
         const change = apply();
         if (!change) return;
         if (change.wholeCanvas) {
+            if (this.imagePaste) this.moveImageTo(this.imagePaste);   // the canvas may be smaller
             this.render();
             this.updateStatus();
         } else {
@@ -437,14 +456,17 @@ class CanvasRenderer {
         if (cursor && this.tool === 'text') this.setTextCursor(cursor.x, cursor.y);
     }
 
-    // Give a cell the currently picked colours
+    // Give a cell the currently picked colours and text style
     applyCurrentColors(cell) {
         cell.fg = { ...this.fgColor };
         cell.bg = { ...this.bgColor };
+        cell.bold = this.bold;
+        cell.inverse = this.inverse;
     }
 
-    loadCanvas() {
-        this.canvas = createCanvas(80, 60);
+    // Start with `canvas` (a restored autosave), or an empty 80x60 one
+    loadCanvas(canvas = createCanvas(80, 60)) {
+        this.canvas = canvas;
         this.render();
         this.updateStatus();
     }
@@ -525,6 +547,7 @@ class CanvasRenderer {
             this.updateTextCursorDisplay();
         }
         if (this.onRender) this.onRender();
+        this.showImagePreview();
     }
 
     // Re-render at the new resolution when the device pixel ratio changes
@@ -560,6 +583,8 @@ class CanvasRenderer {
         this.cellAspect = aspect;
         setCellWidthForAspect(aspect);
         this.render();
+        // An image being placed keeps its proportions in the new cells
+        if (this.imagePaste && this.imagePaste.locked) this.setImageOptions({ cols: this.imagePaste.cols, locked: true });
     }
 
     // Show the canvas at `zoom` times its size, redrawn at that resolution
@@ -575,6 +600,7 @@ class CanvasRenderer {
         this._pastePreviewKey = null;
         this.drawAll();
         this.repaintOverlay();
+        this.showImagePreview();
     }
 
     // Colours the grid is drawn with, from the page's CSS (they change with
@@ -589,6 +615,7 @@ class CanvasRenderer {
                 hover: { line: style.getPropertyValue('--overlay-hover').trim() },
                 'hover-subpixel': { line: style.getPropertyValue('--overlay-hover').trim() },
                 paste: { line: style.getPropertyValue('--overlay-paste').trim() },
+                'image-handle': { line: style.getPropertyValue('--overlay-paste').trim(), fill: style.getPropertyValue('--overlay-handle').trim() },
                 'paste-subpixel': { line: style.getPropertyValue('--overlay-paste').trim() },
                 box: { line: style.getPropertyValue('--overlay-preview').trim() },
                 selection: { line: style.getPropertyValue('--overlay-selection').trim() },
@@ -674,8 +701,12 @@ class CanvasRenderer {
         probe.className = cls;
         probe.style.cssText = 'position:absolute;visibility:hidden;display:block';
         document.body.appendChild(probe);
+        // Read everything before removing the probe: a detached element's
+        // computed style is empty
         const cs = getComputedStyle(probe);
         const font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+        const boldFont = `${cs.fontStyle} bold ${cs.fontSize} ${cs.fontFamily}`;
+        const fontSize = parseFloat(cs.fontSize);
         const transform = cs.transform === 'none' ? new DOMMatrix() : new DOMMatrix(cs.transform);
         const lineHeightCss = cs.lineHeight;
         probe.remove();
@@ -690,9 +721,9 @@ class CanvasRenderer {
         const descent = m.fontBoundingBoxDescent;
         const lineHeight = lineHeightCss === 'normal' ? ascent + descent
             : lineHeightCss.endsWith('px') ? parseFloat(lineHeightCss)
-            : parseFloat(lineHeightCss) * parseFloat(cs.fontSize); // bare multiplier
+            : parseFloat(lineHeightCss) * fontSize; // bare multiplier
         const baseline = -lineHeight / 2 + ascent + Math.floor((lineHeight - ascent - descent) / 2);
-        style = { font, transform, baseline };
+        style = { font, boldFont, transform, baseline };
         this._glyphStyles.set(cls, style);
         return style;
     }
@@ -721,14 +752,18 @@ class CanvasRenderer {
         const ctx = this.ctx;
         const g = this.cellGeometry(x, y, isWideHead(cell) ? 2 * CELL_W : CELL_W);
 
+        // Inverse swaps the colours as the terminal shows them
+        let fg = cell.fg.default ? this.theme.fg : `rgb(${cell.fg.r},${cell.fg.g},${cell.fg.b})`;
+        let bg = cell.bg.default ? this.theme.cellBg : `rgb(${cell.bg.r},${cell.bg.g},${cell.bg.b})`;
+        if (cell.inverse) [fg, bg] = [bg, fg];
+
         ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.fillStyle = cell.bg.default ? this.theme.cellBg : `rgb(${cell.bg.r},${cell.bg.g},${cell.bg.b})`;
+        ctx.fillStyle = bg;
         ctx.fillRect(...g.rect);
 
         const char = cellToChar(cell);
         if (char !== ' ') {
             const code = char.codePointAt(0);
-            const fg = cell.fg.default ? this.theme.fg : `rgb(${cell.fg.r},${cell.fg.g},${cell.fg.b})`;
             ctx.save();
             ctx.beginPath();
             ctx.rect(...g.rect);
@@ -740,7 +775,7 @@ class CanvasRenderer {
             } else if (hasGlyphShape(code)) {
                 this.drawShape(code, g);
             } else {
-                this.drawGlyph(char, g);
+                this.drawGlyph(char, g, cell.bold);
             }
             ctx.restore();
         }
@@ -810,10 +845,10 @@ class CanvasRenderer {
     }
 
     // Font glyph, styled by its .glyph-* class and centred like the old DOM cells
-    drawGlyph(char, g) {
+    drawGlyph(char, g, bold = false) {
         const ctx = this.ctx;
         const style = this.glyphStyle(glyphClass(char.codePointAt(0)));
-        this.ensureFontLoaded(style.font, char);
+        this.ensureFontLoaded(bold ? style.boldFont : style.font, char);
         // The glyph is laid out in CSS px; CSS transforms apply around its
         // centre (transform-origin)
         ctx.setTransform(g.kx, 0, 0, g.ky, -g.ox, -g.oy);
@@ -822,7 +857,7 @@ class CanvasRenderer {
         ctx.scale(CELL_W / GLYPH_CELL_W, 1);
         const t = style.transform;
         ctx.transform(t.a, t.b, t.c, t.d, t.e, t.f);
-        ctx.font = style.font;
+        ctx.font = bold ? style.boldFont : style.font;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'alphabetic';
         ctx.fillText(char, 0, style.baseline);
@@ -1119,6 +1154,11 @@ class CanvasRenderer {
     }
 
     handleMouseDown(e) {
+        // An image being placed takes priority over any tool
+        if (this.imagePaste) {
+            this.startImageDrag(e);
+            return;
+        }
         // Paste mode takes priority over any tool
         if (this.pasteMode) {
             // Same hit-testing as showPastePreview, so paste lands where previewed
@@ -1128,7 +1168,6 @@ class CanvasRenderer {
             } else if (this.clipboard) {
                 const c = this.cellCoordsFromEvent(e);
                 if (c) this.recordEdit('Paste', () => this.pasteAt(c.cellX, c.cellY));
-                if (c) this.endImagePaste();
             }
             return;
         }
@@ -1166,6 +1205,17 @@ class CanvasRenderer {
         this._lastPointerEvent = e;
         this.updateHover(e);
         this.updatePointerInfo(e);
+        if (this.imagePaste) {
+            // The button came up where we didn't see it: the drag is over
+            if (this._imageDrag && e.buttons === 0) {
+                this.handleMouseUp();
+                return;
+            }
+            if (this._imageDrag) this.updateImageDrag(e);
+            else this.updateImageCursor(e);
+            this.updateDragLabel(e);
+            return;
+        }
         if (this.pasteMode) {
             this.showPastePreview(e);
             this.updateDragLabel(e);
@@ -1199,6 +1249,12 @@ class CanvasRenderer {
     }
 
     handleMouseUp() {
+        if (this._imageDrag) {
+            this._imageDrag = null;
+            this.isDrawing = false;
+            this.updateDragLabel(null);
+            return;
+        }
         // Box/line: commit on release
         if (this.dragStart) {
             if (this.tool === 'box') this.commitBox();
@@ -1222,6 +1278,7 @@ class CanvasRenderer {
         const cell = row[c.cellX].type === 'wide-tail' ? row[c.cellX - 1] : row[c.cellX];
 
         if (this.toolbar) {
+            this.toolbar.setStyle(!!cell.bold, !!cell.inverse);
             this.toolbar.setColors(cell.fg, cell.bg);
         }
     }
@@ -1444,7 +1501,7 @@ class CanvasRenderer {
     // placing a paste (the paste preview shows where it goes)
     updateHover(e) {
         let rect = null, sub = null;
-        if (e && this.canvas && !this.pasteMode && this.container.contains(e.target)) {
+        if (e && this.canvas && !this.pasteMode && !this.imagePaste && this.container.contains(e.target)) {
             const c = this.cellCoordsFromEvent(e);
             const row = this.canvas.cells[c.cellY];
             let x = c.cellX;
@@ -1508,11 +1565,9 @@ class CanvasRenderer {
     // its size (cells, or subpixels for the subpixel selection)
     updateDragLabel(e) {
         let text = '';
-        if (e && this.isImagePaste()) {
+        if (e && this._imageDrag) {
             const p = this.imagePaste;
-            text = `${this.rectSizeText({ x1: 1, y1: 1, x2: p.cells[0].length, y2: p.cells.length })}` +
-                ` · ${p.mono ? 'mono' : 'colour'} · ${IMAGE_DITHERS[p.dither].name}` +
-                '\nwheel or ± size · M mono · D dither · Esc cancel';
+            text = this._imageDrag.mode === 'resize' ? `${p.cols}×${p.rows}` : `x ${p.x}, y ${p.y}`;
         } else if (e && this.isDrawing) {
             if (this.subpixelSelectionStart && this.subpixelSelection) {
                 text = this.rectSizeText(this.subpixelSelection, true);
@@ -1690,10 +1745,10 @@ class CanvasRenderer {
     // on where (x, y) falls between device pixels, so images are cached per
     // rounding phase and moved by whole device pixels: moving a big paste
     // preview is just an image copy.
-    pastePreviewImage(x, y) {
-        if (this._pasteImagesFor !== this.clipboard) {
+    pastePreviewImage(x, y, clipboard = this.clipboard) {
+        if (this._pasteImagesFor !== clipboard) {
             this._pasteImages.clear();
-            this._pasteImagesFor = this.clipboard;
+            this._pasteImagesFor = clipboard;
         }
         const fx = x * CELL_W * this._scaleX, fy = y * CELL_H * this._scaleY;
         const key = Math.round((fx - Math.floor(fx)) * 1000) + ',' + Math.round((fy - Math.floor(fy)) * 1000);
@@ -1702,16 +1757,16 @@ class CanvasRenderer {
             // As pasteAt places them: a wide char's tail goes with its head,
             // and a tail without its head becomes a blank cell
             const cells = [];
-            this.clipboard.forEach((row, dy) => row.forEach((cell, dx) => {
+            clipboard.forEach((row, dy) => row.forEach((cell, dx) => {
                 if (!cell || (cell.type === 'wide-tail' && dx > 0 && isWideHead(row[dx - 1]))) return;
                 const placed = cell.type === 'wide-tail' ? { ...cell, type: 'sextant' } : cell;
                 if (placed !== cell) clearCell(placed);
                 cells.push({ x: x + dx, y: y + dy, cell: placed });
             }));
-            const width = Math.max(...this.clipboard.map(row => row.length));
+            const width = Math.max(...clipboard.map(row => row.length));
             // Not ragged pasted text, nor an image with transparent cells
-            const rectangular = this.clipboard.every(row => row.length === width && row.every(Boolean));
-            cached = this.drawCellsImage(cells, { x1: x, y1: y, x2: x + width - 1, y2: y + this.clipboard.length - 1 },
+            const rectangular = clipboard.every(row => row.length === width && row.every(Boolean));
+            cached = this.drawCellsImage(cells, { x1: x, y1: y, x2: x + width - 1, y2: y + clipboard.length - 1 },
                 undefined, rectangular);
             this._pasteImages.set(key, cached);
         }
@@ -1739,6 +1794,7 @@ class CanvasRenderer {
                 setCellSubpixel(cell, sp.row, sp.col, data.filled);
                 if (data.fg) cell.fg = { ...data.fg };
                 if (data.bg) cell.bg = { ...data.bg };
+                if (data.fg) Object.assign(cell, { bold: data.bold, inverse: data.inverse });
             }
         }
         return [...cells].map(([key, cell]) => {
@@ -1752,6 +1808,8 @@ class CanvasRenderer {
         this.updateDragLabel(null);
         this.setOverlay('paste', []);
         this.setOverlay('paste-subpixel', [], true);
+        // An image being placed stays (an AI operation's paste ends here too)
+        this.showImagePreview();
     }
 
     // Convert a 2D cell array to a multiline text string
@@ -1766,6 +1824,7 @@ class CanvasRenderer {
     // Handle paste of the system clipboard's text (read here if not given),
     // falling back to the internal clipboard
     async handlePaste(systemText) {
+        this.endImagePaste();   // pasting something else ends placing an image
         // Subpixel paste stays internal-only
         if (this.isSubpixelMode()) {
             if (this.subpixelClipboard) this.pasteMode = true;
@@ -1794,7 +1853,7 @@ class CanvasRenderer {
         if (systemText && systemText.trim().length > 0) {
             const cells = systemText.includes('\x1b[')
                 ? ansiTextToRows(systemText)
-                : parseTextToCells(systemText, this.fgColor, this.bgColor);
+                : parseTextToCells(systemText, this.fgColor, this.bgColor, this.bold, this.inverse);
             if (cells.length > 0) {
                 this.clipboard = cells;
                 this.pasteMode = true;
@@ -1810,13 +1869,14 @@ class CanvasRenderer {
 
     // --- Image paste ---
     //
-    // A bitmap image (pasted, dropped or imported) is placed like a paste:
-    // converted to cells (see image-import.js) that follow the pointer until
-    // a click places them. It starts as large as fits the selection or the
-    // canvas; the wheel or +/- resize it, M and D switch colour / mono and
-    // the dithering, and every change converts it again.
+    // A bitmap image (pasted, dropped or imported) floats over the canvas,
+    // converted to cells (see image-import.js), until it is placed (Enter,
+    // or Place in the inspector) as one undo step, or cancelled (Esc). Drag
+    // to move it, the bottom-right cell's handle or the wheel to resize it,
+    // and the inspector's Image panel (see onImagePaste) for its options;
+    // every change converts it again.
 
-    async startImagePaste(blob) {
+    async startImagePaste(blob, at = null) {
         let image;
         try {
             image = await createImageBitmap(blob);
@@ -1824,27 +1884,75 @@ class CanvasRenderer {
             alert('Could not read the image: ' + err.message);
             return;
         }
-        const area = this.selection || { x1: 0, y1: 0, x2: this.canvas.width - 1, y2: this.canvas.height - 1 };
-        const cols = fitImageCols(image, this.cellAspect, area.x2 - area.x1 + 1, area.y2 - area.y1 + 1);
         this.endImagePaste();
         this.clearTextCursor(); // its typing would take the image's keys
-        this.imagePaste = { image, cols, mono: false, dither: 'floyd-steinberg' };
+        this.pasteMode = false;
+        this.clearPastePreview();
+        // As large as fits the selection (and at it) or the canvas
+        const area = this.selection || { x1: 0, y1: 0, x2: this.canvas.width - 1, y2: this.canvas.height - 1 };
+        const cols = fitImageCols(image, this.cellAspect, area.x2 - area.x1 + 1, area.y2 - area.y1 + 1);
+        const rows = imageRows(image, cols, this.cellAspect);
+        this.imagePaste = {
+            image, cols, rows, locked: true, x: 0, y: 0,
+            mono: false, dither: 'floyd-steinberg', strength: 1,
+            brightness: 0, contrast: 0, midtones: 0, invert: false
+        };
+        this.moveImageTo(this.selection ? { x: area.x1, y: area.y1 } : this.imageStartPosition(at, cols, rows));
         this._wheel = 0;
-        this.pasteMode = true;
         this.updateImagePaste();
     }
 
-    // Free the image once it is placed or cancelled (its cells stay on the
-    // clipboard, to paste again as they are)
+    // Where a new image goes: its top-left at the drop point, or centred in
+    // the part of the canvas in view
+    imageStartPosition(at, cols, rows) {
+        // All of it on the canvas where it fits
+        const fit = (v, size, count) => Math.max(0, Math.min(v, count - size));
+        if (at && this.container.contains(at.target)) {
+            const c = this.cellCoordsFromEvent(at);
+            return { x: fit(c.cellX, cols, this.canvas.width), y: fit(c.cellY, rows, this.canvas.height) };
+        }
+        const view = (this.container.closest('.canvas-scroll') || this.container).getBoundingClientRect();
+        const box = this.container.getBoundingClientRect();
+        const left = Math.max(view.left, box.left), right = Math.min(view.right, box.right);
+        const top = Math.max(view.top, box.top), bottom = Math.min(view.bottom, box.bottom);
+        const c = this.cellCoordsFromEvent({ clientX: (left + right) / 2, clientY: (top + bottom) / 2 });
+        return {
+            x: fit(c.cellX - Math.floor(cols / 2), cols, this.canvas.width),
+            y: fit(c.cellY - Math.floor(rows / 2), rows, this.canvas.height)
+        };
+    }
+
+    // Keep at least one cell of the image on the canvas
+    moveImageTo({ x, y }) {
+        const p = this.imagePaste;
+        p.x = Math.min(this.canvas.width - 1, Math.max(1 - p.cols, x));
+        p.y = Math.min(this.canvas.height - 1, Math.max(1 - p.rows, y));
+    }
+
+    // Free the image once it is placed or cancelled (placed, its cells stay
+    // on the clipboard, to paste again as they are)
     endImagePaste() {
         if (!this.imagePaste) return;
         this.imagePaste.image.close();
         this.imagePaste = null;
+        this._imageDrag = null;
+        this.container.classList.remove('image-move', 'image-resize');
+        this.setOverlay('paste', []);
+        this.setOverlay('image-handle', []);
+        if (this.onImagePaste) this.onImagePaste(null);
+    }
+
+    placeImage() {
+        const p = this.imagePaste;
+        if (!p) return;
+        this.clipboard = p.cells;
+        this.recordEdit('Paste image', () => this.pasteAt(p.x, p.y));
+        this.endImagePaste();
     }
 
     // Whether an image is being placed
     isImagePaste() {
-        return this.pasteMode && !!this.imagePaste && this.clipboard === this.imagePaste.cells;
+        return !!this.imagePaste;
     }
 
     // Whether a subpixel paste is being placed
@@ -1852,18 +1960,68 @@ class CanvasRenderer {
         return this.isSubpixelMode() && !!this.subpixelClipboard && !this.isImagePaste();
     }
 
+    imageRect() {
+        const p = this.imagePaste;
+        return { x1: p.x, y1: p.y, x2: p.x + p.cols - 1, y2: p.y + p.rows - 1 };
+    }
+
     // Convert the image again (after a change of size or options) and show it
     updateImagePaste() {
         const p = this.imagePaste;
-        p.cells = imageToCells(p.image, p.cols, imageRows(p.image, p.cols, this.cellAspect),
-            { mono: p.mono, fg: this.fgColor, bg: this.bgColor, dither: p.dither });
-        this.clipboard = p.cells;
-        this._pastePreviewKey = null;
-        const e = this._lastPointerEvent;
-        if (e) {
-            this.showPastePreview(e);
-            this.updateDragLabel(e);
+        p.cells = imageToCells(p.image, p.cols, p.rows, {
+            mono: p.mono, fg: this.fgColor, bg: this.bgColor, dither: p.dither, strength: p.strength,
+            brightness: p.brightness, contrast: p.contrast, midtones: p.midtones, invert: p.invert
+        });
+        this.showImagePreview();
+        if (this.onImagePaste) this.onImagePaste(p);
+    }
+
+    // Convert on the next frame (many changes may come before it: a wheel
+    // turn, a slider drag)
+    scheduleImageUpdate() {
+        if (this._imageFrame) return;
+        this._imageFrame = requestAnimationFrame(() => {
+            this._imageFrame = null;
+            if (this.imagePaste) this.updateImagePaste();
+        });
+    }
+
+    // The image as it will be placed, outlined, with a handle on its
+    // bottom-right cell
+    showImagePreview() {
+        const p = this.imagePaste;
+        if (!p || !p.cells) return;
+        const r = this.imageRect();
+        const box = this.clipRect(r);
+        this.setOverlay('paste', box ? [{ ...box, whole: true }] : [], false,
+            box ? [this.pastePreviewImage(p.x, p.y, p.cells)] : []);
+        const h = this.imageHandle();
+        const handle = h && this.clipRect({ x1: h.x, y1: h.y, x2: h.x, y2: h.y });
+        this.setOverlay('image-handle', handle ? [{ ...handle, whole: true }] : []);
+    }
+
+    // Change image options ({ cols, rows, locked, mono, dither, strength,
+    // brightness, contrast, midtones, invert }). Locked, a new width sets the
+    // height to keep the image's proportions, and a new height the width.
+    setImageOptions(changes) {
+        const p = this.imagePaste;
+        if (!p) return;
+        const before = JSON.stringify({ ...p, image: 0, cells: 0 });
+        Object.assign(p, changes);
+        const clamp = (v, max) => Math.min(max, Math.max(1, Math.round(v)));
+        if (p.locked) {
+            // Width and height together, as large as asked within the limits
+            const colsPerRow = p.image.width / (p.image.height * this.cellAspect);
+            let cols = 'rows' in changes && !('cols' in changes) ? p.rows * colsPerRow : p.cols;
+            cols = Math.min(cols, 500, 200 * colsPerRow);
+            p.cols = clamp(cols, 500);
+            p.rows = clamp(imageRows(p.image, p.cols, this.cellAspect), 200);
+        } else {
+            p.cols = clamp(p.cols, 500);
+            p.rows = clamp(p.rows, 200);
         }
+        if (JSON.stringify({ ...p, image: 0, cells: 0 }) !== before) this.scheduleImageUpdate();
+        else if (this.onImagePaste) this.onImagePaste(p);   // fields the user typed past a limit show it again
     }
 
     // Grow (dir 1) or shrink (-1) the image by about a tenth, or by one
@@ -1872,14 +2030,53 @@ class CanvasRenderer {
         const p = this.imagePaste;
         const step = fine ? 1 : Math.max(1, Math.round(p.cols / 10));
         const cols = Math.min(500, Math.max(1, p.cols + dir * step));
-        if (cols === p.cols || (dir > 0 && imageRows(p.image, cols, this.cellAspect) > 200)) return;
-        p.cols = cols;
-        // Once per frame: a fast wheel turn sends many steps
-        if (this._imageFrame) return;
-        this._imageFrame = requestAnimationFrame(() => {
-            this._imageFrame = null;
-            if (this.isImagePaste()) this.updateImagePaste();
-        });
+        if (cols === p.cols) return;
+        this.setImageOptions({ cols, ...(p.locked ? {} : { rows: Math.max(1, Math.round(p.rows * cols / p.cols)) }) });
+    }
+
+    // The resize handle: the image's bottom-right cell, or the cell nearest
+    // it on the canvas when that corner is off it; none on a 1x1 image,
+    // which is dragged to move it
+    imageHandle() {
+        const p = this.imagePaste, r = this.imageRect();
+        if (p.cols === 1 && p.rows === 1) return null;
+        return { x: Math.min(r.x2, this.canvas.width - 1), y: Math.min(r.y2, this.canvas.height - 1) };
+    }
+
+    onImageHandle(c) {
+        const h = this.imageHandle();
+        return !!h && c.cellX === h.x && c.cellY === h.y;
+    }
+
+    // Image dragging: from its handle resizes, from anywhere else moves it
+    startImageDrag(e) {
+        const p = this.imagePaste;
+        const c = this.cellCoordsFromEvent(e);
+        this._imageDrag = {
+            mode: this.onImageHandle(c) ? 'resize' : 'move',
+            from: c, x: p.x, y: p.y, cols: p.cols, rows: p.rows
+        };
+        this.isDrawing = true;
+    }
+
+    updateImageDrag(e) {
+        const d = this._imageDrag, p = this.imagePaste;
+        const c = this.cellCoordsFromEvent(e);
+        const dx = c.cellX - d.from.cellX, dy = c.cellY - d.from.cellY;
+        if (d.mode === 'move') {
+            this.moveImageTo({ x: d.x + dx, y: d.y + dy });
+            this.showImagePreview();
+            if (this.onImagePaste) this.onImagePaste(p);
+        } else {
+            this.setImageOptions(p.locked ? { cols: d.cols + dx } : { cols: d.cols + dx, rows: d.rows + dy });
+        }
+    }
+
+    // The pointer shows what a drag on the image does
+    updateImageCursor(e) {
+        const onHandle = this.onImageHandle(this.cellCoordsFromEvent(e)) && this.container.contains(e.target);
+        this.container.classList.toggle('image-resize', onHandle);
+        this.container.classList.toggle('image-move', !onHandle);
     }
 
     // Subpixel value and cell colours at subpixel coordinates
@@ -1891,7 +2088,9 @@ class CanvasRenderer {
             // Extended chars have no subpixels
             filled: cell.type === 'sextant' && cell.subpixels[row][col],
             fg: { ...cell.fg },
-            bg: { ...cell.bg }
+            bg: { ...cell.bg },
+            bold: !!cell.bold,
+            inverse: !!cell.inverse
         };
     }
 
@@ -1948,6 +2147,7 @@ class CanvasRenderer {
                 setCellSubpixel(sp.cell, sp.row, sp.col, data.filled);
                 if (data.fg) sp.cell.fg = { ...data.fg };
                 if (data.bg) sp.cell.bg = { ...data.bg };
+                if (data.fg) Object.assign(sp.cell, { bold: data.bold, inverse: data.inverse });
             });
         });
 
@@ -2001,14 +2201,20 @@ class CanvasRenderer {
         const { cell, cellX, cellY, row, col } = sp;
 
         // Nothing to do if the subpixel and the colours it sets already match
-        if (cell.type === 'sextant' && cell.subpixels[row][col] === filled &&
-            colorsEqual(cell.bg, this.bgColor) && (!filled || colorsEqual(cell.fg, this.fgColor))) {
+        if (cell.type === 'sextant' && cell.subpixels[row][col] === filled && colorsEqual(cell.bg, this.bgColor) &&
+            (filled ? colorsEqual(cell.fg, this.fgColor) && !!cell.bold === this.bold && !!cell.inverse === this.inverse
+                : !cell.bold && !cell.inverse)) {
             return null;
         }
 
         this.beforeChange(cellX, cellY, cellX, cellY);
-        if (filled) this.applyCurrentColors(cell);
-        else cell.bg = { ...this.bgColor };
+        if (filled) {
+            this.applyCurrentColors(cell);
+        } else {
+            // Erased, the cell shows plainly (an inverse blank would be a block)
+            cell.bg = { ...this.bgColor };
+            cell.bold = cell.inverse = false;
+        }
         detachWide(this.canvas.cells, cellX, cellY);
         setCellSubpixel(cell, row, col, filled);
         return sp;
@@ -2288,12 +2494,12 @@ class CanvasRenderer {
     }
 
     // Drop selections and in-progress drags; they refer to the old canvas extents.
-    resetInteractionState() {
+    resetInteractionState(keepImage = false) {
         this.clearSelection();
         this.clearSubpixelSelection();
         this.pasteMode = false;
         this.clearPastePreview();
-        this.endImagePaste();
+        if (!keepImage) this.endImagePaste();
         this.cancelDrag();
         this.isDrawing = false;
         this.lastPoint = null;

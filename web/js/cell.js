@@ -9,13 +9,18 @@ function defaultBG() {
     return { r: 0, g: 0, b: 0, default: true };
 }
 
+// A cell: what it shows (subpixels, or a character), its colours, and its
+// text style: bold, and inverse (fg and bg swapped as the terminal shows it,
+// which follows the terminal's own colours where they are "default")
 function createCell() {
     return {
         type: 'sextant',
         fg: defaultFG(),
         bg: defaultBG(),
         subpixels: [[false, false], [false, false], [false, false]],
-        charCode: 0
+        charCode: 0,
+        bold: false,
+        inverse: false
     };
 }
 
@@ -104,6 +109,8 @@ function claimWideTail(cells, x, y) {
     makeWideTail(tail);
     tail.fg = { ...row[x].fg };
     tail.bg = { ...row[x].bg };
+    tail.bold = !!row[x].bold;
+    tail.inverse = !!row[x].inverse;
 }
 
 // Set cell (x, y) to a character, keeping wide chars consistent
@@ -132,11 +139,13 @@ function placeCell(cells, x, y, src) {
 // NFC normalisation, variation selectors, ZWJ) have no cell and are dropped.
 function charsToRow(chars) {
     const row = [];
-    for (const { code, fg, bg } of chars) {
+    for (const { code, fg, bg, bold, inverse } of chars) {
         if (charWidth(code) === 0) continue;
         const cell = createCell();
         cell.fg = { ...fg };
         cell.bg = { ...bg };
+        cell.bold = !!bold;
+        cell.inverse = !!inverse;
         setCellChar(cell, code);
         row.push(cell);
         if (isWideHead(cell)) {
@@ -217,7 +226,7 @@ function sgrColor(color, isBg) {
 // terminals narrower than the canvas
 function visibleLength(row) {
     let n = row.length;
-    while (n > 0 && cellToChar(row[n - 1]) === ' ' && row[n - 1].bg.default) n--;
+    while (n > 0 && cellToChar(row[n - 1]) === ' ' && row[n - 1].bg.default && !row[n - 1].inverse) n--;
     return n;
 }
 
@@ -228,6 +237,7 @@ function canvasToANSI(canvas) {
         let line = '';
         let lastFG = defaultFG();
         let lastBG = defaultBG();
+        let lastBold = false, lastInverse = false;
         let lineHasColor = false;
         const length = visibleLength(canvas.cells[y]);
 
@@ -235,9 +245,21 @@ function canvasToANSI(canvas) {
             const cell = canvas.cells[y][x];
             if (cell.type === 'wide-tail') continue;
             const ch = cellToChar(cell);
+            const bold = !!cell.bold, inverse = !!cell.inverse;
 
-            // A space shows only its background, so leave the foreground alone
-            if (ch !== ' ' && !colorsEqual(cell.fg, lastFG)) {
+            if (bold !== lastBold) {
+                line += bold ? '\x1b[1m' : '\x1b[22m';
+                lastBold = bold;
+                lineHasColor = true;
+            }
+            if (inverse !== lastInverse) {
+                line += inverse ? '\x1b[7m' : '\x1b[27m';
+                lastInverse = inverse;
+                lineHasColor = true;
+            }
+            // A space shows only its background, so leave the foreground
+            // alone (unless inverse, which shows the foreground there)
+            if ((ch !== ' ' || inverse) && !colorsEqual(cell.fg, lastFG)) {
                 line += sgrColor(cell.fg, false);
                 lastFG = cell.fg;
                 lineHasColor = true;
@@ -262,7 +284,7 @@ function canvasToPlain(canvas) {
     return canvas.cells.map(row => row.map(cellToChar).join('').trimEnd()).join('\n') + '\n';
 }
 
-function parseTextToCells(text, fgColor, bgColor) {
+function parseTextToCells(text, fgColor, bgColor, bold = false, inverse = false) {
     // NFC composes e.g. e + U+0301 into é, which fits in one cell
     text = text.normalize('NFC').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     let lines = text.split('\n');
@@ -273,6 +295,6 @@ function parseTextToCells(text, fgColor, bgColor) {
     }
 
     return lines.map(line => charsToRow(
-        Array.from(line, ch => ({ code: ch.codePointAt(0), fg: fgColor, bg: bgColor }))
+        Array.from(line, ch => ({ code: ch.codePointAt(0), fg: fgColor, bg: bgColor, bold, inverse }))
     ));
 }

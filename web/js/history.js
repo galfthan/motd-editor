@@ -39,7 +39,7 @@ const HISTORY_MAX_CELLS = 1000000;
 // --- Packed cell records ---
 //
 // Recorded cells are kept as RECORD_SIZE numbers each in one flat array per
-// step (x, y, type and subpixels, charCode, fg, bg) rather than as cell
+// step (x, y, type, subpixels and style, charCode, fg, bg) rather than as cell
 // objects: a large step then costs one array instead of ~100k small objects.
 
 const RECORD_SIZE = 6;
@@ -53,13 +53,18 @@ function unpackColor(v) {
     return { r: (v >> 16) & 255, g: (v >> 8) & 255, b: v & 255, default: (v & (1 << 24)) !== 0 };
 }
 
-// Cell type in the low 3 bits, subpixels (row-major) above them
+// Cell type in the low 3 bits, subpixels (row-major) above them, then bold
+// and inverse
+const BOLD_BIT = 1 << 9, INVERSE_BIT = 1 << 10;
+
 function packTypeAndSubpixels(cell) {
     let v = CELL_TYPES.indexOf(cell.type);
     for (let r = 0; r < 3; r++) {
         if (cell.subpixels[r][0]) v |= 8 << (r * 2);
         if (cell.subpixels[r][1]) v |= 16 << (r * 2);
     }
+    if (cell.bold) v |= BOLD_BIT;
+    if (cell.inverse) v |= INVERSE_BIT;
     return v;
 }
 
@@ -81,7 +86,9 @@ function cellFromRecord(recs, i) {
         fg: unpackColor(recs[i + 4]),
         bg: unpackColor(recs[i + 5]),
         subpixels: [[bit(0, 0), bit(0, 1)], [bit(1, 0), bit(1, 1)], [bit(2, 0), bit(2, 1)]],
-        charCode: recs[i + 3]
+        charCode: recs[i + 3],
+        bold: (v & BOLD_BIT) !== 0,
+        inverse: (v & INVERSE_BIT) !== 0
     };
 }
 

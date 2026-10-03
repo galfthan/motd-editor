@@ -52,8 +52,9 @@ function withState(state, fn) {
     }
 }
 
+// The colours and text style an operation draws with
 function colorState(a) {
-    return { fgColor: parseColor(a.fg, defaultFG), bgColor: parseColor(a.bg, defaultBG) };
+    return { fgColor: parseColor(a.fg, defaultFG), bgColor: parseColor(a.bg, defaultBG), bold: !!a.bold, inverse: !!a.inverse };
 }
 
 // x, y, width, height (all optional) clipped to the canvas
@@ -223,6 +224,8 @@ const OPS = {
                 tool: r.tool,
                 fg: colorName(r.fgColor),
                 bg: colorName(r.bgColor),
+                bold: r.bold,
+                inverse: r.inverse,
                 selection: r.selection,
                 subpixel_selection: r.subpixelSelection,
                 text_cursor: r.textCursor,
@@ -283,8 +286,11 @@ const OPS = {
                 const out = [];
                 rows.forEach((row, dy) => row.forEach((cell, dx) => {
                     const char = cellToChar(cell);
-                    if (char === '' || (char === ' ' && cell.bg.default)) return;
-                    out.push({ x: x1 + dx, y: y1 + dy, char, fg: colorName(cell.fg), bg: colorName(cell.bg) });
+                    if (char === '' || (char === ' ' && cell.bg.default && !cell.inverse)) return;
+                    const item = { x: x1 + dx, y: y1 + dy, char, fg: colorName(cell.fg), bg: colorName(cell.bg) };
+                    if (cell.bold) item.bold = true;
+                    if (cell.inverse) item.inverse = true;
+                    out.push(item);
                 }));
                 return out;
             }
@@ -434,8 +440,17 @@ const OPS = {
         cols ||= Math.max(1, Math.round(rows * image.width / (image.height * r.cellAspect)));
         rows ||= imageRows(image, cols, r.cellAspect);
         if (cols > 500 || rows > 200) throw new Error('the image can be at most 500x200 cells');
+        const tone = {};
+        for (const name of ['brightness', 'contrast', 'midtones']) {
+            const v = a[name] ?? 0;
+            if (!(v >= -100 && v <= 100)) throw new Error(`${name} must be -100 to 100`);
+            tone[name] = v;
+        }
+        const strength = a.dither_strength ?? 100;
+        if (!(strength >= 0 && strength <= 100)) throw new Error('dither_strength must be 0-100');
         const cells = imageToCells(image, cols, rows, {
-            mono: a.mono, fg: parseColor(a.fg, defaultFG), bg: parseColor(a.bg, defaultBG), dither: a.dither || 'floyd-steinberg'
+            mono: a.mono, fg: parseColor(a.fg, defaultFG), bg: parseColor(a.bg, defaultBG), dither: a.dither || 'floyd-steinberg',
+            strength: strength / 100, invert: !!a.invert, ...tone
         });
         withState({ clipboard: cells, pasteMode: false }, () => r.pasteAt(x, y));
         flash({ x1: x, y1: y, x2: x + cols - 1, y2: y + rows - 1 });

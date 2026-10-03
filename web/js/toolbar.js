@@ -123,6 +123,9 @@ const KEY_TOOLS = {
     s: 'shape', l: 'line', v: 'selection', i: 'pick', p: 'pick'
 };
 
+// Where the canvas is autosaved (see Toolbar.autosave)
+const AUTOSAVE_KEY = 'motd-editor.canvas';
+
 // Zoom steps for + and -
 const ZOOMS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.25, 1.5, 2, 3, 4];
 
@@ -191,6 +194,8 @@ class Toolbar {
         this.setupZoom();
         this.setupTools();
         this.setupColors();
+        this.setupStyle();
+        this.setupImagePanel();
         this.setupFileInputs();
         this.setupCharPalette();
         this.setupCommandPalette();
@@ -259,7 +264,10 @@ class Toolbar {
             case 'zoom-fit': this.zoomToFit(); break;
             case 'zoom-reset': this.setZoom(1); break;
             case 'swap-colors': this.setColors(r.bgColor, r.fgColor); break;
-            case 'default-colors': this.setColors(defaultFG(), defaultBG()); break;
+            case 'default-colors':
+                this.setStyle(false, false);
+                this.setColors(defaultFG(), defaultBG());
+                break;
             case 'pick': this.setTool('pick'); break;
             case 'commands': this.openCommandPalette(); break;
             case 'toggle-inspector': document.getElementById('inspector').classList.toggle('open'); break;
@@ -277,7 +285,10 @@ class Toolbar {
             undoBtn.title = history.undoLabel() ? `Undo ${history.undoLabel()} (⌘Z)` : 'Undo (⌘Z)';
             redoBtn.title = history.redoLabel() ? `Redo ${history.redoLabel()} (⇧⌘Z)` : 'Redo (⇧⌘Z)';
         };
-        history.onChange = update;
+        history.onChange = () => {
+            update();
+            this.scheduleAutosave();
+        };
         update();
     }
 
@@ -463,16 +474,107 @@ class Toolbar {
             b.classList.toggle('active', b.dataset.tool === group);
             b.setAttribute('aria-pressed', String(b.dataset.tool === group));
         });
-        document.querySelectorAll('.inspector section[data-panel]').forEach(s => s.classList.toggle('active', s.dataset.panel === group));
         document.querySelectorAll('[data-tool-set]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.toolSet === tool)));
-        document.getElementById('tool-title').textContent = GROUP_INFO[group].title;
-        document.getElementById('tool-key').textContent = GROUP_INFO[group].key;
+        this.currentGroup = group;
+        this.showPanel();
 
         // Fill applies to boxes only, and a line needs a border
         document.querySelector('.box-only').hidden = tool !== 'box';
         const none = document.querySelector('.tile[data-style="0"]');
         none.hidden = tool === 'line';
         if (tool === 'line' && r.boxLineStyle === 0) document.querySelector('.tile[data-style="1"]').click();
+    }
+
+    // The inspector's panel: the Image panel while an image is being
+    // placed, else the current tool's
+    showPanel() {
+        const image = !!this.renderer.imagePaste;
+        const panel = image ? 'image' : this.currentGroup;
+        document.querySelectorAll('.inspector section[data-panel]').forEach(s => s.classList.toggle('active', s.dataset.panel === panel));
+        document.getElementById('tool-title').textContent = image ? 'Image' : GROUP_INFO[panel].title;
+        const key = document.getElementById('tool-key');
+        key.textContent = image ? '' : GROUP_INFO[panel].key;
+        key.hidden = image;
+        // Narrow windows: open the inspector for the image, close it after
+        const inspector = document.getElementById('inspector');
+        if (image && !inspector.classList.contains('open')) {
+            inspector.classList.add('open');
+            this._openedForImage = true;
+        } else if (!image && this._openedForImage) {
+            inspector.classList.remove('open');
+            this._openedForImage = false;
+        }
+    }
+
+    // --- Image panel ---
+
+    setupImagePanel() {
+        const r = this.renderer;
+        r.onImagePaste = (p) => this.showImagePanel(p);
+        const set = (changes) => r.setImageOptions(changes);
+
+        document.querySelectorAll('[data-image-action]').forEach(btn => btn.addEventListener('click', () => {
+            const p = r.imagePaste;
+            if (!p) return;
+            switch (btn.dataset.imageAction) {
+                case 'place': r.placeImage(); break;
+                case 'cancel': r.endImagePaste(); break;
+                case 'reset-tone': set({ brightness: 0, contrast: 0, midtones: 0, invert: false }); break;
+                case 'fit-canvas':
+                case 'fit-selection': {
+                    const a = btn.dataset.imageAction === 'fit-selection' && r.selection ||
+                        { x1: 0, y1: 0, x2: r.canvas.width - 1, y2: r.canvas.height - 1 };
+                    const cols = fitImageCols(p.image, r.cellAspect, a.x2 - a.x1 + 1, a.y2 - a.y1 + 1);
+                    r.setImageOptions({ cols, rows: imageRows(p.image, cols, r.cellAspect), locked: true });
+                    r.moveImageTo({ x: a.x1, y: a.y1 });
+                    break;
+                }
+            }
+        }));
+        const cols = document.getElementById('image-cols'), rows = document.getElementById('image-rows');
+        cols.addEventListener('input', () => { if (cols.value >= 1) set({ cols: +cols.value }); });
+        rows.addEventListener('input', () => { if (rows.value >= 1) set({ rows: +rows.value }); });
+        for (const input of [cols, rows]) {
+            // Leaving the field shows the size as it is (limits applied)
+            input.addEventListener('blur', () => r.imagePaste && this.showImagePanel(r.imagePaste));
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === 'Escape') input.blur();
+            });
+        }
+        const lock = document.getElementById('image-lock');
+        lock.addEventListener('click', () => set({ locked: lock.getAttribute('aria-pressed') !== 'true' }));
+        document.querySelectorAll('[data-image-mono]').forEach(b => b.addEventListener('click', () => set({ mono: b.dataset.imageMono === 'true' })));
+        document.querySelectorAll('[data-image-dither]').forEach(b => b.addEventListener('click', () => set({ dither: b.dataset.imageDither })));
+        document.querySelectorAll('[data-image-slider]').forEach(input => {
+            const name = input.dataset.imageSlider;
+            input.addEventListener('input', () => set({ [name]: name === 'strength' ? input.value / 100 : +input.value }));
+            // Double-click puts a slider back to its default
+            input.addEventListener('dblclick', () => set({ [name]: name === 'strength' ? 1 : 0 }));
+        });
+        const invert = document.getElementById('image-invert');
+        invert.addEventListener('change', () => set({ invert: invert.checked }));
+    }
+
+    // Show the image's settings (null: placing ended)
+    showImagePanel(p) {
+        this.showPanel();
+        if (!p) return;
+        // Not the field being typed in, which would move its cursor
+        for (const [id, value] of [['image-cols', p.cols], ['image-rows', p.rows]]) {
+            const input = document.getElementById(id);
+            if (document.activeElement !== input) input.value = value;
+        }
+        document.getElementById('image-lock').setAttribute('aria-pressed', String(p.locked));
+        pressOne([...document.querySelectorAll('[data-image-mono]')], document.querySelector(`[data-image-mono="${p.mono}"]`));
+        pressOne([...document.querySelectorAll('[data-image-dither]')], document.querySelector(`[data-image-dither="${p.dither}"]`));
+        document.querySelectorAll('[data-image-slider]').forEach(input => {
+            const name = input.dataset.imageSlider;
+            const value = name === 'strength' ? Math.round(p.strength * 100) : p[name];
+            input.value = value;
+            input.nextElementSibling.textContent = name === 'strength' ? value + '%' : (value > 0 ? '+' : '') + value;
+        });
+        document.getElementById('image-invert').checked = p.invert;
+        document.querySelector('[data-image-action="fit-selection"]').disabled = !this.renderer.selection;
     }
 
     // --- Colours ---
@@ -511,6 +613,7 @@ class Toolbar {
     setColor(which, color) {
         if (which === 'fg') this.renderer.setFgColor(color);
         else this.renderer.setBgColor(color);
+        if (this.renderer.imagePaste && this.renderer.imagePaste.mono) this.renderer.scheduleImageUpdate();
         const input = document.getElementById(`${which}-color`);
         input.value = toHex(color);
         const swatch = input.parentElement;
@@ -533,11 +636,84 @@ class Toolbar {
         }
     }
 
+    // --- Text style ---
+
+    setupStyle() {
+        document.querySelectorAll('[data-style-toggle]').forEach(btn => btn.addEventListener('click', () => {
+            const r = this.renderer;
+            if (btn.dataset.styleToggle === 'bold') this.setStyle(!r.bold, r.inverse);
+            else this.setStyle(r.bold, !r.inverse);
+        }));
+    }
+
+    // Make bold / inverse the style drawn cells get, and show it
+    setStyle(bold, inverse) {
+        this.renderer.bold = bold;
+        this.renderer.inverse = inverse;
+        document.querySelector('[data-style-toggle="bold"]').setAttribute('aria-pressed', String(bold));
+        document.querySelector('[data-style-toggle="inverse"]').setAttribute('aria-pressed', String(inverse));
+    }
+
+    // --- Autosave: the canvas is kept in this browser (as ANSI text, with
+    // its size and file name) and comes back when the editor is reopened ---
+
+    // The saved canvas, or undefined; applies the saved file name
+    savedCanvas() {
+        try {
+            const saved = JSON.parse(loadSetting(AUTOSAVE_KEY));
+            const size = (v, max) => Number.isInteger(v) && v >= 1 && v <= max;
+            // None, or not something this version saved: start empty
+            if (!saved || saved.v !== 1 || typeof saved.ansi !== 'string' ||
+                !size(saved.width, 500) || !size(saved.height, 200)) return undefined;
+            const canvas = parseANSIText(saved.ansi);
+            resizeCanvas(canvas, saved.width, saved.height);
+            if (typeof saved.name === 'string' && saved.name) this.setFilename(saved.name, false);
+            return canvas;
+        } catch (e) {
+            return undefined;   // unreadable: start empty
+        }
+    }
+
+    // Save a moment after the last change (and when the page goes away);
+    // big canvases take a while to save, so wait longer for them
+    scheduleAutosave() {
+        clearTimeout(this._autosaveTimer);
+        const c = this.renderer.canvas;
+        const delay = c && c.width * c.height > 20000 ? 3000 : 500;
+        this._autosaveTimer = setTimeout(() => this.autosave(), delay);
+        if (!this._autosaveOnLeave) {
+            this._autosaveOnLeave = true;
+            window.addEventListener('pagehide', () => {
+                if (this._autosaveTimer) this.autosave();
+            });
+        }
+    }
+
+    autosave() {
+        clearTimeout(this._autosaveTimer);
+        this._autosaveTimer = null;
+        const c = this.renderer.canvas;
+        const state = document.getElementById('save-state');
+        try {
+            localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({
+                v: 1, width: c.width, height: c.height, name: this.saveFilename, ansi: canvasToANSI(c)
+            }));
+            state.textContent = 'Autosaved';
+            state.title = 'Kept in this browser: it comes back when you reopen the editor. Export to save a file.';
+            state.classList.remove('failed');
+        } catch (e) {
+            state.textContent = 'Not autosaved';
+            state.title = "This browser can't keep the canvas (storage full, or not allowed). Export to save it.";
+            state.classList.add('failed');
+        }
+    }
+
     // --- Save / open / resize ---
 
-    setFilename(name) {
+    setFilename(name, save = true) {
         this.saveFilename = name;
         document.getElementById('file-name').textContent = name;
+        if (save) this.scheduleAutosave();
     }
 
     doSave() {
@@ -777,6 +953,8 @@ class Toolbar {
             ['Edit', 'Redo', '⇧⌘Z', act('redo')],
             ['Colour', 'Swap ink and paper', 'X', act('swap-colors')],
             ['Colour', "Reset to the terminal's colours", '', act('default-colors')],
+            ['Style', r.bold ? 'Bold off' : 'Bold on', '', () => this.setStyle(!r.bold, r.inverse)],
+            ['Style', r.inverse ? 'Inverse off' : 'Inverse on', '', () => this.setStyle(r.bold, !r.inverse)],
             ['View', r.showGrid ? 'Hide grid' : 'Show grid', '', act('toggle-grid')],
             ['View', r.lightTerminal ? 'Preview in a dark terminal' : 'Preview in a light terminal', '', act('toggle-light-terminal')],
             ['View', 'Zoom in', '+', act('zoom-in')],

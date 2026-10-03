@@ -21,14 +21,19 @@ npx serve web
   and emoji, searchable by name
 - Box and line drawing with light/heavy/double borders
 - Ink (foreground) and paper (background) colours, the 16 terminal colours,
-  or the terminal's own
+  or the terminal's own; bold and inverse text
+- Autosave: the canvas is kept in the browser and comes back when you reopen
+  the editor (Export saves a file). Tabs of the same editor share it: the
+  last one changed wins
 - Import/export ANSI text files
 - Copy/paste with system clipboard integration
-- Image import: paste (Ctrl+V), drop or Import image a picture, then place
-  it with a click. The mouse wheel or +/- resize it, M switches to two
-  colours (the current ink and paper) and D changes the dithering. Each cell
-  gets the two colours that best fit its subpixels; transparent areas leave
-  the canvas as it is.
+- Image import: paste (Ctrl+V), drop or Import image a picture. It floats
+  over the canvas until you place it (Enter): drag it to move it, its corner
+  handle or the wheel to resize it, and set its size, full colour or two
+  colours (ink and paper), dithering and tone (brightness, contrast,
+  midtones, invert) in the panel on the right. Each cell gets the two
+  colours that best fit its subpixels; transparent areas leave the canvas
+  as it is.
 - Preview for dark or light terminals and for the cell shape (width ÷ height)
   of the terminal the art is for (the cells button in the status bar)
 - Zoom with + and −, Ctrl+wheel, or 0 to fit the window

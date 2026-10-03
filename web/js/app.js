@@ -18,8 +18,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Connect toolbar to canvas renderer for pick tool
     canvasRenderer.toolbar = toolbar;
 
-    // Load initial canvas
-    canvasRenderer.loadCanvas();
+    // Start with the autosaved canvas, if there is one
+    canvasRenderer.loadCanvas(toolbar.savedCanvas());
 
     console.log('MOTD Editor initialized');
 });

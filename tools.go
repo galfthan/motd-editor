@@ -18,8 +18,10 @@ import (
 // types that have one).
 
 type colors struct {
-	FG string `json:"fg,omitempty" jsonschema:"foreground colour: #rrggbb or default (the default)"`
-	BG string `json:"bg,omitempty" jsonschema:"background colour: #rrggbb or default (the default). Cells drawn on get it even where they had a colour: pass that colour to keep a background"`
+	Bold    bool   `json:"bold,omitempty" jsonschema:"bold text (cells drawn on get it, or lose it when false)"`
+	Inverse bool   `json:"inverse,omitempty" jsonschema:"fg and bg swapped as the terminal shows them, following the terminal's own colours where they are default (cells drawn on get it, or lose it when false)"`
+	FG      string `json:"fg,omitempty" jsonschema:"foreground colour: #rrggbb or default (the default)"`
+	BG      string `json:"bg,omitempty" jsonschema:"background colour: #rrggbb or default (the default). Cells drawn on get it even where they had a colour: pass that colour to keep a background"`
 }
 
 type region struct {
@@ -51,7 +53,7 @@ type display struct {
 
 type readArgs struct {
 	region
-	Format string `json:"format,omitempty" jsonschema:"text (the default): one line per row; subpixels: 3 lines per row, 2 chars per cell, # set, . clear, + a cell holding a character; cells: JSON for every non-blank cell with its char and colours"`
+	Format string `json:"format,omitempty" jsonschema:"text (the default): one line per row; subpixels: 3 lines per row, 2 chars per cell, # set, . clear, + a cell holding a character; cells: JSON for every non-blank cell with its char, colours, and bold / inverse when set"`
 }
 
 type bitmapArgs struct {
@@ -112,16 +114,21 @@ type importArgs struct {
 }
 
 type imageArgs struct {
-	Path   string `json:"path,omitempty" jsonschema:"absolute path of an image file on this computer: PNG, JPEG, GIF, WebP or BMP"`
-	URL    string `json:"url,omitempty" jsonschema:"or the image's http(s) URL"`
-	X      int    `json:"x,omitempty" jsonschema:"left cell (default 0)"`
-	Y      int    `json:"y,omitempty" jsonschema:"top cell (default 0)"`
-	Width  int    `json:"width,omitempty" jsonschema:"cells; with only one of width and height the other keeps the image's proportions at the editor's cell aspect (default: as large as fits the canvas from x, y)"`
-	Height int    `json:"height,omitempty" jsonschema:"cells"`
-	Mono   bool   `json:"mono,omitempty" jsonschema:"use only the colours fg and bg (default: full colour, two colours per cell fitted to the image)"`
-	Dither string `json:"dither,omitempty" jsonschema:"floyd-steinberg (the default), atkinson (crisper) or none"`
-	FG     string `json:"fg,omitempty" jsonschema:"mono only: one of the two colours, #rrggbb or default (the default); each subpixel gets the nearer one"`
-	BG     string `json:"bg,omitempty" jsonschema:"mono only: the other colour, #rrggbb or default (the default), also given to cells the image only partly covers. Full colour ignores fg and bg and keeps the canvas background where the image is transparent"`
+	Path           string `json:"path,omitempty" jsonschema:"absolute path of an image file on this computer: PNG, JPEG, GIF, WebP or BMP"`
+	URL            string `json:"url,omitempty" jsonschema:"or the image's http(s) URL"`
+	X              int    `json:"x,omitempty" jsonschema:"left cell (default 0)"`
+	Y              int    `json:"y,omitempty" jsonschema:"top cell (default 0)"`
+	Width          int    `json:"width,omitempty" jsonschema:"cells; with only one of width and height the other keeps the image's proportions at the editor's cell aspect (default: as large as fits the canvas from x, y)"`
+	Height         int    `json:"height,omitempty" jsonschema:"cells"`
+	Mono           bool   `json:"mono,omitempty" jsonschema:"use only the colours fg and bg (default: full colour, two colours per cell fitted to the image)"`
+	Dither         string `json:"dither,omitempty" jsonschema:"floyd-steinberg (the default), atkinson (crisper) or none"`
+	DitherStrength *int   `json:"dither_strength,omitempty" jsonschema:"0-100: how much of each subpixel's error is passed on (default 100); lower is less grainy"`
+	Brightness     int    `json:"brightness,omitempty" jsonschema:"-100 to 100 (default 0): shifts every tone"`
+	Contrast       int    `json:"contrast,omitempty" jsonschema:"-100 to 100 (default 0): spreads tones from the middle, or squeezes them to it"`
+	Midtones       int    `json:"midtones,omitempty" jsonschema:"-100 to 100 (default 0): lightens or darkens the middle tones, black and white stay; mono images look dark at 0, which mixes light physically, so try 30-50 to lighten them"`
+	Invert         bool   `json:"invert,omitempty" jsonschema:"use the image's negative"`
+	FG             string `json:"fg,omitempty" jsonschema:"mono only: one of the two colours, #rrggbb or default (the default); each subpixel gets the nearer one"`
+	BG             string `json:"bg,omitempty" jsonschema:"mono only: the other colour, #rrggbb or default (the default), also given to cells the image only partly covers. Full colour ignores fg and bg and keeps the canvas background where the image is transparent"`
 }
 
 const maxImage = 20 << 20
@@ -222,7 +229,7 @@ func addTools(s *mcp.Server, l *link) {
 	relay[copyArgs](s, l, "copy_region",
 		"Copy or move the rectangle (x1, y1)-(x2, y2), inclusive, to (to_x, to_y), like Select with copy/cut and paste.")
 	relay[importArgs](s, l, "import_ansi",
-		"Paste ANSI text, or load it as the whole canvas. Understands SGR colours: the 16 basic ones, 256-colour (xterm palette) and 24-bit; bold makes the basic colours bright; inverse swaps the colours, the terminal's own as fixed black and white. Other escape sequences are dropped.")
+		"Paste ANSI text, or load it as the whole canvas. Understands SGR colours (the 16 basic ones, 256-colour in the xterm palette, 24-bit), bold and inverse; other escape sequences are dropped.")
 	relay[imageArgs](s, l, "import_image",
 		"Place a picture as cells, like pasting an image into the editor: scaled, each cell given the two colours that best fit its 2x3 subpixels, and dithered. Transparent areas leave the canvas as it is.")
 	relay[exportArgs](s, l, "export",

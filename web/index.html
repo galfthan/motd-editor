@@ -29,6 +29,7 @@
         <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
         <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
         <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14 M5 12h14"/></symbol>
+        <symbol id="i-lock" viewBox="0 0 24 24"><path d="M6 11h12v9H6z M9 11V8a3 3 0 0 1 6 0v3"/></symbol>
         <symbol id="i-panel" viewBox="0 0 24 24"><path d="M4 4h16v16H4z M14 4v16"/></symbol>
         <symbol id="i-github" viewBox="0 0 16 16"><path fill="currentColor" stroke="none" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></symbol>
     </svg>
@@ -52,6 +53,7 @@
                     <button data-action="clear" role="menuitem">Clear canvas</button>
                 </div>
             </div>
+            <span class="save-state" id="save-state"></span>
             <div class="group">
                 <button class="icon-btn" data-action="undo" aria-label="Undo"><svg class="ic"><use href="#i-undo"></use></svg></button>
                 <button class="icon-btn" data-action="redo" aria-label="Redo"><svg class="ic"><use href="#i-redo"></use></svg></button>
@@ -158,6 +160,46 @@
                         <p class="hint">Drag to select, then <kbd>⌘C</kbd> copy, <kbd>⌘X</kbd> cut, <kbd>⌘V</kbd> paste. Paste or drop an image and scroll to scale it before placing.</p>
                     </section>
 
+                    <section data-panel="image">
+                        <div class="image-actions">
+                            <button class="btn primary" data-image-action="place">Place <kbd>Enter</kbd></button>
+                            <button class="btn" data-image-action="cancel">Cancel <kbd>Esc</kbd></button>
+                        </div>
+                        <span class="label">Size</span>
+                        <div class="size-row">
+                            <input type="number" id="image-cols" min="1" max="500" aria-label="Width in cells">
+                            <span>×</span>
+                            <input type="number" id="image-rows" min="1" max="200" aria-label="Height in cells">
+                            <span class="unit">cells</span>
+                            <button class="icon-btn" id="image-lock" aria-pressed="true" aria-label="Keep proportions" title="Keep the image's proportions"><svg class="ic"><use href="#i-lock"></use></svg></button>
+                        </div>
+                        <div class="image-fit">
+                            <button class="btn small" data-image-action="fit-canvas">Fit canvas</button>
+                            <button class="btn small" data-image-action="fit-selection">Fit selection</button>
+                        </div>
+                        <span class="label">Colours</span>
+                        <div class="segmented wide" role="group" aria-label="Image colours">
+                            <button data-image-mono="false" aria-pressed="true">Full colour</button>
+                            <button data-image-mono="true" aria-pressed="false" title="Only the ink and paper colours below">Two colours</button>
+                        </div>
+                        <span class="label">Dither</span>
+                        <div class="segmented wide" role="group" aria-label="Dithering">
+                            <button data-image-dither="floyd-steinberg" aria-pressed="true">Floyd–Steinberg</button>
+                            <button data-image-dither="atkinson" aria-pressed="false">Atkinson</button>
+                            <button data-image-dither="none" aria-pressed="false">None</button>
+                        </div>
+                        <label class="slider"><span>Strength</span><input type="range" data-image-slider="strength" min="0" max="100" value="100"><output></output></label>
+                        <span class="label">Tone</span>
+                        <label class="slider"><span>Brightness</span><input type="range" data-image-slider="brightness" min="-100" max="100" value="0"><output></output></label>
+                        <label class="slider"><span>Contrast</span><input type="range" data-image-slider="contrast" min="-100" max="100" value="0"><output></output></label>
+                        <label class="slider"><span>Midtones</span><input type="range" data-image-slider="midtones" min="-100" max="100" value="0"><output></output></label>
+                        <div class="image-fit">
+                            <label class="check"><input type="checkbox" id="image-invert"> Invert</label>
+                            <button class="btn small" data-image-action="reset-tone">Reset tone</button>
+                        </div>
+                        <p class="hint">Drag the image to move it, or its corner handle to resize it; the wheel and <kbd>+</kbd> <kbd>−</kbd> resize it too, the arrow keys move it.</p>
+                    </section>
+
                     <section data-panel="pick">
                         <p class="hint">Click a cell to take its colours. <kbd>Alt</kbd>-click does this with any tool.</p>
                     </section>
@@ -175,6 +217,10 @@
                                 <label class="swatch" title="Choose the paper colour"><input type="color" id="bg-color" value="#000000" aria-label="Paper colour"></label>
                                 <button class="color-target-name" data-target-pick="bg" aria-pressed="false"><span>Paper</span><span class="color-value" id="bg-value">Terminal</span></button>
                             </div>
+                        </div>
+                        <div class="segmented wide" role="group" aria-label="Text style">
+                            <button data-style-toggle="bold" aria-pressed="false" title="Bold text"><strong>B</strong> Bold</button>
+                            <button data-style-toggle="inverse" aria-pressed="false" title="Swap ink and paper as the terminal shows them, also its own colours"><span class="inverse-icon" aria-hidden="true"></span>Inverse</button>
                         </div>
                         <div class="palette" id="palette" aria-label="Terminal colours"></div>
                         <div class="color-actions">
