@@ -180,7 +180,9 @@ function parseCodes(codes, state) {
     return { fg, bg, bold, inverse, basic };
 }
 
-function parseANSIText(text) {
+// ANSI text as rows of cells, each as long as its line (wide chars take two
+// cells, so a row's width is its width in columns)
+function ansiTextToRows(text) {
     // NFC composes e.g. e + U+0301 into é, which fits in one cell
     text = text.normalize('NFC').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     const lines = text.split('\n');
@@ -189,13 +191,14 @@ function parseANSIText(text) {
     if (lines.length > 0 && lines[lines.length - 1] === '') {
         lines.pop();
     }
+    return lines.map(line => charsToRow(parseLine(line)));
+}
 
-    if (lines.length === 0) {
+function parseANSIText(text) {
+    const rows = ansiTextToRows(text);
+    if (rows.length === 0) {
         return createCanvas(1, 1);
     }
-
-    // Wide chars take two cells, so a row's width is its width in columns
-    const rows = lines.map(line => charsToRow(parseLine(line)));
     const canvas = createCanvas(Math.max(1, ...rows.map(row => row.length)), rows.length);
     rows.forEach((row, y) => row.forEach((cell, x) => { canvas.cells[y][x] = cell; }));
 

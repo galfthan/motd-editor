@@ -215,7 +215,7 @@ func addTools(s *mcp.Server, l *link) {
 	relay[boxArgs](s, l, "draw_box",
 		"Draw a box with box-drawing characters from (x1, y1) to (x2, y2), cells inclusive, like the Box tool. Borders join with lines and boxes already there. Parts past the canvas edges are left out.")
 	relay[lineArgs](s, l, "draw_line",
-		"Draw a line of box-drawing characters from (x1, y1) to (x2, y2), like the Line tool: straight, or if both x and y differ an S of three straight legs (horizontal, vertical, horizontal when at least as wide as tall). Ends on another line join it (╠, ┯).")
+		"Draw a line of box-drawing characters from (x1, y1) to (x2, y2), like the Line tool: straight, or if both x and y differ a Z of three straight legs, the middle one halfway (horizontal-vertical-horizontal when at least as wide as tall, else vertical-horizontal-vertical). Ends on another line join it (╠, ┯).")
 	relay[copyArgs](s, l, "copy_region",
 		"Copy or move the rectangle (x1, y1)-(x2, y2), inclusive, to (to_x, to_y), like Select with copy/cut and paste.")
 	relay[importArgs](s, l, "import_ansi",

@@ -1789,9 +1789,12 @@ class CanvasRenderer {
             }
         }
 
-        // System clipboard has different/new content — parse it into cells
+        // System clipboard has different/new content — parse it into cells:
+        // ANSI art with its colours, plain text in the current ones
         if (systemText && systemText.trim().length > 0) {
-            const cells = parseTextToCells(systemText, this.fgColor, this.bgColor);
+            const cells = systemText.includes('\x1b[')
+                ? ansiTextToRows(systemText)
+                : parseTextToCells(systemText, this.fgColor, this.bgColor);
             if (cells.length > 0) {
                 this.clipboard = cells;
                 this.pasteMode = true;
