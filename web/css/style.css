@@ -473,10 +473,18 @@ main {
  * blink.
  */
 .canvas {
-    --overlay-selection: var(--accent);
+    --overlay-selection: #2ec4b6;             /* teal */
     --overlay-paste: var(--success);
     --overlay-preview: #ff9800;               /* box / line tool */
     --overlay-hover: #c678dd;                 /* the cell under the pointer */
+}
+
+/* Canvas > Light Terminal: the default colours of a light-background
+   terminal (the canvas's own default colours are the dark ones in :root) */
+.canvas.light-terminal {
+    --cell-bg: #ffffff;
+    --border: #d4d4d4;
+    color: #1e1e1e;
 }
 
 /* Layers sized to the canvas (see CanvasRenderer.render) */

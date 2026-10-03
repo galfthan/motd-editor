@@ -96,7 +96,8 @@ class CanvasRenderer {
 
         // Grid canvas drawing state (see render / drawCell)
         this.ctx = null;                // 2D context of the grid canvas
-        this.showGrid = true;           // 1px grid lines over the cells (see setShowGrid)
+        this.showGrid = false;          // 1px grid lines over the cells (see setShowGrid)
+        this.lightTerminal = false;     // simulate a light terminal (see setLightTerminal)
         this._onPixelRatioChange = () => this.render();
         this._glyphStyles = new Map();  // .glyph-* class → { font, transform, baseline }
         this._shadePatterns = new WeakMap(); // context → shade + colour → CanvasPattern (see fillShape)
@@ -440,13 +441,29 @@ class CanvasRenderer {
     // without it the cells run together as they will there.
     setShowGrid(show) {
         this.showGrid = show;
-        this._pasteImages.clear();
-        this._pastePreviewKey = null; // redraw the paste preview on the next move
-        this.drawAll();
+        this.redrawEverything();
     }
 
-    // Colours the grid is drawn with, from the page's CSS. Read on full
-    // redraws only; the CSS variables are static (no theme switching).
+    // Show the canvas as in a terminal with a light or a dark background: the
+    // terminal's default colours (cells with the "default" foreground or
+    // background) come from .canvas or .canvas.light-terminal in style.css.
+    setLightTerminal(light) {
+        this.lightTerminal = light;
+        this.container.classList.toggle('light-terminal', light);
+        this.redrawEverything();
+    }
+
+    // Redraw the canvas, overlays and (on the next move) the paste preview,
+    // e.g. after the grid or the theme changed
+    redrawEverything() {
+        this._pasteImages.clear();
+        this._pastePreviewKey = null;
+        this.drawAll();
+        this.repaintOverlay();
+    }
+
+    // Colours the grid is drawn with, from the page's CSS (they change with
+    // the light / dark terminal setting). Read on full redraws.
     readTheme() {
         const style = getComputedStyle(this.container);
         this.theme = {
