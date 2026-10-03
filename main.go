@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -39,6 +40,7 @@ The canvas is a grid of terminal character cells, addressed (x, y) from the top-
 Start with get_state (canvas size, the user's selection and note to you). Look with view_canvas; use read_region for exact content. The banner will be shown in users' terminals, with dark or light backgrounds: "default" colours follow the terminal, so check both. Every drawing tool is one undo step for the user. Use batch to apply many operations at once.`
 
 type editor struct {
+	url     string // where the editor is served
 	mu      sync.Mutex
 	tab     chan []byte // events for the connected tab; nil when there is none
 	nextID  int64
@@ -50,8 +52,12 @@ type reply struct {
 	Error  string          `json:"error"`
 }
 
-// call runs op in the connected tab and returns its result
+// call runs op in the connected tab and returns its result. A tab that is
+// (re)connecting gets a few seconds.
 func (e *editor) call(ctx context.Context, op string, args json.RawMessage) (json.RawMessage, error) {
+	for i := 0; i < 50 && !e.connected(); i++ {
+		time.Sleep(100 * time.Millisecond)
+	}
 	done := make(chan reply, 1)
 	e.mu.Lock()
 	e.nextID++
@@ -68,7 +74,7 @@ func (e *editor) call(ctx context.Context, op string, args json.RawMessage) (jso
 	}
 	e.mu.Unlock()
 	if !sent {
-		return nil, errors.New("no editor tab is connected: ask the user to open the editor URL printed by motd-editor")
+		return nil, fmt.Errorf("no editor tab is connected: ask the user to open %s", e.url)
 	}
 	defer func() {
 		e.mu.Lock()
@@ -87,6 +93,12 @@ func (e *editor) call(ctx context.Context, op string, args json.RawMessage) (jso
 	case <-time.After(30 * time.Second):
 		return nil, errors.New("the editor tab did not answer within 30 s")
 	}
+}
+
+func (e *editor) connected() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.tab != nil
 }
 
 // events streams operations to the tab. The newest tab takes over; the one it
@@ -150,6 +162,98 @@ func (e *editor) result(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// callHandler runs an operation for another motd-editor process (see link)
+func (e *editor) callHandler(w http.ResponseWriter, r *http.Request) {
+	var c struct {
+		Op   string          `json:"op"`
+		Args json.RawMessage `json:"args"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var rep reply
+	var err error
+	if rep.Result, err = e.call(r.Context(), c.Op, c.Args); err != nil {
+		rep.Error = err.Error()
+	}
+	json.NewEncoder(w).Encode(rep)
+}
+
+// link is how this process's tools reach the tab. Only one process can serve
+// the editor on the port, but there may be several: Claude Desktop starts one
+// per kind of session, and the user may run one by hand. The one with the
+// port runs operations itself; the others pass them on to it over HTTP, and
+// take the port over if it has gone away.
+type link struct {
+	e       *editor
+	addr    string
+	handler http.Handler
+	mu      sync.Mutex
+	serving bool
+}
+
+// serve starts serving the editor unless this process already does; false
+// when another process has the port
+func (l *link) serve() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.serving {
+		return true
+	}
+	ln, err := net.Listen("tcp", l.addr)
+	if err != nil {
+		return false
+	}
+	l.serving = true
+	log.Printf("Editor:      %s", l.e.url)
+	go func() { log.Fatal(http.Serve(ln, l.handler)) }()
+	return true
+}
+
+func (l *link) call(ctx context.Context, op string, args json.RawMessage) (json.RawMessage, error) {
+	if l.serve() {
+		return l.e.call(ctx, op, args)
+	}
+	body, _ := json.Marshal(map[string]any{"op": op, "args": args})
+	req, _ := http.NewRequestWithContext(ctx, "POST", "http://"+l.addr+"/call", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		if l.serve() { // the other process just exited
+			return l.e.call(ctx, op, args)
+		}
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var r reply
+	if json.NewDecoder(resp.Body).Decode(&r) != nil {
+		return nil, fmt.Errorf("%s is in use by something other than motd-editor: start it with another -addr", l.addr)
+	}
+	if r.Error != "" {
+		return nil, errors.New(r.Error)
+	}
+	return r.Result, nil
+}
+
+// localOnly rejects requests from other sites' pages (cross-origin) and for
+// host names other than localhost (DNS rebinding), so only the editor page
+// and local tools can drive the editor
+func localOnly(h http.Handler) http.Handler {
+	h = http.NewCrossOriginProtection().Handler(h)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.Host)
+		if err != nil {
+			host = r.Host
+		}
+		if host != "localhost" && net.ParseIP(host) == nil {
+			http.Error(w, "forbidden host", http.StatusForbidden)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
 // toolResult turns a tab result into MCP content: a string as text, an
 // {image, info} object as a PNG plus text, anything else as JSON text
 func toolResult(raw json.RawMessage) *mcp.CallToolResult {
@@ -172,10 +276,10 @@ func toolResult(raw json.RawMessage) *mcp.CallToolResult {
 
 // relay adds a tool that runs the tab operation of the same name. In only
 // describes and validates the arguments; the tab gets them as sent.
-func relay[In any](s *mcp.Server, e *editor, name, description string) {
+func relay[In any](s *mcp.Server, l *link, name, description string) {
 	mcp.AddTool(s, &mcp.Tool{Name: name, Description: description},
 		func(ctx context.Context, req *mcp.CallToolRequest, _ In) (*mcp.CallToolResult, any, error) {
-			res, err := e.call(ctx, name, req.Params.Arguments)
+			res, err := l.call(ctx, name, req.Params.Arguments)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -195,15 +299,15 @@ func main() {
 	}
 	webFS, _ := fs.Sub(files, "web")
 
-	e := &editor{pending: map[int64]chan reply{}}
+	e := &editor{url: "http://" + *addr + "/", pending: map[int64]chan reply{}}
 	server := mcp.NewServer(&mcp.Implementation{Name: "motd-editor", Version: "0.1.0"},
 		&mcp.ServerOptions{Instructions: instructions})
-	addTools(server, e)
 
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil))
 	mux.HandleFunc("GET /events", e.events)
 	mux.HandleFunc("POST /result", e.result)
+	mux.HandleFunc("POST /call", e.callHandler)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		page, err := fs.ReadFile(webFS, "index.html")
 		if err != nil {
@@ -216,14 +320,19 @@ func main() {
 	mux.Handle("/collab/", http.FileServerFS(files))
 	mux.Handle("/", http.FileServerFS(webFS))
 
-	log.Printf("Editor:      http://%s/", *addr)
+	l := &link{e: e, addr: *addr, handler: localOnly(mux)}
+	addTools(server, l)
+
 	if !*stdio {
+		l.serving = true
+		log.Printf("Editor:      %s", e.url)
 		log.Printf("MCP server:  claude mcp add --transport http motd http://%s/mcp", *addr)
-		log.Fatal(http.ListenAndServe(*addr, mux))
+		log.Fatal(http.ListenAndServe(*addr, l.handler))
 	}
-	// The editor is still served over HTTP; the MCP session ends when the
-	// client closes stdin (log output goes to stderr)
-	go func() { log.Fatal(http.ListenAndServe(*addr, mux)) }()
+	// The MCP session ends when the client closes stdin (logs go to stderr)
+	if !l.serve() {
+		log.Printf("Another motd-editor serves %s: passing operations on to it", e.url)
+	}
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		log.Fatal(err)
 	}

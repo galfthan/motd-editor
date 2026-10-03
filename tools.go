@@ -114,39 +114,39 @@ type batchArgs struct {
 	} `json:"ops"`
 }
 
-func addTools(s *mcp.Server, e *editor) {
-	relay[struct{}](s, e, "get_state",
+func addTools(s *mcp.Server, l *link) {
+	relay[struct{}](s, l, "get_state",
 		"Canvas size in cells and subpixels; what the user is doing: current tool and colours, cell or subpixel selection, text cursor, and the note they left for you; and the editor's display settings.")
-	relay[viewArgs](s, e, "view_canvas",
+	relay[viewArgs](s, l, "view_canvas",
 		"The canvas, or a region of it, as a PNG image drawn by the editor. MOTDs show in both dark and light terminals: check both with light_terminal.")
-	relay[display](s, e, "set_display",
+	relay[display](s, l, "set_display",
 		"Change how the editor shows the canvas to the user (the Canvas menu's Show Grid and Light Terminal). Doesn't change the art.")
-	relay[readArgs](s, e, "read_region",
+	relay[readArgs](s, l, "read_region",
 		"Read the exact content of the canvas or a region as text, a subpixel bitmap, or per-cell JSON with colours.")
-	relay[bitmapArgs](s, e, "draw_bitmap",
+	relay[bitmapArgs](s, l, "draw_bitmap",
 		"Paint a pattern of subpixels, given as rows of text. The best way to draw shapes, letters and pixel art.")
-	relay[strokesArgs](s, e, "draw_strokes",
+	relay[strokesArgs](s, l, "draw_strokes",
 		"Draw or erase freehand strokes through subpixel points, like the Draw and Erase tools. Drawing gives the touched cells fg and bg; erasing gives them bg.")
-	relay[symbolsArgs](s, e, "place_symbols",
+	relay[symbolsArgs](s, l, "place_symbols",
 		"Put characters in cells, like the Symbol tool: diagonals, triangles, blocks, shades, emoji or any other character.")
-	relay[textArgs](s, e, "write_text",
+	relay[textArgs](s, l, "write_text",
 		"Type text into cells, like the Text tool.")
-	relay[boxArgs](s, e, "draw_box",
+	relay[boxArgs](s, l, "draw_box",
 		"Draw a box with box-drawing characters from (x1, y1) to (x2, y2), cells inclusive, like the Box tool. Borders join with lines and boxes already there.")
-	relay[lineArgs](s, e, "draw_line",
+	relay[lineArgs](s, l, "draw_line",
 		"Draw a line of box-drawing characters from (x1, y1) to (x2, y2), going horizontally then vertically, like the Line tool.")
-	relay[copyArgs](s, e, "copy_region",
+	relay[copyArgs](s, l, "copy_region",
 		"Copy or move the rectangle (x1, y1)-(x2, y2), inclusive, to (to_x, to_y), like Select with copy/cut and paste.")
-	relay[importArgs](s, e, "import_ansi",
+	relay[importArgs](s, l, "import_ansi",
 		"Paste ANSI text, or load it as the whole canvas.")
-	relay[exportArgs](s, e, "export",
+	relay[exportArgs](s, l, "export",
 		"The canvas as a MOTD file: ANSI text with colours, or plain text.")
-	relay[sizeArgs](s, e, "resize_canvas",
+	relay[sizeArgs](s, l, "resize_canvas",
 		"Change the canvas size, keeping the content.")
-	relay[sizeArgs](s, e, "new_canvas",
+	relay[sizeArgs](s, l, "new_canvas",
 		"Start over with an empty canvas of this size.")
-	relay[struct{}](s, e, "undo", "Undo the last step, the user's or yours.")
-	relay[struct{}](s, e, "redo", "Redo the last undone step.")
-	relay[batchArgs](s, e, "batch",
+	relay[struct{}](s, l, "undo", "Undo the last step, the user's or yours.")
+	relay[struct{}](s, l, "redo", "Redo the last undone step.")
+	relay[batchArgs](s, l, "batch",
 		"Run several operations in order as one undo step, e.g. [{op: \"draw_box\", args: {...}}, {op: \"write_text\", args: {...}}]. Stops at the first failing one; the ones before it stay applied.")
 }
