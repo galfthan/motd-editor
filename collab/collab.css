@@ -1,0 +1,79 @@
+/* Collaborative AI mode (collab.js) */
+
+.ai-status {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.75rem;
+    padding: 1px 8px;
+}
+
+.ai-status::before {
+    content: '●';
+    margin-right: 4px;
+    color: #f44336;
+}
+
+.ai-status[data-state="on"]::before {
+    color: var(--success);
+}
+
+.ai-panel {
+    display: none;
+    flex-direction: column;
+    gap: 6px;
+    position: fixed;
+    right: 8px;
+    top: 40px;
+    bottom: 8px;
+    width: 320px;
+    padding: 8px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    z-index: 50;
+}
+
+.ai-panel.open {
+    display: flex;
+}
+
+.ai-panel textarea {
+    height: 5em;
+    resize: vertical;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    font: inherit;
+    font-size: 0.8rem;
+    padding: 4px;
+}
+
+.ai-log {
+    flex: 1;
+    overflow-y: auto;
+    list-style: none;
+    font-family: monospace;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.ai-log li {
+    padding: 2px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.ai-log li.error {
+    color: #f44336;
+}
+
+/* Cells the agent just changed */
+.ai-flash {
+    position: absolute;
+    outline: 2px solid #ff4fa3;
+    outline-offset: -1px;
+    background-color: rgba(255, 79, 163, 0.15);
+}

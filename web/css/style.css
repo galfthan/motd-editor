@@ -451,8 +451,9 @@ main {
     user-select: none;
 }
 
-/* The grid is drawn on this canvas (CanvasRenderer.drawCell), as 18x34px
-   cells: a 1px var(--border) border around a 16x32 var(--cell-bg) inside */
+/* The grid is drawn on this canvas (CanvasRenderer.drawCell), in cells of
+   34px by the cell aspect (17x34 by default), with the grid lines, when
+   shown, as a 1px var(--border) ring over each cell's outermost pixels */
 .grid-canvas {
     position: absolute;
     left: 0;

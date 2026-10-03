@@ -135,6 +135,7 @@ class Toolbar {
             on => this.renderer.setShowGrid(on));
         this.toggleLightTerminal = this.setupCanvasToggle('toggle-light-terminal', 'motd-editor.lightTerminal', false,
             on => this.renderer.setLightTerminal(on));
+        this.setupCellAspect();
         this.setupToolButtons();
         this.setupColorPickers();
         this.setupFileInputs();
@@ -235,6 +236,47 @@ class Toolbar {
             set(next);
             try { localStorage.setItem(key, String(next)); } catch (e) { /* not saved */ }
         };
+    }
+
+    // Canvas menu cell aspect (width / height) presets and Custom…, to preview
+    // cells as a given terminal draws them. Remembered like the toggles.
+    setupCellAspect() {
+        const key = 'motd-editor.cellAspect';
+        const items = [...document.querySelectorAll('button[data-cell-aspect]')];
+        const custom = items.find(b => b.dataset.cellAspect === 'custom');
+        const value = (b) => parseFloat(b.dataset.cellAspect);
+        const presets = items.filter(b => b !== custom);
+
+        // Show and apply `aspect` (see isCellAspect); with `save`, remember it
+        this.setCellAspect = (aspect, save = true) => {
+            const preset = presets.find(b => Math.abs(value(b) - aspect) < 0.0005);
+            items.forEach(b => b.setAttribute('aria-checked', String(b === (preset || custom))));
+            custom.querySelector('.menu-label').textContent =
+                preset ? 'Cells: Custom…' : `Cells: Custom (${aspect.toFixed(3)})…`;
+            this.renderer.setCellAspect(aspect);
+            if (save) {
+                try { localStorage.setItem(key, String(aspect)); } catch (e) { /* not saved */ }
+            }
+        };
+
+        items.forEach(b => b.addEventListener('click', () => {
+            this.closeMenus();
+            if (b !== custom) {
+                this.setCellAspect(value(b));
+                return;
+            }
+            const answer = prompt(`Cell width ÷ height, ${CELL_ASPECT_RANGE.join('-')} (e.g. 9x19 px terminal cells: 0.47)`,
+                this.renderer.cellAspect.toFixed(3));
+            const aspect = parseFloat(answer);
+            if (isCellAspect(aspect)) this.setCellAspect(aspect);
+        }));
+
+        let aspect = DEFAULT_CELL_ASPECT;
+        try {
+            const saved = parseFloat(localStorage.getItem(key));
+            if (isCellAspect(saved)) aspect = saved;
+        } catch (e) { /* default */ }
+        this.setCellAspect(aspect, false);
     }
 
     handleMenuAction(action) {

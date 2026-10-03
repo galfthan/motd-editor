@@ -1,9 +1,19 @@
 // Canvas rendering and interaction
 
-// Cell is 16x32 + 2px border = 18x34 total (2x scale of 8x16 Unifont), holding
-// 2x3 subpixels. style.css hardcodes the same sizes for cells and overlays.
-const CELL_W = 18;
+// Cells are CELL_H tall and CELL_W wide, holding 2x3 subpixels. The width
+// follows the cell aspect (width / height) the user previews, to match the
+// terminal the art is for (see setCellAspect). By default it is a typical
+// terminal's 0.5; the glyph styles in style.css are sized for 18x34 cells.
 const CELL_H = 34;
+const GLYPH_CELL_W = 18;
+const DEFAULT_CELL_ASPECT = 0.5;
+let CELL_W = DEFAULT_CELL_ASPECT * CELL_H;
+
+// The cell aspects the editor accepts (terminals are around 0.45-0.55)
+const CELL_ASPECT_RANGE = [0.3, 0.8];
+function isCellAspect(aspect) {
+    return aspect >= CELL_ASPECT_RANGE[0] && aspect <= CELL_ASPECT_RANGE[1];
+}
 
 // Subpixel edges within a cell, in CSS px from its top-left corner: the
 // whole cell split into 2x3 equal parts, as a terminal draws sextants (the
@@ -11,6 +21,17 @@ const CELL_H = 34;
 // hit-testing and the subpixel selection overlay all use these.
 const SUB_X_EDGES = [0, CELL_W / 2, CELL_W];
 const SUB_Y_EDGES = [0, CELL_H / 3, 2 * CELL_H / 3, CELL_H];
+
+// Set the cell width for a cell aspect (width / height). Only how cells are
+// drawn changes, never the art. Takes effect on the next render (or, for an
+// offscreen drawing, at once: see collab.js).
+function setCellWidthForAspect(aspect) {
+    // In 1/64 px: binary fractions add up exactly, so a cell's right edge and
+    // the next one's left edge round to the same device pixel (no gaps)
+    CELL_W = Math.round(aspect * CELL_H * 64) / 64;
+    SUB_X_EDGES[1] = CELL_W / 2;
+    SUB_X_EDGES[2] = CELL_W;
+}
 
 // Overlays on the overlay canvas, bottom to top (see setOverlay)
 const OVERLAY_ORDER = ['hover', 'hover-subpixel', 'paste', 'paste-subpixel', 'box', 'selection', 'subpixel-selection'];
@@ -98,6 +119,7 @@ class CanvasRenderer {
         this.ctx = null;                // 2D context of the grid canvas
         this.showGrid = false;          // 1px grid lines over the cells (see setShowGrid)
         this.lightTerminal = false;     // simulate a light terminal (see setLightTerminal)
+        this.cellAspect = DEFAULT_CELL_ASPECT; // cell width / height (see setCellAspect)
         this._onPixelRatioChange = () => this.render();
         this._glyphStyles = new Map();  // .glyph-* class → { font, transform, baseline }
         this._shadePatterns = new WeakMap(); // context → shade + colour → CanvasPattern (see fillShape)
@@ -463,6 +485,13 @@ class CanvasRenderer {
         this.redrawEverything();
     }
 
+    // Preview cells with another aspect (width / height), e.g. a terminal's
+    setCellAspect(aspect) {
+        this.cellAspect = aspect;
+        setCellWidthForAspect(aspect);
+        this.render();
+    }
+
     // Redraw the canvas, overlays and (on the next move) the paste preview,
     // e.g. after the grid or the theme changed
     redrawEverything() {
@@ -681,6 +710,8 @@ class CanvasRenderer {
         // centre (transform-origin)
         ctx.setTransform(g.kx, 0, 0, g.ky, -g.ox, -g.oy);
         ctx.translate(g.left + g.w / 2, g.top + CELL_H / 2);
+        // Narrower or wider cells: as a terminal font with that aspect
+        ctx.scale(CELL_W / GLYPH_CELL_W, 1);
         const t = style.transform;
         ctx.transform(t.a, t.b, t.c, t.d, t.e, t.f);
         ctx.font = style.font;
