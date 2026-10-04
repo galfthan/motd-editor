@@ -2391,8 +2391,10 @@ class CanvasRenderer {
     }
 
     // Fill: the area is the subpixels connected to (sx, sy) that look the
-    // same as it: lit or unlit alike, showing the same colour; anything else,
-    // and cells holding a character, stop it. Unlit areas connect up, down,
+    // same as it: lit or unlit alike, showing the same colour (an unlit area
+    // also takes in unlit subpixels showing the paper colour, which would be
+    // filled with it anyway); anything else, and cells holding a character,
+    // stop it. Unlit areas connect up, down,
     // left and right, lit ones also diagonally (drawn lines often only touch
     // at corners, and such a line still bounds an unlit area). `mode` (default this.fillMode) says what it does there:
     //   ink    lights the area in the ink colour. A cell where that would
@@ -2416,13 +2418,16 @@ class CanvasRenderer {
         };
         if (cellAt(sx, sy).type !== 'sextant') return { count: 0 };
         const startLit = lit(sx, sy), colour = shown(sx, sy);
+        const alsoPaper = !startLit && !this.bgColor.keep ? this.bgColor : null;
 
         // The subpixels that look like the start, row-major (cleared as the
         // fill reaches them)
         const match = new Uint8Array(W * H);
         for (let y = 0; y < H; y++) {
             for (let x = 0; x < W; x++) {
-                if (cellAt(x, y).type === 'sextant' && lit(x, y) === startLit && colorsEqual(shown(x, y), colour)) {
+                if (cellAt(x, y).type !== 'sextant' || lit(x, y) !== startLit) continue;
+                const c = shown(x, y);
+                if (colorsEqual(c, colour) || (alsoPaper && colorsEqual(c, alsoPaper))) {
                     match[y * W + x] = 1;
                 }
             }
