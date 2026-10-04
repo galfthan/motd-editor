@@ -416,7 +416,8 @@ kbd {
 }
 
 .tiles.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.tiles.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+/* One row, as many columns as tiles shown */
+.tiles.row { grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; }
 
 .tile {
     height: 58px;
@@ -687,6 +688,31 @@ kbd {
 
 .palette .default-swatch {
     background: repeating-linear-gradient(45deg, #0b0b0d 0 3px, #2e3036 3px 6px);
+}
+
+/* Keep: leave the cell's own colour (an outline with an equals sign) */
+.palette .keep-swatch,
+.swatch.keep,
+#fg-color-swatch.keep,
+.dock-colors .keep,
+.dock-colors .chip-fg.keep,
+.keep-mark {
+    background: linear-gradient(var(--text-secondary), var(--text-secondary)) center 36% / 50% 1.5px no-repeat,
+        linear-gradient(var(--text-secondary), var(--text-secondary)) center 64% / 50% 1.5px no-repeat,
+        var(--surface);
+    box-shadow: inset 0 0 0 1.5px var(--text-secondary);
+}
+
+.dock-colors .chip-fg.keep {
+    box-shadow: 0 0 0 2px var(--surface), inset 0 0 0 1.5px var(--text-secondary);
+}
+
+.keep-mark {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    vertical-align: -2px;
 }
 
 .color-actions {

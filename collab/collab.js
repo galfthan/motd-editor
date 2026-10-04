@@ -7,7 +7,7 @@
 
 (() => {
 
-const STYLES = { none: 0, light: 1, heavy: 2, double: 3 };
+const STYLES = { none: 0, light: 1, heavy: 2, double: 3, subpixel: SUBPIXEL_STYLE };
 const FILLS = { none: 0, fill: 1, recolor: 2 };
 
 // Operations that aren't an undo step of their own
@@ -26,13 +26,15 @@ function lookup(table, key, what) {
 
 function parseColor(value, fallback) {
     if (value === undefined || value === 'default') return fallback();
+    if (value === 'keep') return { ...fallback(), keep: true };
     const m = /^#([0-9a-f]{6})$/i.exec(value);
-    if (!m) throw new Error(`bad colour "${value}": use #rrggbb or default`);
+    if (!m) throw new Error(`bad colour "${value}": use #rrggbb, default or keep`);
     const n = parseInt(m[1], 16);
     return { r: n >> 16, g: (n >> 8) & 255, b: n & 255, default: false };
 }
 
 function colorName(c) {
+    if (c.keep) return 'keep';
     return c.default ? 'default' : '#' + [c.r, c.g, c.b].map(v => v.toString(16).padStart(2, '0')).join('');
 }
 
@@ -79,6 +81,12 @@ function argRect(a, subpixel = false) {
 function checkCell(x, y) {
     if (!(x >= 0 && x < r.canvas.width && y >= 0 && y < r.canvas.height)) {
         throw new Error(`cell (${x}, ${y}) is outside the ${r.canvas.width}x${r.canvas.height} canvas`);
+    }
+}
+
+function checkSubpixel(sx, sy) {
+    if (!(sx >= 0 && sx < r.canvas.width * 2 && sy >= 0 && sy < r.canvas.height * 3)) {
+        throw new Error(`subpixel (${sx}, ${sy}) is outside the ${r.canvas.width * 2}x${r.canvas.height * 3} subpixel canvas`);
     }
 }
 
@@ -356,9 +364,11 @@ const OPS = {
     },
 
     draw_box(a) {
-        // Not clipped: the parts past the edges are left out
+        // Not clipped: the parts past the edges are left out. With the
+        // subpixel style the coordinates are subpixels.
+        const subpixel = a.style === 'subpixel';
         const rect = normRect({ x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 });
-        if (!r.clipRect(rect)) throw new Error('rectangle is outside the canvas');
+        if (!r.clipRect(rect, subpixel)) throw new Error('rectangle is outside the canvas');
         withState({
             ...colorState(a),
             dragStart: { x: rect.x1, y: rect.y1 },
@@ -366,20 +376,35 @@ const OPS = {
             boxLineStyle: lookup(STYLES, a.style || 'light', 'style'),
             boxFillMode: lookup(FILLS, a.fill || 'none', 'fill')
         }, () => r.commitBox());
-        flash(rect);
+        flash(subpixel ? subpixelToCells(rect) : rect);
     },
 
     draw_line(a) {
-        if (a.style === 'none') throw new Error('a line needs a style: light, heavy or double');
-        checkCell(a.x1, a.y1);
-        checkCell(a.x2, a.y2);
+        if (a.style === 'none') throw new Error('a line needs a style: light, heavy, double or subpixel');
+        const subpixel = a.style === 'subpixel';
+        for (const [x, y] of [[a.x1, a.y1], [a.x2, a.y2]]) {
+            if (subpixel) checkSubpixel(x, y);
+            else checkCell(x, y);
+        }
         withState({
             ...colorState(a),
             dragStart: { x: a.x1, y: a.y1 },
             dragEnd: { x: a.x2, y: a.y2 },
             boxLineStyle: lookup(STYLES, a.style || 'light', 'style')
         }, () => r.commitLine());
-        flash(normRect({ x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 }));
+        const rect = normRect({ x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 });
+        flash(subpixel ? subpixelToCells(rect) : rect);
+    },
+
+    fill(a) {
+        checkSubpixel(a.sx, a.sy);
+        const mode = a.mode || 'ink';
+        if (!['ink', 'paper', 'both'].includes(mode)) throw new Error(`unknown mode "${mode}": use ink, paper or both`);
+        const { count, changed, rect } = withState(colorState(a), () => r.fillAt(a.sx, a.sy, mode));
+        if (!count) return `nothing was filled: (${a.sx}, ${a.sy}) is in a character cell, or the colours it would use are keep`;
+        if (!changed) return `nothing changed: the area (${count} subpixels) already has those colours, or ink mode left out all its cells (lines of another colour run through them)`;
+        flash(rect);
+        return `filled an area of ${count} subpixels, changing ${changed} cells`;
     },
 
     copy_region(a) {

@@ -100,6 +100,7 @@ const LEGACY_CHARS = {
 // default; the inspector switches between them)
 const TOOL_GROUPS = {
     brush: ['draw', 'erase'],
+    fill: ['fill'],
     glyph: ['char'],
     text: ['text'],
     shape: ['box', 'line'],
@@ -109,6 +110,7 @@ const TOOL_GROUPS = {
 
 const GROUP_INFO = {
     brush: { title: 'Brush', key: 'B' },
+    fill: { title: 'Fill', key: 'F' },
     glyph: { title: 'Glyph', key: 'G' },
     text: { title: 'Text', key: 'T' },
     shape: { title: 'Shape', key: 'S' },
@@ -119,7 +121,7 @@ const GROUP_INFO = {
 // Single-key shortcuts: a tool, or a dock tool (its last used mode). D, C
 // and P are the older keys for draw, symbol and pick.
 const KEY_TOOLS = {
-    b: 'brush', e: 'erase', d: 'draw', g: 'glyph', c: 'glyph', t: 'text',
+    b: 'brush', e: 'erase', d: 'draw', f: 'fill', g: 'glyph', c: 'glyph', t: 'text',
     s: 'shape', l: 'line', v: 'selection', i: 'pick', p: 'pick'
 };
 
@@ -440,6 +442,8 @@ class Toolbar {
 
         const styles = [...document.querySelectorAll('.tile[data-style]')];
         styles.forEach(btn => btn.addEventListener('click', () => {
+            // A drag in progress is in the old style's units (cells or subpixels)
+            if (this.renderer.dragStart) this.renderer.cancelDrag();
             pressOne(styles, btn);
             this.renderer.boxLineStyle = parseInt(btn.dataset.style);
         }));
@@ -447,6 +451,12 @@ class Toolbar {
         fills.forEach(btn => btn.addEventListener('click', () => {
             pressOne(fills, btn);
             this.renderer.boxFillMode = parseInt(btn.dataset.fill);
+        }));
+        const fillModes = [...document.querySelectorAll('[data-fill-mode]')];
+        fillModes.forEach(btn => btn.addEventListener('click', () => {
+            pressOne(fillModes, btn);
+            this.renderer.fillMode = btn.dataset.fillMode;
+            document.querySelectorAll('[data-fill-hint]').forEach(p => { p.hidden = p.dataset.fillHint !== btn.dataset.fillMode; });
         }));
         const brushes = [...document.querySelectorAll('[data-brush]')];
         brushes.forEach(btn => btn.addEventListener('click', () => {
@@ -588,10 +598,12 @@ class Toolbar {
             if (cls) btn.className = cls;
             else btn.style.background = color;
             btn.addEventListener('click', () => this.setColor(this.colorTarget,
-                color ? { ...hexToRgb(color), default: false } : (this.colorTarget === 'fg' ? defaultFG() : defaultBG())));
+                color === 'keep' ? keepColor(this.colorTarget)
+                    : color ? { ...hexToRgb(color), default: false } : (this.colorTarget === 'fg' ? defaultFG() : defaultBG())));
             palette.appendChild(btn);
         };
         add("Terminal's own colour", null, 'default-swatch');
+        add("Keep: leave the cell's own colour", 'keep', 'keep-swatch');
         ANSI_COLORS.forEach(([name, hex]) => add(name, hex));
 
         for (const which of ['fg', 'bg']) {
@@ -611,17 +623,20 @@ class Toolbar {
 
     // Make `color` the current fg/bg colour and show it
     setColor(which, color) {
+        if (color.keep) color = keepColor(which);   // e.g. after a swap
         if (which === 'fg') this.renderer.setFgColor(color);
         else this.renderer.setBgColor(color);
         if (this.renderer.imagePaste && this.renderer.imagePaste.mono) this.renderer.scheduleImageUpdate();
         const input = document.getElementById(`${which}-color`);
         input.value = toHex(color);
         const swatch = input.parentElement;
-        swatch.classList.toggle('default', color.default);
+        swatch.classList.toggle('keep', !!color.keep);
+        swatch.classList.toggle('default', color.default && !color.keep);
         swatch.style.setProperty('--swatch', toHex(color));
-        document.getElementById(`${which}-value`).textContent = color.default ? 'Terminal' : toHex(color);
+        document.getElementById(`${which}-value`).textContent = color.keep ? 'Keep' : color.default ? 'Terminal' : toHex(color);
         const chip = document.getElementById(`dock-${which}`);
-        chip.classList.toggle('default', color.default);
+        chip.classList.toggle('keep', !!color.keep);
+        chip.classList.toggle('default', color.default && !color.keep);
         chip.style.background = color.default ? '' : toHex(color);
     }
 
@@ -934,6 +949,11 @@ class Toolbar {
         const r = this.renderer;
         const cmds = [
             ['Tools', 'Brush', 'B', tool('draw')],
+            ['Tools', 'Fill', 'F', tool('fill')],
+            ...['ink', 'paper', 'both'].map(m => ['Fill', `Fill with ${m}`, '', () => {
+                this.setTool('fill');
+                document.querySelector(`[data-fill-mode="${m}"]`).click();
+            }]),
             ['Tools', 'Erase', 'E', tool('erase')],
             ['Tools', 'Glyph', 'G', tool('char')],
             ['Tools', 'Text', 'T', tool('text')],
@@ -952,6 +972,10 @@ class Toolbar {
             ['Edit', 'Undo', '⌘Z', act('undo')],
             ['Edit', 'Redo', '⇧⌘Z', act('redo')],
             ['Colour', 'Swap ink and paper', 'X', act('swap-colors')],
+            ['Colour', "Ink: keep the cells' own", '', () => this.setColor('fg', keepColor('fg'))],
+            ['Colour', "Paper: keep the cells' own", '', () => this.setColor('bg', keepColor('bg'))],
+            ['Shape', 'Subpixel box', '', () => { this.setTool('box'); document.querySelector('.tile[data-style="4"]').click(); }],
+            ['Shape', 'Subpixel line', '', () => { this.setTool('line'); document.querySelector('.tile[data-style="4"]').click(); }],
             ['Colour', "Reset to the terminal's colours", '', act('default-colors')],
             ['Style', r.bold ? 'Bold off' : 'Bold on', '', () => this.setStyle(!r.bold, r.inverse)],
             ['Style', r.inverse ? 'Inverse off' : 'Inverse on', '', () => this.setStyle(r.bold, !r.inverse)],

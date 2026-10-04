@@ -19,9 +19,15 @@ npx serve web
 - Sextant character editing (2x3 subpixel grid per cell)
 - Extended diagonal and triangle characters (U+1FB3C-1FB6F), blocks, shades
   and emoji, searchable by name
-- Box and line drawing with light/heavy/double borders
+- Box and line drawing with light/heavy/double borders, or with subpixels
+  (straight lines, and boxes that blend with subpixel art)
+- Fill: from the clicked subpixel to the touching ones that look the same;
+  other colours and cells holding a character stop it. Ink lights the area
+  in the ink colour (lines through it keep theirs), Paper gives its cells
+  the paper colour, Both does both
 - Ink (foreground) and paper (background) colours, the 16 terminal colours,
-  or the terminal's own; bold and inverse text
+  the terminal's own, or keep (leave each cell's colour as it is); bold and
+  inverse text
 - Autosave: the canvas is kept in the browser and comes back when you reopen
   the editor (Export saves a file). Tabs of the same editor share it: the
   last one changed wins
@@ -39,7 +45,7 @@ npx serve web
 - Zoom with + and −, Ctrl+wheel, or 0 to fit the window
 
 Tools are in the dock at the bottom; the panel on the right has the current
-tool's options and the colours. Shortcuts: B brush, E erase, G glyph, T text,
+tool's options and the colours. Shortcuts: B brush, E erase, F fill, G glyph, T text,
 S box, L line, V select (Shift+V subpixels), I pick a colour (or Alt-click
 with any tool), X swap colours. Ctrl+K (⌘K) finds any command or glyph.
 
