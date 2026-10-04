@@ -398,8 +398,10 @@ const OPS = {
 
     fill(a) {
         checkSubpixel(a.sx, a.sy);
-        const { count, rect } = withState(colorState(a), () => r.fillAt(a.sx, a.sy));
-        if (!count) return `nothing was filled: (${a.sx}, ${a.sy}) is in a character cell or already the fg colour, or fg is keep`;
+        const mode = a.mode || 'ink';
+        if (!['ink', 'paper', 'both'].includes(mode)) throw new Error(`unknown mode "${mode}": use ink, paper or both`);
+        const { count, rect } = withState(colorState(a), () => r.fillAt(a.sx, a.sy, mode));
+        if (!count) return `nothing was filled: (${a.sx}, ${a.sy}) is in a character cell, or the colour it would use is keep`;
         flash(rect);
         return `filled ${count} subpixels`;
     },

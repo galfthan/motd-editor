@@ -452,6 +452,12 @@ class Toolbar {
             pressOne(fills, btn);
             this.renderer.boxFillMode = parseInt(btn.dataset.fill);
         }));
+        const fillModes = [...document.querySelectorAll('[data-fill-mode]')];
+        fillModes.forEach(btn => btn.addEventListener('click', () => {
+            pressOne(fillModes, btn);
+            this.renderer.fillMode = btn.dataset.fillMode;
+            document.querySelectorAll('[data-fill-hint]').forEach(p => { p.hidden = p.dataset.fillHint !== btn.dataset.fillMode; });
+        }));
         const brushes = [...document.querySelectorAll('[data-brush]')];
         brushes.forEach(btn => btn.addEventListener('click', () => {
             pressOne(brushes, btn);
@@ -944,6 +950,10 @@ class Toolbar {
         const cmds = [
             ['Tools', 'Brush', 'B', tool('draw')],
             ['Tools', 'Fill', 'F', tool('fill')],
+            ...['ink', 'paper', 'both'].map(m => ['Fill', `Fill with ${m}`, '', () => {
+                this.setTool('fill');
+                document.querySelector(`[data-fill-mode="${m}"]`).click();
+            }]),
             ['Tools', 'Erase', 'E', tool('erase')],
             ['Tools', 'Glyph', 'G', tool('char')],
             ['Tools', 'Text', 'T', tool('text')],
