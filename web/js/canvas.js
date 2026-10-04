@@ -1216,6 +1216,8 @@ class CanvasRenderer {
             this.handleSelectToolDown(e);
         } else if (this.tool === 'char') {
             this.handleCharTool(e);
+        } else if (this.tool === 'hand') {
+            // Moving the view (the toolbar handles the drag)
         } else if (this.tool === 'fill') {
             this.handleFillTool(e);
         } else {

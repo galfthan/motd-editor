@@ -1085,6 +1085,12 @@ dialog h3 {
     cursor: crosshair;
 }
 
+/* Moving the view: the hand tool, Space held, or a middle-button drag */
+.canvas-scroll.pan-ready,
+.canvas-scroll.pan-ready .grid-canvas { cursor: grab; }
+.canvas-scroll.panning,
+.canvas-scroll.panning .grid-canvas { cursor: grabbing; }
+
 /* Placing an image: drags move it, or resize it from its handle */
 .canvas.image-move .grid-canvas { cursor: move; }
 .canvas.image-resize .grid-canvas { cursor: nwse-resize; }

@@ -42,11 +42,12 @@ npx serve web
   as it is.
 - Preview for dark or light terminals and for the cell shape (width ÷ height)
   of the terminal the art is for (the cells button in the status bar)
-- Zoom with + and −, Ctrl+wheel, or 0 to fit the window
+- Zoom with + and −, Ctrl+wheel, or 0 to fit the window; move the view with
+  the Hand tool, by holding Space and dragging, or with the middle button
 
 Tools are in the dock at the bottom; the panel on the right has the current
 tool's options and the colours. Shortcuts: B brush, E erase, F fill, G glyph, T text,
-S box, L line, V select (Shift+V subpixels), I pick a colour (or Alt-click
+S box, L line, V select (Shift+V subpixels), H hand, I pick a colour (or Alt-click
 with any tool), X swap colours. Ctrl+K (⌘K) finds any command or glyph.
 
 ## Working with an AI agent (optional)

@@ -105,6 +105,7 @@ const TOOL_GROUPS = {
     text: ['text'],
     shape: ['box', 'line'],
     selection: ['select', 'select-subpixel'],
+    hand: ['hand'],
     pick: ['pick']
 };
 
@@ -115,6 +116,7 @@ const GROUP_INFO = {
     text: { title: 'Text', key: 'T' },
     shape: { title: 'Shape', key: 'S' },
     selection: { title: 'Select', key: 'V' },
+    hand: { title: 'Hand', key: 'H' },
     pick: { title: 'Pick colour', key: 'I' }
 };
 
@@ -122,7 +124,7 @@ const GROUP_INFO = {
 // and P are the older keys for draw, symbol and pick.
 const KEY_TOOLS = {
     b: 'brush', e: 'erase', d: 'draw', f: 'fill', g: 'glyph', c: 'glyph', t: 'text',
-    s: 'shape', l: 'line', v: 'selection', i: 'pick', p: 'pick'
+    s: 'shape', l: 'line', v: 'selection', h: 'hand', i: 'pick', p: 'pick'
 };
 
 // Where the canvas is autosaved (see Toolbar.autosave)
@@ -194,6 +196,7 @@ class Toolbar {
         });
         this.setupCellAspect();
         this.setupZoom();
+        this.setupPanning();
         this.setupTools();
         this.setupColors();
         this.setupStyle();
@@ -363,6 +366,56 @@ class Toolbar {
         }, { passive: false });
     }
 
+    // Moving the view by dragging: with the hand tool, while Space is held
+    // (any tool; not while typing on the canvas), or with the middle button
+    setupPanning() {
+        const s = this.scroller, r = this.renderer;
+        let space = false, drag = null;
+        const ready = () => s.classList.toggle('pan-ready', !drag && (space || r.tool === 'hand'));
+        this.updatePanCursor = ready;
+
+        // Capture phase: before the canvas sees the press
+        s.addEventListener('mousedown', (e) => {
+            if (!(e.button === 1 || (e.button === 0 && (space || r.tool === 'hand')))) return;
+            e.preventDefault();
+            e.stopPropagation();
+            drag = { x: e.clientX, y: e.clientY, left: s.scrollLeft, top: s.scrollTop };
+            s.classList.add('panning');
+            ready();
+        }, true);
+        window.addEventListener('mousemove', (e) => {
+            if (!drag) return;
+            if (e.buttons === 0) return end();   // released where we didn't see it
+            s.scrollLeft = drag.left - (e.clientX - drag.x);
+            s.scrollTop = drag.top - (e.clientY - drag.y);
+        });
+        const end = () => {
+            drag = null;
+            s.classList.remove('panning');
+            ready();
+        };
+        window.addEventListener('mouseup', () => { if (drag) end(); });
+        // The middle button's click mustn't start auto-scrolling either
+        s.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefault(); });
+
+        const typing = (e) => (e.target.closest && e.target.closest('input, textarea, dialog')) ||
+            (r.tool === 'text' && r.textCursor);
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== ' ' || typing(e)) return;
+            e.preventDefault();   // no scrolling, no pressing a focused button
+            if (space) return;    // held: the key repeats
+            space = true;
+            ready();
+        });
+        document.addEventListener('keyup', (e) => {
+            if (e.key !== ' ' || !space) return;
+            e.preventDefault();   // a focused button would activate on key-up
+            space = false;
+            ready();
+        });
+        window.addEventListener('blur', () => { space = false; ready(); });
+    }
+
     // Zoom to `zoom`, keeping the canvas point under `at` (a pointer event;
     // default the middle of the view) where it is
     setZoom(zoom, at = null) {
@@ -485,6 +538,7 @@ class Toolbar {
             b.setAttribute('aria-pressed', String(b.dataset.tool === group));
         });
         document.querySelectorAll('[data-tool-set]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.toolSet === tool)));
+        if (this.updatePanCursor) this.updatePanCursor();
         this.currentGroup = group;
         this.showPanel();
 
@@ -962,6 +1016,7 @@ class Toolbar {
             ['Tools', 'Select cells', 'V', tool('select')],
             ['Tools', 'Select subpixels', '⇧V', tool('select-subpixel')],
             ['Tools', 'Pick colour', 'I', tool('pick')],
+            ['Tools', 'Hand: move the view', 'H', tool('hand')],
             ['Brush', 'Brush tip: subpixel', '', () => { this.setTool('brush'); document.querySelector('[data-brush="subpixel"]').click(); }],
             ['Brush', 'Brush tip: whole cell', '', () => { this.setTool('brush'); document.querySelector('[data-brush="cell"]').click(); }],
             ['File', 'New canvas', '', act('new')],
