@@ -2391,63 +2391,62 @@ class CanvasRenderer {
     }
 
     // Fill: the area is the subpixels connected to (sx, sy) that look the
-    // same as it: lit or unlit alike, showing the same colour (an unlit area
-    // also takes in unlit subpixels showing the paper colour, which would be
-    // filled with it anyway); anything else, and cells holding a character,
-    // stop it. Unlit areas connect up, down,
-    // left and right, lit ones also diagonally (drawn lines often only touch
-    // at corners, and such a line still bounds an unlit area). `mode` (default this.fillMode) says what it does there:
-    //   ink    lights the area in the ink colour. A cell where that would
-    //          repaint other lit subpixels (a line through it) is left out.
+    // same as it: lit or unlit alike, showing the same colour; anything else,
+    // and cells holding a character, stop it. An unlit area also takes in
+    // the unlit subpixels of drawn cells (ones with lit subpixels) showing
+    // the paper colour: the paper a shape drawn in these colours put around
+    // it. Unlit areas connect up, down, left and right, lit ones also
+    // diagonally (drawn lines often only touch at corners, and such a line
+    // still bounds an unlit area). `mode` (default this.fillMode) says what
+    // it does there:
+    //   ink    lights the area in the ink colour. An unlit area leaves out
+    //          cells where that would repaint other lit subpixels (a line
+    //          through them).
     //   paper  gives every cell the area reaches the paper colour; lit
     //          subpixels keep their ink.
     //   both   paper, then ink.
-    // Returns how many subpixels the area has (0: (sx, sy) is in a
-    // character cell, or there is nothing to do) and the cells' rect.
+    // Returns the area's size (0: (sx, sy) is in a character cell, or the
+    // colours to use are keep), how many cells changed, and their rect.
     fillAt(sx, sy, mode = this.fillMode) {
         const cols = this.canvas.width, W = cols * 2, H = this.canvas.height * 3;
         const ink = mode !== 'paper' && !this.fgColor.keep;
         const paper = mode !== 'ink' && !this.bgColor.keep;
-        if ((!ink && !paper) || !(sx >= 0 && sx < W && sy >= 0 && sy < H)) return { count: 0 };
+        if ((!ink && !paper) || !(sx >= 0 && sx < W && sy >= 0 && sy < H)) return { count: 0, changed: 0 };
         const cellAt = (x, y) => this.canvas.cells[Math.floor(y / 3)][x >> 1];
-        const lit = (x, y) => cellAt(x, y).subpixels[y % 3][x % 2];
-        // The colour a subpixel shows (inverse swaps ink and paper)
-        const shown = (x, y) => {
+        // A cell's colour slots: lit subpixels show `on`, unlit `off`
+        // (inverse swaps them)
+        const slots = (cell) => cell.inverse ? { on: 'bg', off: 'fg' } : { on: 'fg', off: 'bg' };
+        const start = cellAt(sx, sy);
+        if (start.type !== 'sextant') return { count: 0, changed: 0 };
+        const startLit = start.subpixels[sy % 3][sx % 2];
+        const colour = start[slots(start)[startLit ? 'on' : 'off']];
+        const passPaper = !startLit && !this.bgColor.keep ? this.bgColor : null;
+        // Whether (x, y) belongs in the area, worked out as the fill reaches it
+        const fits = (x, y) => {
             const cell = cellAt(x, y);
-            return lit(x, y) !== !!cell.inverse ? cell.fg : cell.bg;
+            if (cell.type !== 'sextant' || cell.subpixels[y % 3][x % 2] !== startLit) return false;
+            const c = cell[slots(cell)[startLit ? 'on' : 'off']];
+            return colorsEqual(c, colour) ||
+                (!!passPaper && colorsEqual(c, passPaper) && cell.subpixels.some(row => row[0] || row[1]));
         };
-        if (cellAt(sx, sy).type !== 'sextant') return { count: 0 };
-        const startLit = lit(sx, sy), colour = shown(sx, sy);
-        const alsoPaper = !startLit && !this.bgColor.keep ? this.bgColor : null;
-
-        // The subpixels that look like the start, row-major (cleared as the
-        // fill reaches them)
-        const match = new Uint8Array(W * H);
-        for (let y = 0; y < H; y++) {
-            for (let x = 0; x < W; x++) {
-                if (cellAt(x, y).type !== 'sextant' || lit(x, y) !== startLit) continue;
-                const c = shown(x, y);
-                if (colorsEqual(c, colour) || (alsoPaper && colorsEqual(c, alsoPaper))) {
-                    match[y * W + x] = 1;
-                }
-            }
-        }
         const steps = startLit
             ? [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]]
             : [[-1, 0], [1, 0], [0, -1], [0, 1]];
+        const seen = new Uint8Array(W * H);
         const area = [];
         const stack = [sy * W + sx];
-        match[stack[0]] = 0;
+        seen[stack[0]] = 1;
         while (stack.length) {
             const i = stack.pop();
             area.push(i);
             const x = i % W, y = (i - x) / W;
             for (const [dx, dy] of steps) {
-                const nx = x + dx, ny = y + dy, j = ny * W + nx;
-                if (nx >= 0 && nx < W && ny >= 0 && ny < H && match[j]) {
-                    match[j] = 0;
-                    stack.push(j);
-                }
+                const nx = x + dx, ny = y + dy;
+                if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+                const j = ny * W + nx;
+                if (seen[j]) continue;
+                seen[j] = 1;
+                if (fits(nx, ny)) stack.push(j);
             }
         }
 
@@ -2460,25 +2459,32 @@ class CanvasRenderer {
             byCell.get(k).push([y % 3, x % 2]);
         }
         const box = { x1: cols, y1: this.canvas.height, x2: 0, y2: 0 };
+        let changed = 0;
         for (const [k, subs] of byCell) {
             const x = k % cols, y = (k - x) / cols;
             const cell = this.canvas.cells[y][x];
+            const before = JSON.stringify(cell);
+            const slot = slots(cell);
             this.beforeChange(x, y, x, y);
-            if (paper) cell.bg = { ...this.bgColor };
+            if (paper) cell[slot.off] = { ...this.bgColor };
             if (ink) {
-                // Other lit subpixels would take the new ink: leave the cell
+                // An unlit area: other lit subpixels would take the new ink,
+                // so leave the cell (a lit area has all the cell's lit ones'
+                // colour, so recolouring them all is right)
                 const inArea = new Set(subs.map(([r, c]) => r * 2 + c));
-                const others = cell.subpixels.flat().some((on, i) => on && !inArea.has(i));
-                if (!others || colorsEqual(cell.fg, this.fgColor)) {
-                    cell.fg = { ...this.fgColor };
+                const others = !startLit && cell.subpixels.flat().some((on, i) => on && !inArea.has(i));
+                if (!others || colorsEqual(cell[slot.on], this.fgColor)) {
+                    cell[slot.on] = { ...this.fgColor };
                     for (const [r, c] of subs) cell.subpixels[r][c] = true;
                 }
             }
+            if (JSON.stringify(cell) === before) continue;
+            changed++;
             box.x1 = Math.min(box.x1, x); box.x2 = Math.max(box.x2, x);
             box.y1 = Math.min(box.y1, y); box.y2 = Math.max(box.y2, y);
         }
-        this.updateCellRect(box.x1, box.y1, box.x2, box.y2);
-        return { count: area.length, rect: box };
+        if (changed) this.updateCellRect(box.x1, box.y1, box.x2, box.y2);
+        return { count: area.length, changed, rect: changed ? box : null };
     }
 
     commitBox() {

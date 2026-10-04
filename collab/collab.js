@@ -400,10 +400,11 @@ const OPS = {
         checkSubpixel(a.sx, a.sy);
         const mode = a.mode || 'ink';
         if (!['ink', 'paper', 'both'].includes(mode)) throw new Error(`unknown mode "${mode}": use ink, paper or both`);
-        const { count, rect } = withState(colorState(a), () => r.fillAt(a.sx, a.sy, mode));
-        if (!count) return `nothing was filled: (${a.sx}, ${a.sy}) is in a character cell, or the colour it would use is keep`;
+        const { count, changed, rect } = withState(colorState(a), () => r.fillAt(a.sx, a.sy, mode));
+        if (!count) return `nothing was filled: (${a.sx}, ${a.sy}) is in a character cell, or the colours it would use are keep`;
+        if (!changed) return `nothing changed: the area (${count} subpixels) already has those colours, or ink mode left out all its cells (lines of another colour run through them)`;
         flash(rect);
-        return `filled ${count} subpixels`;
+        return `filled an area of ${count} subpixels, changing ${changed} cells`;
     },
 
     copy_region(a) {
