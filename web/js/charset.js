@@ -58,58 +58,87 @@ const TRIANGLE_CHARS = [
     { code: 0x1FB6F, name: 'UPPER TRIANGULAR ONE QUARTER BLOCK' },
 ];
 
-// Sextant patterns are 6 bits, one per subpixel in reading order:
-// bit (row * 2 + col) for the 2x3 grid, so 1 = top-left ... 32 = bottom-right.
+// Block cells: 2 columns of subpixels and 2 (quadrants), 3 (sextants) or 4
+// (octants) rows. A pattern has one bit per subpixel in reading order, bit
+// (row * 2 + col): 1 = top-left, 2 = top-right, 4 = next row's left, ...
 
-// Convert a subpixels array ([row][col]) to its 6-bit pattern
 function subpixelsToPattern(subpixels) {
     let pattern = 0;
-    for (let row = 0; row < 3; row++) {
-        for (let col = 0; col < 2; col++) {
-            if (subpixels[row][col]) pattern |= 1 << (row * 2 + col);
-        }
-    }
+    subpixels.forEach((row, r) => {
+        if (row[0]) pattern |= 1 << (r * 2);
+        if (row[1]) pattern |= 2 << (r * 2);
+    });
     return pattern;
 }
 
-// Convert a 6-bit pattern to its subpixels array
-function patternToSubpixels(pattern) {
-    return [
-        [!!(pattern & 1), !!(pattern & 2)],
-        [!!(pattern & 4), !!(pattern & 8)],
-        [!!(pattern & 16), !!(pattern & 32)]
-    ];
+function patternToSubpixels(pattern, rows = 3) {
+    return Array.from({ length: rows }, (_, r) => [!!(pattern & (1 << (r * 2))), !!(pattern & (2 << (r * 2)))]);
 }
 
-// Convert a 6-bit pattern to its Unicode character. The sextant block
-// U+1FB00-1FB3B omits the patterns that already exist as block elements.
-function sextantPatternToChar(pattern) {
-    if (pattern === 0)  return ' ';
-    if (pattern === 63) return '\u2588';  // full block
-    if (pattern === 21) return '\u258C';  // left half
-    if (pattern === 42) return '\u2590';  // right half
+// Each resolution's characters by pattern
+const BLOCK_CHARS = (() => {
+    const quadrant = [0x20, 0x2598, 0x259D, 0x2580, 0x2596, 0x258C, 0x259E, 0x259B,
+        0x2597, 0x259A, 0x2590, 0x259C, 0x2584, 0x2599, 0x259F, 0x2588];
+    // Sextants U+1FB00-1FB3B, in pattern order without the patterns block
+    // elements already have
+    const sextant = [];
+    const sextantOwn = { 0: 0x20, 21: 0x258C, 42: 0x2590, 63: 0x2588 };
+    for (let p = 0, code = 0x1FB00; p < 64; p++) sextant.push(sextantOwn[p] ?? code++);
+    // Octants U+1CD00-1CDE5 (Unicode 16) likewise; the others are blocks,
+    // quadrants and quarter blocks
+    const octantOwn = {
+        0: 0x20, 1: 0x1CEA8, 2: 0x1CEAB, 3: 0x1FB82, 5: 0x2598, 10: 0x259D, 15: 0x2580, 20: 0x1FBE6,
+        40: 0x1FBE7, 63: 0x1FB85, 64: 0x1CEA3, 80: 0x2596, 85: 0x258C, 90: 0x259E, 95: 0x259B,
+        128: 0x1CEA0, 160: 0x2597, 165: 0x259A, 170: 0x2590, 175: 0x259C, 192: 0x2582,
+        240: 0x2584, 245: 0x2599, 250: 0x259F, 252: 0x2586, 255: 0x2588
+    };
+    const octant = [];
+    for (let p = 0, code = 0x1CD00; p < 256; p++) octant.push(octantOwn[p] ?? code++);
+    return { 2: quadrant, 3: sextant, 4: octant };
+})();
 
-    let offset = pattern;
-    if (pattern > 42)      offset -= 3;
-    else if (pattern > 21) offset -= 2;
-    else                   offset -= 1;
+// The block resolutions: subpixel rows per cell and their names
+const BLOCK_MODES = { 2: 'quadrant', 3: 'sextant', 4: 'octant' };
 
-    return String.fromCodePoint(0x1FB00 + offset);
+// Character → { rows, pattern }. A character several resolutions have is
+// read as a sextant (space, █, ▌, ▐) or else a quadrant (▀, ▄, ▘, ...).
+const CHAR_BLOCKS = new Map();
+for (const rows of [4, 2, 3]) {
+    BLOCK_CHARS[rows].forEach((code, pattern) => CHAR_BLOCKS.set(code, { rows, pattern }));
 }
 
-// Reverse lookup: Unicode char → sextant 6-bit pattern
-function runeToSextantPattern(code) {
-    if (code === 32) return { pattern: 0, ok: true };        // Space
-    if (code === 0x2588) return { pattern: 63, ok: true };   // Full block
-    if (code === 0x258C) return { pattern: 21, ok: true };   // Left half
-    if (code === 0x2590) return { pattern: 42, ok: true };   // Right half
+function blockToChar(subpixels) {
+    return String.fromCodePoint(BLOCK_CHARS[subpixels.length][subpixelsToPattern(subpixels)]);
+}
 
-    if (code < 0x1FB00 || code > 0x1FB3B) return { pattern: 0, ok: false };
+// The block cell subpixels a character stands for, or null
+function charToBlock(code) {
+    const block = CHAR_BLOCKS.get(code);
+    return block ? patternToSubpixels(block.pattern, block.rows) : null;
+}
 
-    let pattern = (code - 0x1FB00) + 1;
-    if (pattern >= 21) pattern++;
-    if (pattern >= 42) pattern++;
-    return { pattern, ok: true };
+// Rows of a grid of subpixels `from` per cell high, resampled to `to` per
+// cell: a subpixel is set where set ones cover at least a third of it (with
+// `any`, where any covers it). set(v) says whether an entry is set and
+// make(v, on) gives the new entry, v being the one covering most of it.
+function resampleGrid(grid, from, to, { any = false, set = v => v, make = (v, on) => on } = {}) {
+    const h = Math.max(1, Math.round(grid.length * to / from));
+    return Array.from({ length: h }, (_, r) => grid[0].map((_, c) => {
+        const top = r * from / to, bottom = (r + 1) * from / to;   // in source rows
+        let covered = 0, most = 0, v = null;
+        for (let s = Math.floor(top); s < Math.min(grid.length, Math.ceil(bottom)); s++) {
+            const overlap = Math.min(bottom, s + 1) - Math.max(top, s);
+            if (overlap <= 0) continue;
+            if (overlap > most) { most = overlap; v = grid[s][c]; }
+            if (set(grid[s][c])) covered += overlap;
+        }
+        return make(v, any ? covered > 0 : covered * to / from >= 1 / 3 - 1e-9);
+    }));
+}
+
+// A block cell's subpixels at `rows` per cell (see resampleGrid)
+function resampleSubpixels(subpixels, rows, any = false) {
+    return resampleGrid(subpixels, subpixels.length, rows, { any });
 }
 
 // CSS class with the font styles for a glyph (see .glyph-* in style.css).

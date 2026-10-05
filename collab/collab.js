@@ -9,6 +9,7 @@
 
 const STYLES = { none: 0, light: 1, heavy: 2, double: 3, rounded: ROUNDED_STYLE, subpixel: SUBPIXEL_STYLE };
 const FILLS = { none: 0, fill: 1, recolor: 2 };
+const PIXELS = Object.fromEntries(Object.entries(BLOCK_MODES).map(([rows, name]) => [name, +rows]));
 
 // Operations that aren't an undo step of their own
 const NO_STEP = new Set(['get_state', 'view_canvas', 'read_region', 'export', 'set_display', 'undo', 'redo']);
@@ -90,13 +91,9 @@ function inkOnly(op) {
 }
 
 function checkSubpixel(sx, sy) {
-    if (!(sx >= 0 && sx < r.canvas.width * 2 && sy >= 0 && sy < r.canvas.height * 3)) {
-        throw new Error(`subpixel (${sx}, ${sy}) is outside the ${r.canvas.width * 2}x${r.canvas.height * 3} subpixel canvas`);
+    if (!(sx >= 0 && sx < r.canvas.width * 2 && sy >= 0 && sy < r.canvas.height * BLOCK_ROWS)) {
+        throw new Error(`subpixel (${sx}, ${sy}) is outside the ${r.canvas.width * 2}x${r.canvas.height * BLOCK_ROWS} subpixel canvas`);
     }
-}
-
-function subpixelToCells(s) {
-    return { x1: Math.floor(s.x1 / 2), y1: Math.floor(s.y1 / 3), x2: Math.floor(s.x2 / 2), y2: Math.floor(s.y2 / 3) };
 }
 
 // Highlight cells the agent changed, briefly
@@ -130,7 +127,8 @@ function paintSubpixels(points) {
         for (const filled of [true, false]) {
             const cells = new Map();
             for (const p of points) {
-                if (p.filled === filled && r.subpixelAt(p.x, p.y)) cells.set(`${p.x >> 1},${Math.floor(p.y / 3)}`, { x: p.x >> 1, y: Math.floor(p.y / 3) });
+                const c = subpixelCell(p.x, p.y);
+                if (p.filled === filled && r.subpixelAt(p.x, p.y)) cells.set(`${c.x},${c.y}`, c);
             }
             r.paintPaper([...cells.values()], !filled);
             for (const c of cells.values()) flash({ x1: c.x, y1: c.y, x2: c.x, y2: c.y });
@@ -253,7 +251,7 @@ const OPS = {
             width: r.canvas.width,
             height: r.canvas.height,
             subpixel_width: r.canvas.width * 2,
-            subpixel_height: r.canvas.height * 3,
+            subpixel_height: r.canvas.height * r.blockRows,
             user: {
                 tool: r.tool,
                 fg: colorName(r.fgColor),
@@ -263,6 +261,7 @@ const OPS = {
                 selection: r.selection,
                 subpixel_selection: r.subpixelSelection,
                 text_cursor: r.textCursor,
+                pixels: BLOCK_MODES[r.blockRows],
                 note: panel.note.value
             },
             display: displayState()
@@ -314,8 +313,8 @@ const OPS = {
                 return text.trim() ? text : `(${rows.length} blank rows)`;
             }
             case 'subpixels':
-                return rows.flatMap(row => [0, 1, 2].map(sr => row.map(cell =>
-                    cell.type === 'sextant' ? cell.subpixels[sr].map(on => on ? '#' : '.').join('') : '++'
+                return rows.flatMap(row => Array.from({ length: BLOCK_ROWS }, (_, sr) => row.map(cell =>
+                    cell.type === 'block' ? [0, 1].map(c => cellSubpixelAt(cell, sr, c, BLOCK_ROWS) ? '#' : '.').join('') : '++'
                 ).join(''))).join('\n');
             case 'cells': {
                 const out = [];
@@ -399,7 +398,7 @@ const OPS = {
         const rect = normRect({ x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 });
         if (!r.clipRect(rect, subpixel)) throw new Error('rectangle is outside the canvas');
         // Editing paper: the cells it covers
-        const at = subpixel && r.editView() === 'paper' ? subpixelToCells(rect) : rect;
+        const at = subpixel && r.editView() === 'paper' ? subpixelToCellRect(rect) : rect;
         withState({
             ...colorState(a),
             dragStart: { x: at.x1, y: at.y1 },
@@ -407,7 +406,7 @@ const OPS = {
             boxLineStyle: lookup(STYLES, a.style || 'light', 'style'),
             boxFillMode: lookup(FILLS, a.fill || 'none', 'fill')
         }, () => r.commitBox());
-        flash(subpixel ? subpixelToCells(rect) : rect);
+        flash(subpixel ? subpixelToCellRect(rect) : rect);
     },
 
     draw_line(a) {
@@ -419,7 +418,7 @@ const OPS = {
         }
         if (a.path != null && !['s', 'straight'].includes(a.path)) throw new Error(`unknown path "${a.path}": use s or straight`);
         // Editing paper: a line of the cells it covers
-        const cellOf = (x, y) => subpixel && r.editView() === 'paper' ? { x: x >> 1, y: Math.floor(y / 3) } : { x, y };
+        const cellOf = (x, y) => subpixel && r.editView() === 'paper' ? subpixelCell(x, y) : { x, y };
         withState({
             ...colorState(a),
             linePath: a.path || 's',
@@ -428,7 +427,7 @@ const OPS = {
             boxLineStyle: lookup(STYLES, a.style || 'light', 'style')
         }, () => r.commitLine());
         const rect = normRect({ x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 });
-        flash(subpixel ? subpixelToCells(rect) : rect);
+        flash(subpixel ? subpixelToCellRect(rect) : rect);
     },
 
     fill(a) {
@@ -437,8 +436,9 @@ const OPS = {
         if (!['ink', 'paper', 'both'].includes(mode)) throw new Error(`unknown mode "${mode}": use ink, paper or both`);
         // Editing paper: connected cells of the same paper
         const unit = r.editView() === 'paper' ? 'cells' : 'subpixels';
+        const c = subpixelCell(a.sx, a.sy);
         const { count, changed, rect } = withState(colorState(a), () => r.editView() === 'paper'
-            ? { ...r.fillPaperAt(a.sx >> 1, Math.floor(a.sy / 3)), rect: { x1: a.sx >> 1, y1: Math.floor(a.sy / 3), x2: a.sx >> 1, y2: Math.floor(a.sy / 3) } }
+            ? { ...r.fillPaperAt(c.x, c.y), rect: { x1: c.x, y1: c.y, x2: c.x, y2: c.y } }
             : r.fillAt(a.sx, a.sy, mode));
         if (!count) {
             return unit === 'cells' ? 'nothing was filled: the cell already has that paper, or bg is keep'
@@ -456,13 +456,13 @@ const OPS = {
             x2: a.to_x + src.x2 - src.x1, y2: a.to_y + src.y2 - src.y1
         };
         if (a.subpixel) {
-            withState({ subpixelSelection: src, subpixelSelectionStart: null, subpixelClipboard: null, pasteMode: false, pasteTransparent: !!a.transparent }, () => {
+            withState({ subpixelSelection: src, subpixelSelectionStart: null, subpixelCopy: null, pasteMode: false, pasteTransparent: !!a.transparent }, () => {
                 if (a.move) r.cutSelectionSubpixel();
                 else r.copySelectionSubpixel();
                 r.pasteAtSubpixel(a.to_x, a.to_y);
             });
-            flash(subpixelToCells(src));
-            flash(subpixelToCells(dest));
+            flash(subpixelToCellRect(src));
+            flash(subpixelToCellRect(dest));
             return;
         }
         const clipboard = r.canvas.cells.slice(src.y1, src.y2 + 1)
@@ -512,7 +512,7 @@ const OPS = {
         const cells = imageToCells(image, cols, rows, {
             mono: a.mono || edit === 'ink', paperOnly: edit === 'paper',
             fg: parseColor(a.fg, defaultFG), bg: edit === 'ink' ? keepColor('bg') : parseColor(a.bg, defaultBG),
-            dither: a.dither || 'floyd-steinberg', strength: strength / 100, invert: !!a.invert, ...tone
+            dither: a.dither || 'floyd-steinberg', strength: strength / 100, blockRows: BLOCK_ROWS, invert: !!a.invert, ...tone
         });
         withState({ clipboard: cells, pasteMode: false }, () => r.pasteAt(x, y));
         flash({ x1: x, y1: y, x2: x + cols - 1, y2: y + rows - 1 });
@@ -559,7 +559,8 @@ const OPS = {
         for (const [i, { op, args }] of a.ops.entries()) {
             try {
                 // Each op's own edit, else the batch's
-                results.push(withState({ editOverride: editOf(args || {}, r.editOverride) }, () => OPS[op](args || {})) ?? 'ok');
+                results.push(r.withBlockRows(pixelsOf(args || {}, BLOCK_ROWS), () =>
+                    withState({ editOverride: editOf(args || {}, r.editOverride) }, () => OPS[op](args || {}))) ?? 'ok');
             } catch (e) {
                 throw new Error(`ops[${i}] (${op}): ${e.message}. Operations before it were applied.`);
             }
@@ -589,10 +590,16 @@ function editOf(a, fallback = 'both') {
     return edit;
 }
 
+// An operation's `pixels`: the subpixels per cell its subpixel coordinates
+// and drawing use, by default the user's (see CanvasRenderer.blockRows)
+function pixelsOf(a, fallback = r.blockRows) {
+    return a.pixels == null ? fallback : lookup(PIXELS, a.pixels, 'pixels');
+}
+
 function run(op, args) {
     if (!Object.hasOwn(OPS, op)) throw new Error(`unknown operation "${op}"`);
-    if (NO_STEP.has(op)) return OPS[op](args);
-    return withState({ editOverride: editOf(args) }, () => r.recordEdit(`AI ${op}`, () => OPS[op](args)));
+    return r.withBlockRows(pixelsOf(args), () => NO_STEP.has(op) ? OPS[op](args)
+        : withState({ editOverride: editOf(args) }, () => r.recordEdit(`AI ${op}`, () => OPS[op](args))));
 }
 
 // --- Connection and activity panel ---

@@ -22,6 +22,11 @@ type editing struct {
 	Edit string `json:"edit,omitempty" jsonschema:"both (the default), ink (lit subpixels, characters and their colours; the paper stays) or paper (cells' backgrounds only: subpixels, boxes and lines paint the paper of the cells they cover; write_text and place_symbols are refused)"`
 }
 
+// The subpixels per cell an operation's subpixel coordinates and drawing use
+type pixels struct {
+	Pixels string `json:"pixels,omitempty" jsonschema:"subpixels per cell for subpixel coordinates and drawing: quadrant (2x2, subpixel row sy = 2*y + row), sextant (2x3, sy = 3*y + row) or octant (2x4, sy = 4*y + row; finest, but needs a terminal font with Unicode 16 octants). Default: the user's, get_state's user.pixels. Cells drawn on at another resolution are converted (best effort)"`
+}
+
 type colors struct {
 	editing
 	Bold    bool   `json:"bold,omitempty" jsonschema:"bold text (cells drawn on get it, or lose it when false)"`
@@ -60,19 +65,22 @@ type display struct {
 
 type readArgs struct {
 	region
-	Format string `json:"format,omitempty" jsonschema:"text (the default): one line per row; subpixels: 3 lines per row, 2 chars per cell, # set, . clear, + a cell holding a character; cells: JSON for every non-blank cell with its char, colours, and bold / inverse when set"`
+	pixels
+	Format string `json:"format,omitempty" jsonschema:"text (the default): one line per row; subpixels: one line per subpixel row (2, 3 or 4 per cell row, by pixels), 2 chars per cell, # set, . clear, + a cell holding a character; cells: JSON for every non-blank cell with its char, colours, and bold / inverse when set"`
 }
 
 type bitmapArgs struct {
 	SX   int      `json:"sx" jsonschema:"subpixel column of the bitmap's left edge"`
 	SY   int      `json:"sy" jsonschema:"subpixel row of the bitmap's top edge"`
 	Rows []string `json:"rows" jsonschema:"one string per subpixel row: # sets a subpixel (giving its cell fg and bg), . clears it (giving its cell bg), a space leaves it unchanged"`
+	pixels
 	colors
 }
 
 type strokesArgs struct {
 	Strokes [][][]int `json:"strokes" jsonschema:"polylines of [sx, sy] subpixel points; consecutive points are joined by straight lines, a single point paints one subpixel"`
 	Erase   bool      `json:"erase,omitempty" jsonschema:"clear subpixels instead of setting them; the cells get bg as background, so erasing with the default bg removes a background colour"`
+	pixels
 	colors
 }
 
@@ -96,6 +104,7 @@ type boxArgs struct {
 	rect
 	Style string `json:"style,omitempty" jsonschema:"border: light (the default), heavy, double, rounded (light with rounded corners ╭╮╯╰), subpixel (drawn with subpixels; x1-y2 are then subpixel coordinates) or none"`
 	Fill  string `json:"fill,omitempty" jsonschema:"none (the default); fill: clear the inside and give it the colours (subpixel style: a solid rectangle of subpixels); recolor: only give the inside the colours. With style none they cover the whole rectangle, its edge cells included"`
+	pixels
 	colors
 }
 
@@ -103,11 +112,13 @@ type lineArgs struct {
 	rect
 	Style string `json:"style,omitempty" jsonschema:"light (the default), heavy, double, rounded (light, knees rounded), or subpixel: a straight line of subpixels, with x1-y2 subpixel coordinates"`
 	Path  string `json:"path,omitempty" jsonschema:"with edit paper: s (the default; two knees) or straight (a direct line of cells from (x1, y1) to (x2, y2), at any angle)"`
+	pixels
 	colors
 }
 
 type fillArgs struct {
 	editing
+	pixels
 	SX   int    `json:"sx" jsonschema:"subpixel column where the fill starts"`
 	SY   int    `json:"sy" jsonschema:"subpixel row"`
 	Mode string `json:"mode,omitempty" jsonschema:"ink (the default): light the area in fg, leaving out cells where that would repaint other lit subpixels (a line through them); paper: give every cell the area reaches bg; both: paper, then ink. With edit ink it always fills ink, bounded by lit subpixels and characters alone; with edit paper it floods the connected cells of the same paper with bg (mode not used)"`
@@ -118,6 +129,7 @@ type fillArgs struct {
 type copyArgs struct {
 	rect
 	editing
+	pixels
 	ToX         int  `json:"to_x" jsonschema:"where the copy's top-left goes"`
 	ToY         int  `json:"to_y"`
 	Move        bool `json:"move,omitempty" jsonschema:"clear the source (cut and paste)"`
@@ -136,6 +148,7 @@ type importArgs struct {
 
 type imageArgs struct {
 	editing
+	pixels
 	Path           string `json:"path,omitempty" jsonschema:"absolute path of an image file on this computer: PNG, JPEG, GIF, WebP or BMP"`
 	URL            string `json:"url,omitempty" jsonschema:"or the image's http(s) URL"`
 	X              int    `json:"x,omitempty" jsonschema:"left cell (default 0)"`
@@ -221,8 +234,9 @@ type sizeArgs struct {
 }
 
 type batchArgs struct {
-	Edit string `json:"edit,omitempty" jsonschema:"the edit for ops that give none (default both)"`
-	Ops  []struct {
+	Edit   string `json:"edit,omitempty" jsonschema:"the edit for ops that give none (default both)"`
+	Pixels string `json:"pixels,omitempty" jsonschema:"the pixels for ops that give none (default: the user's)"`
+	Ops    []struct {
 		Op   string         `json:"op" jsonschema:"name of any other tool except batch, view_canvas, import_image, undo and redo"`
 		Args map[string]any `json:"args,omitempty"`
 	} `json:"ops"`
@@ -230,7 +244,7 @@ type batchArgs struct {
 
 func addTools(s *mcp.Server, l *link) {
 	relay[struct{}](s, l, "get_state",
-		"Canvas size in cells and subpixels; what the user is doing: current tool and colours, cell or subpixel selection, text cursor, and the note they left for you; and the editor's display settings.")
+		"Canvas size in cells and subpixels; what the user is doing: current tool and colours, cell or subpixel selection, the subpixels per cell they draw in (pixels; the subpixel sizes and selection are in it, and your tools use it by default), text cursor, and the note they left for you; and the editor's display settings.")
 	relay[viewArgs](s, l, "view_canvas",
 		"The canvas, or a region of it, as a PNG image drawn by the editor. MOTDs show in both dark and light terminals: check both with light_terminal.")
 	relay[display](s, l, "set_display",
@@ -256,7 +270,7 @@ func addTools(s *mcp.Server, l *link) {
 	relay[importArgs](s, l, "import_ansi",
 		"Paste ANSI text, or load it as the whole canvas. Understands SGR colours (the 16 basic ones, 256-colour in the xterm palette, 24-bit), bold and inverse; other escape sequences are dropped.")
 	relay[imageArgs](s, l, "import_image",
-		"Place a picture as cells, like pasting an image into the editor: scaled, each cell given the two colours that best fit its 2x3 subpixels, and dithered. Transparent areas leave the canvas as it is.")
+		"Place a picture as cells, like pasting an image into the editor: scaled, each cell given the two colours that best fit its subpixels (see pixels), and dithered. Transparent areas leave the canvas as it is.")
 	relay[exportArgs](s, l, "export",
 		"The canvas as a MOTD file: ANSI text with colours, or plain text.")
 	relay[sizeArgs](s, l, "resize_canvas",

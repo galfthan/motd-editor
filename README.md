@@ -1,6 +1,6 @@
 # MOTD Editor
 
-A web-based editor for creating MOTD banners using Unicode sextant characters (2x3 subpixel blocks) and extended diagonal/triangle characters.
+A web-based editor for creating MOTD banners using Unicode block characters (2x2 quadrant, 2x3 sextant or 2x4 octant subpixels) and extended diagonal/triangle characters.
 
 ## Usage
 
@@ -16,7 +16,10 @@ npx serve web
 
 ## Features
 
-- Sextant character editing (2x3 subpixel grid per cell)
+- Subpixel editing in quadrant (2x2), sextant (2x3) or octant (2x4) cells,
+  chosen with Pixels in the subpixel tools' panels; cells drawn at another
+  resolution are converted (best effort). Octants are Unicode 16, so older
+  terminal fonts can't show them
 - Extended diagonal and triangle characters (U+1FB3C-1FB6F), blocks, shades
   and emoji, searchable by name
 - Box and line drawing with light/heavy/double/rounded borders, or with subpixels
@@ -95,7 +98,8 @@ The agent gets tools mirroring the editor's: `draw_bitmap` and
 `new_canvas`, `undo`/`redo` and `batch`, plus `get_state`, `read_region`
 (text, subpixel bitmap or per-cell colours), `view_canvas` (a PNG, in dark
 or light terminal colours and any cell aspect) and `set_display` (Show Grid,
-Light Terminal, cell aspect).
+Light Terminal, cell aspect). Subpixel tools take `pixels`: quadrant,
+sextant or octant (by default the user's Pixels setting).
 
 How it works: the browser tab holds the canvas. The server relays each tool
 call to the tab over Server-Sent Events, the tab runs it with the editor's own
