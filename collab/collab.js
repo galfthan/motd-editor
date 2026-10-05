@@ -456,7 +456,7 @@ const OPS = {
             x2: a.to_x + src.x2 - src.x1, y2: a.to_y + src.y2 - src.y1
         };
         if (a.subpixel) {
-            withState({ subpixelSelection: src, subpixelSelectionStart: null, subpixelClipboard: null, pasteMode: false }, () => {
+            withState({ subpixelSelection: src, subpixelSelectionStart: null, subpixelClipboard: null, pasteMode: false, pasteTransparent: !!a.transparent }, () => {
                 if (a.move) r.cutSelectionSubpixel();
                 else r.copySelectionSubpixel();
                 r.pasteAtSubpixel(a.to_x, a.to_y);
@@ -468,7 +468,7 @@ const OPS = {
         const clipboard = r.canvas.cells.slice(src.y1, src.y2 + 1)
             .map(row => structuredClone(row.slice(src.x1, src.x2 + 1)));
         if (a.move) r.clearCells(src);
-        withState({ clipboard, pasteMode: false }, () => r.pasteAt(a.to_x, a.to_y));
+        withState({ clipboard, pasteMode: false, pasteTransparent: !!a.transparent }, () => r.pasteAt(a.to_x, a.to_y));
         flash(src);
         flash(dest);
     },
@@ -480,7 +480,7 @@ const OPS = {
             return `canvas is now ${parsed.width}x${parsed.height}`;
         }
         const x = a.x ?? 0, y = a.y ?? 0;
-        withState({ clipboard: parsed.cells, pasteMode: false }, () => r.pasteAt(x, y));
+        withState({ clipboard: parsed.cells, pasteMode: false, pasteTransparent: !!a.transparent }, () => r.pasteAt(x, y));
         flash({ x1: x, y1: y, x2: x + parsed.width - 1, y2: y + parsed.height - 1 });
     },
 

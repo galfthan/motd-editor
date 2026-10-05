@@ -118,18 +118,20 @@ type fillArgs struct {
 type copyArgs struct {
 	rect
 	editing
-	ToX      int  `json:"to_x" jsonschema:"where the copy's top-left goes"`
-	ToY      int  `json:"to_y"`
-	Move     bool `json:"move,omitempty" jsonschema:"clear the source (cut and paste)"`
-	Subpixel bool `json:"subpixel,omitempty" jsonschema:"all coordinates are subpixels and only subpixels and colours are copied"`
+	ToX         int  `json:"to_x" jsonschema:"where the copy's top-left goes"`
+	ToY         int  `json:"to_y"`
+	Move        bool `json:"move,omitempty" jsonschema:"clear the source (cut and paste)"`
+	Subpixel    bool `json:"subpixel,omitempty" jsonschema:"all coordinates are subpixels and only subpixels and colours are copied"`
+	Transparent bool `json:"transparent,omitempty" jsonschema:"paste ink only where the copy has ink and paper only where its paper is coloured (not the terminal's own): parts with no ink keep the ink there, parts with the terminal's own paper keep the paper there, parts with neither are left out (cells, or with subpixel subpixels; inverse cells are pasted whole)"`
 }
 
 type importArgs struct {
 	editing
-	Text    string `json:"text" jsonschema:"ANSI text, as in a MOTD file"`
-	X       int    `json:"x,omitempty" jsonschema:"where to paste it (default 0)"`
-	Y       int    `json:"y,omitempty"`
-	Replace bool   `json:"replace,omitempty" jsonschema:"replace the whole canvas, sized to the text, like File > Open (edit not used)"`
+	Text        string `json:"text" jsonschema:"ANSI text, as in a MOTD file"`
+	X           int    `json:"x,omitempty" jsonschema:"where to paste it (default 0)"`
+	Y           int    `json:"y,omitempty"`
+	Replace     bool   `json:"replace,omitempty" jsonschema:"replace the whole canvas, sized to the text, like File > Open (edit not used)"`
+	Transparent bool   `json:"transparent,omitempty" jsonschema:"paste ink only where the text has ink and paper only where its paper is coloured (not the terminal's own): parts with no ink keep the ink there, parts with the terminal's own paper keep the paper there, parts with neither are left out (cells, or with subpixel subpixels; inverse cells are pasted whole)"`
 }
 
 type imageArgs struct {

@@ -202,6 +202,7 @@ class Toolbar {
         this.setupStyle();
         this.setupImagePanel();
         this.setupViews();
+        this.setupPastePanel();
         this.setupFileInputs();
         this.setupCharPalette();
         this.setupCommandPalette();
@@ -561,12 +562,13 @@ class Toolbar {
     // placed, else the current tool's
     showPanel() {
         const image = !!this.renderer.imagePaste;
-        const panel = image ? 'image' : this.currentGroup;
+        const pasting = !image && this.renderer.pasteMode;
+        const panel = image ? 'image' : pasting ? 'paste' : this.currentGroup;
         document.querySelectorAll('.inspector section[data-panel]').forEach(s => s.classList.toggle('active', s.dataset.panel === panel));
-        document.getElementById('tool-title').textContent = image ? 'Image' : GROUP_INFO[panel].title;
+        document.getElementById('tool-title').textContent = image ? 'Image' : pasting ? 'Paste' : GROUP_INFO[panel].title;
         const key = document.getElementById('tool-key');
-        key.textContent = image ? '' : GROUP_INFO[panel].key;
-        key.hidden = image;
+        key.textContent = image || pasting ? '' : GROUP_INFO[panel].key;
+        key.hidden = image || pasting;
         const note = document.getElementById('view-note');
         note.textContent = this.viewNote();
         note.hidden = !note.textContent;
@@ -755,9 +757,25 @@ class Toolbar {
         this.showPanel();
     }
 
+    // --- Paste panel: shown while a paste waits to be placed ---
+
+    setupPastePanel() {
+        const r = this.renderer;
+        r.onPasteMode = () => this.showPanel();
+        const buttons = [...document.querySelectorAll('[data-paste-empty]')];
+        this.setPasteTransparent = (on, save = true) => {
+            r.setPasteTransparent(on);
+            pressOne(buttons, buttons.find(b => (b.dataset.pasteEmpty === 'transparent') === on));
+            if (save) saveSetting('motd-editor.pasteTransparent', on);
+        };
+        buttons.forEach(b => b.addEventListener('click', () => this.setPasteTransparent(b.dataset.pasteEmpty === 'transparent')));
+        this.setPasteTransparent(loadSetting('motd-editor.pasteTransparent') === 'true', false);
+    }
+
     // What the current tool does in the ink or paper view, if it differs
     viewNote() {
-        const view = this.renderer.view, group = this.renderer.imagePaste ? 'image' : this.currentGroup;
+        const view = this.renderer.view;
+        const group = this.renderer.imagePaste ? 'image' : this.renderer.pasteMode ? 'paste' : this.currentGroup;
         const notes = {
             paper: {
                 brush: "Paper view: paints whole cells' paper; Erase gives them the terminal's own.",
@@ -766,7 +784,8 @@ class Toolbar {
                 text: 'Text is ink: switch to Ink or Both to use this tool.',
                 shape: 'Paper view: the box or line gives every cell it covers the paper colour.',
                 selection: 'Paper view: copy, cut and paste move only the paper.',
-                image: "Paper view: each cell's paper gets the image's colour there."
+                image: "Paper view: each cell's paper gets the image's colour there.",
+                paste: 'Paper view: pastes only the paper.'
             },
             ink: {
                 brush: 'Ink view: the paper stays as it is.',
@@ -775,7 +794,8 @@ class Toolbar {
                 text: 'Ink view: the paper stays as it is.',
                 shape: 'Ink view: the paper stays as it is.',
                 selection: 'Ink view: copy, cut and paste leave the paper as it is.',
-                image: 'Ink view: the image is drawn in the ink colour over the paper there.'
+                image: 'Ink view: the image is drawn in the ink colour over the paper there.',
+                paste: 'Ink view: pastes only the ink; the paper stays.'
             }
         };
         return (notes[view] || {})[group] || '';
@@ -1102,6 +1122,8 @@ class Toolbar {
             ['File', 'Import image…', '', act('import-image')],
             ['Edit', 'Undo', '⌘Z', act('undo')],
             ['Edit', 'Redo', '⇧⌘Z', act('redo')],
+            ['Edit', 'Paste: empty cells transparent', '', () => this.setPasteTransparent(true)],
+            ['Edit', 'Paste: empty cells overwrite', '', () => this.setPasteTransparent(false)],
             ['Colour', 'Swap ink and paper', 'X', act('swap-colors')],
             ['Colour', "Ink: keep the cells' own", '', () => this.setColor('fg', keepColor('fg'))],
             ['Colour', "Paper: keep the cells' own", '', () => this.setColor('bg', keepColor('bg'))],
