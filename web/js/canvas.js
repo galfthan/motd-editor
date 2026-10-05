@@ -2862,58 +2862,62 @@ class CanvasRenderer {
             return map;
         };
         const byCell = byCellOf(area);
-        // Both, started on ink: the unlit gaps between the area and lines of
-        // other colours (those cells kept their own ink): unlit subpixels
-        // next to it, 4-connected, that reach no cell without ink
-        const gaps = [];
+        // Both: cells that get the ink as paper (see the end).
+        // Started on ink, the unlit gaps between the area and lines of other
+        // colours (those cells kept their own ink): unlit subpixels next to
+        // it, 4-connected, that reach no cell without ink. (Space between
+        // the area and other shapes' ink alone counts as a gap too.)
+        const toSolid = new Map();
         if (startLit && solid) {
-            const unlit = (x, y) => !glyphAt(x, y) && !view(cellAt(x, y))[y % BLOCK_ROWS][x % 2];
-            const done = new Uint8Array(W * H);
-            const near = (i, fn) => {
-                const x = i % W, y = (i - x) / W;
-                for (const [dx, dy] of steps.slice(0, 4)) {
-                    const nx = x + dx, ny = y + dy;
-                    if (nx >= 0 && nx < W && ny >= 0 && ny < H) fn(ny * W + nx, nx, ny);
-                }
+            const inked = new Map();
+            const hasInk = (cell) => {
+                if (!inked.has(cell)) inked.set(cell, view(cell).some(row => row[0] || row[1]));
+                return inked.get(cell);
             };
-            for (const i of area) near(i, (j0, x0, y0) => {
-                if (done[j0] || !unlit(x0, y0)) return;
-                const part = [], stack = [j0];
-                let open = false;
+            const unlit = (x, y) => !glyphAt(x, y) && !view(cellAt(x, y))[y % BLOCK_ROWS][x % 2];
+            const four = steps.slice(0, 4);
+            // 1: in a gap so far, 2: in open space
+            const done = new Uint8Array(W * H);
+            const flood = (j0) => {
+                // Only through cells with ink: reaching one without (or open
+                // space) ends it, and what it went through is open space
+                const part = [j0], stack = [j0];
                 done[j0] = 1;
                 while (stack.length) {
-                    const j = stack.pop(), x = j % W;
-                    part.push(j);
-                    if (!view(cellAt(x, (j - x) / W)).flat().some(Boolean)) open = true;
-                    near(j, (n, nx, ny) => {
-                        if (done[n] || !unlit(nx, ny)) return;
+                    const j = stack.pop(), x = j % W, y = (j - x) / W;
+                    for (const [dx, dy] of four) {
+                        const nx = x + dx, ny = y + dy, n = ny * W + nx;
+                        if (nx < 0 || nx >= W || ny < 0 || ny >= H || done[n] === 1 || !unlit(nx, ny)) continue;
+                        if (done[n] === 2 || !hasInk(cellAt(nx, ny))) {
+                            for (const p of part) done[p] = 2;
+                            return null;
+                        }
                         done[n] = 1;
+                        part.push(n);
                         stack.push(n);
-                    });
+                    }
                 }
-                if (!open) gaps.push(...part);
-            });
+                return part;
+            };
+            const gaps = [];
+            for (const i of area) {
+                const x = i % W, y = (i - x) / W;
+                for (const [dx, dy] of four) {
+                    const nx = x + dx, ny = y + dy, j = ny * W + nx;
+                    if (nx < 0 || nx >= W || ny < 0 || ny >= H || done[j] || !unlit(nx, ny)) continue;
+                    if (!hasInk(cellAt(nx, ny))) continue;
+                    gaps.push(...(flood(j) || []));
+                }
+            }
+            for (const [k, subs] of byCellOf(gaps)) toSolid.set(k, subs);
         }
         const box = { x1: cols, y1: this.canvas.height, x2: 0, y2: 0 };
-        let changed = 0;
+        const changed = new Set();
         const grow = (x1, x2, y) => {
-            changed++;
+            changed.add(y * cols + x1);
             box.x1 = Math.min(box.x1, x1); box.x2 = Math.max(box.x2, x2);
             box.y1 = Math.min(box.y1, y); box.y2 = Math.max(box.y2, y);
         };
-        // A block cell whose unlit subpixels are all in `subs`
-        const covers = (cell, subs) => {
-            const set = new Set(subs.map(([r, c]) => r * 2 + c));
-            return view(cell).flat().every((on, i) => on || set.has(i));
-        };
-        for (const [k, subs] of byCellOf(gaps)) {
-            const x = k % cols, y = (k - x) / cols, cell = this.canvas.cells[y][x];
-            const slot = slots(cell);
-            if (!covers(cell, subs) || colorsEqual(cell[slot.off], this.fgColor)) continue;
-            this.beforeChange(x, y, x, y);
-            cell[slot.off] = { ...this.fgColor };
-            grow(x, x, y);
-        }
         for (const [k, subs] of byCell) {
             let x = k % cols;
             const y = (k - x) / cols;
@@ -2949,14 +2953,25 @@ class CanvasRenderer {
                         cell.subpixels = view(cell).map(row => row.slice());
                         for (const [r, c] of subs) cell.subpixels[r][c] = true;
                     }
-                } else if (solid && covers(cell, subs)) {
-                    cell[slot.off] = { ...this.fgColor };
+                } else if (solid) {
+                    toSolid.set(k, subs);
                 }
             }
             if (JSON.stringify(cell) !== before) grow(x, x, y);
         }
-        if (changed) this.updateCellRect(box.x1, box.y1, box.x2, box.y2);
-        return { count: area.length, changed, rect: changed ? box : null };
+        // The cells along lines whose unlit subpixels are all in the area or
+        // its gaps take the ink as paper (last, over the paper given above)
+        for (const [k, subs] of toSolid) {
+            const x = k % cols, y = (k - x) / cols, cell = this.canvas.cells[y][x];
+            const set = new Set(subs.map(([r, c]) => r * 2 + c));
+            const slot = slots(cell);
+            if (!view(cell).flat().every((on, i) => on || set.has(i)) || colorsEqual(cell[slot.off], this.fgColor)) continue;
+            this.beforeChange(x, y, x, y);
+            cell[slot.off] = { ...this.fgColor };
+            grow(x, x, y);
+        }
+        if (changed.size) this.updateCellRect(box.x1, box.y1, box.x2, box.y2);
+        return { count: area.length, changed: changed.size, rect: changed.size ? box : null };
     }
 
     commitBox() {
