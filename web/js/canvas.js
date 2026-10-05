@@ -541,6 +541,21 @@ class CanvasRenderer {
         return this.history.record(label, fn);
     }
 
+    // recordEdit, all or nothing: if fn throws, what it changed is undone
+    // (and can't be redone)
+    recordEditOrNothing(label, fn) {
+        const top = this.history.undoStack.at(-1);
+        try {
+            return this.recordEdit(label, fn);
+        } catch (e) {
+            if (this.history.undoStack.at(-1) !== top) {
+                this.repaintChange(this.history.undo());
+                this.history.redoStack.pop();
+            }
+            throw e;
+        }
+    }
+
     // Record the cells in a rect (cell coords, clipped) before writing them;
     // see EditHistory.touchRect
     beforeChange(x1, y1, x2, y2) {
@@ -580,6 +595,15 @@ class CanvasRenderer {
         this.resetInteractionState(true);
         const change = apply();
         if (!change) return;
+        this.repaintChange(change);
+        // Put the text cursor back where it was at that point (e.g. where
+        // undone typing started), in bounds and off wide chars' tails
+        const cursor = change.cursor || this.textCursor;
+        if (cursor && this.tool === 'text') this.setTextCursor(cursor.x, cursor.y);
+    }
+
+    // Repaint what an undo or redo changed
+    repaintChange(change) {
         if (change.wholeCanvas) {
             if (this.imagePaste) this.moveImageTo(this.imagePaste);   // the canvas may be smaller
             this.render();
@@ -587,10 +611,6 @@ class CanvasRenderer {
         } else {
             for (const { x, y } of change.cells) this.updateCell(x, y);
         }
-        // Put the text cursor back where it was at that point (e.g. where
-        // undone typing started), in bounds and off wide chars' tails
-        const cursor = change.cursor || this.textCursor;
-        if (cursor && this.tool === 'text') this.setTextCursor(cursor.x, cursor.y);
     }
 
     // The view editing follows: the user's, or editOverride (the AI add-on's

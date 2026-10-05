@@ -373,22 +373,29 @@ const OPS = {
 
     write_text(a) {
         inkOnly('write_text');
+        checkCell(a.x, a.y);
+        let dropped = 0;
         withState(colorState(a), () => {
             a.text.normalize('NFC').split('\n').forEach((line, dy) => {
                 const y = a.y + dy;
-                if (y < 0 || y >= r.canvas.height) return;
-                let x = a.x;
-                for (const ch of line) {
-                    const code = ch.codePointAt(0);
-                    const w = charWidth(code);
-                    if (w === 0) continue;
-                    if (x + w > r.canvas.width) break;
-                    if (x >= 0) r.setTextCell(x, y, code);
-                    x += w;
+                const chars = [...line].filter(ch => charWidth(ch.codePointAt(0)) > 0);
+                if (y >= r.canvas.height) {
+                    dropped += chars.length;
+                    return;
                 }
+                let x = a.x, n = 0;
+                for (const ch of chars) {
+                    const code = ch.codePointAt(0);
+                    if (x + charWidth(code) > r.canvas.width) break;
+                    r.setTextCell(x, y, code);
+                    x += charWidth(code);
+                    n++;
+                }
+                dropped += chars.length - n;
                 flash({ x1: a.x, y1: y, x2: x - 1, y2: y });
             });
         });
+        if (dropped) return `ok; ${dropped} character${dropped === 1 ? '' : 's'} past the canvas edge ${dropped === 1 ? 'was' : 'were'} left out`;
     },
 
     draw_box(a) {
@@ -474,14 +481,18 @@ const OPS = {
     },
 
     import_ansi(a) {
+        // SGR codes whose ESC byte got lost on the way end up as text
+        const lostEsc = !a.text.includes('\x1b') && /\[[0-9;]*m/.test(a.text)
+            ? '; warning: the text has "[...m" codes but no ESC characters, so they were taken as text. Send ESC as \\u001b in the JSON string' : '';
         const parsed = parseANSIText(a.text);
         if (a.replace) {
             r.setCanvas(parsed);
-            return `canvas is now ${parsed.width}x${parsed.height}`;
+            return `canvas is now ${parsed.width}x${parsed.height}${lostEsc}`;
         }
         const x = a.x ?? 0, y = a.y ?? 0;
         withState({ clipboard: parsed.cells, pasteMode: false, pasteTransparent: !!a.transparent }, () => r.pasteAt(x, y));
         flash({ x1: x, y1: y, x2: x + parsed.width - 1, y2: y + parsed.height - 1 });
+        if (lostEsc) return 'ok' + lostEsc;
     },
 
     // a.image: decoded from a.data (see prepare)
@@ -559,7 +570,7 @@ const OPS = {
                 results.push(r.withBlockRows(pixelsOf(args || {}, BLOCK_ROWS), () =>
                     withState({ editOverride: editOf(args || {}, r.editOverride) }, () => OPS[op](args || {}))) ?? 'ok');
             } catch (e) {
-                throw new Error(`ops[${i}] (${op}): ${e.message}. Operations before it were applied.`);
+                throw new Error(`ops[${i}] (${op}): ${e.message}. Nothing was changed.`);
             }
         }
         return results.every(res => res === 'ok') ? `ok (${results.length} ops)` : results;
@@ -596,7 +607,7 @@ function pixelsOf(a, fallback = r.blockRows) {
 function run(op, args) {
     if (!Object.hasOwn(OPS, op)) throw new Error(`unknown operation "${op}"`);
     return r.withBlockRows(pixelsOf(args), () => NO_STEP.has(op) ? OPS[op](args)
-        : withState({ editOverride: editOf(args) }, () => r.recordEdit(`AI ${op}`, () => OPS[op](args))));
+        : withState({ editOverride: editOf(args) }, () => r.recordEditOrNothing(`AI ${op}`, () => OPS[op](args))));
 }
 
 // --- Connection and activity panel ---
