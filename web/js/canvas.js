@@ -430,10 +430,15 @@ class CanvasRenderer {
     // keep) only its ink, with neither nothing (null), also when the view
     // pastes only what it lacks. Not transparent: the cell as it is.
     pasteCell(cell) {
-        if (!this.pasteTransparent || !cell) return cell;
-        const noInk = !!cell.paperOnly || (cell.type === 'sextant' && !cell.subpixels.flat().some(Boolean));
-        const noPaper = !!cell.bg.keep || !!cell.bg.default;
+        // (an image being placed has its own transparency)
+        if (!this.pasteTransparent || !cell || this.imagePaste) return cell;
         const view = this.editView();
+        // Inverse shows its colours swapped in the both view: a blank is a block
+        if (view === 'both' && cell.inverse) return cell;
+        // A wide char's tail has nothing of its own
+        const noInk = !!cell.paperOnly || cell.type === 'wide-tail' ||
+            (cell.type === 'sextant' && !cell.subpixels.flat().some(Boolean));
+        const noPaper = !!cell.bg.keep || !!cell.bg.default;
         if ((noInk && noPaper) || (view === 'ink' && noInk) || (view === 'paper' && noPaper)) return null;
         if (noPaper) return { ...cell, bg: keepColor('bg') };
         if (noInk) return { ...cell, paperOnly: true };
@@ -444,9 +449,10 @@ class CanvasRenderer {
     // subpixel pastes only its cell's paper, a terminal's own paper isn't pasted
     pasteSubpixel(data) {
         if (!this.pasteTransparent) return data;
+        const view = this.editView();
+        if (view === 'both' && data.inverse) return data;   // as in pasteCell
         const noInk = !!data.paperOnly || !data.filled;
         const noPaper = !data.bg || !!data.bg.keep || !!data.bg.default;
-        const view = this.editView();
         if ((noInk && noPaper) || (view === 'ink' && noInk) || (view === 'paper' && noPaper)) return null;
         if (noPaper) return { ...data, bg: null };
         if (noInk) return { ...data, paperOnly: true };
@@ -2025,11 +2031,15 @@ class CanvasRenderer {
                 let cell = cells.get(key);
                 if (!cell) {
                     cell = structuredClone(sp.cell);
-                    // Painting over half of a wide char blanks it
-                    if (cell.type === 'wide-tail' || isWideHead(cell)) clearCell(cell);
                     cells.set(key, cell);
                 }
-                this.applySubpixelData(cell, sp.row, sp.col, this.subpixelClipboard[py - sy][px - sx]);
+                const data = this.subpixelClipboard[py - sy][px - sx];
+                // Painting over half of a wide char blanks it (not where a
+                // transparent paste leaves it), as pasteAtSubpixel does
+                if ((cell.type === 'wide-tail' || isWideHead(cell)) && this.pasteSubpixel(data) && this.editView() !== 'paper') {
+                    clearCell(cell);
+                }
+                this.applySubpixelData(cell, sp.row, sp.col, data);
             }
         }
         return [...cells].map(([key, cell]) => {
