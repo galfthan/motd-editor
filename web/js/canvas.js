@@ -170,7 +170,6 @@ class CanvasRenderer {
 
         // Draw/erase tool state
         this.brushCell = false;     // Paint whole cells instead of subpixels
-        this.fillMode = 'ink';      // what the fill tool paints: ink, paper or both (see fillAt)
 
         // Grid canvas drawing state (see render / drawCell)
         this.ctx = null;                // 2D context of the grid canvas
@@ -2769,31 +2768,28 @@ class CanvasRenderer {
     // the paper colour: the paper a shape drawn in these colours put around
     // it. Unlit areas connect up, down, left and right, lit ones also
     // diagonally (drawn lines often only touch at corners, and such a line
-    // still bounds an unlit area). `mode` (default this.fillMode) says what
-    // it does there:
+    // still bounds an unlit area). What it does there follows the view
+    // (the paper view floods cells instead, see fillPaperAt):
     //   ink    lights the area in the ink colour. An unlit area leaves out
     //          cells where that would repaint other lit subpixels (a line
     //          through them).
-    //   paper  gives every cell the area reaches the paper colour; lit
-    //          subpixels keep their ink.
-    //   both   paper, then ink. A cell left out of the ink for a line of
-    //          another colour, where the area covers all its unlit
-    //          subpixels, takes the ink colour as paper instead: the area
-    //          looks solid up to the line (also with the paper colour
-    //          keep). Started on ink, the same for the enclosed unlit gaps
-    //          between the area and such lines.
+    //   both   gives every cell the area reaches the paper colour, then the
+    //          ink. A cell left out of the ink for a line of another colour,
+    //          where the area covers all its unlit subpixels, takes the ink
+    //          colour as paper instead: the area looks solid up to the line
+    //          (also with the paper colour keep). Started on ink, the same
+    //          for the enclosed unlit gaps between the area and such lines.
     // Returns the area's size (0: (sx, sy) is in a character cell, or the
     // colours to use are keep), how many cells changed, and their rect.
-    fillAt(sx, sy, mode = this.fillMode) {
+    fillAt(sx, sy) {
         // The ink view fills ink, bounded by ink alone (see editView)
         const inkView = this.editView() === 'ink';
-        if (inkView) mode = 'ink';
         const cols = this.canvas.width, W = cols * 2, H = this.canvas.height * BLOCK_ROWS;
-        const ink = mode !== 'paper' && !this.fgColor.keep;
-        const paper = mode !== 'ink' && !this.bgColor.keep;
+        const ink = !this.fgColor.keep;
+        const paper = !inkView && !this.bgColor.keep;
         // Both: cells along lines of other colours take the ink as paper
         // (whatever the paper colour, keep too)
-        const solid = mode === 'both' && ink;
+        const solid = !inkView && ink;
         if ((!ink && !paper) || !(sx >= 0 && sx < W && sy >= 0 && sy < H)) return { count: 0, changed: 0 };
         const cellAt = (x, y) => this.canvas.cells[Math.floor(y / BLOCK_ROWS)][x >> 1];
         // A cell's colour slots: lit subpixels show `on`, unlit `off`
