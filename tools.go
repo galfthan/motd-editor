@@ -102,7 +102,7 @@ type boxArgs struct {
 type lineArgs struct {
 	rect
 	Style string `json:"style,omitempty" jsonschema:"light (the default), heavy, double, or subpixel: a straight line of subpixels, with x1-y2 subpixel coordinates"`
-	Path  string `json:"path,omitempty" jsonschema:"with edit paper: s (the default; two knees) or straight (one row or column from (x1, y1), the way to (x2, y2) goes further)"`
+	Path  string `json:"path,omitempty" jsonschema:"with edit paper: s (the default; two knees) or straight (a direct line of cells from (x1, y1) to (x2, y2), at any angle)"`
 	colors
 }
 

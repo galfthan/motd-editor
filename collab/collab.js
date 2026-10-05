@@ -426,10 +426,7 @@ const OPS = {
             dragStart: cellOf(a.x1, a.y1),
             dragEnd: cellOf(a.x2, a.y2),
             boxLineStyle: lookup(STYLES, a.style || 'light', 'style')
-        }, () => {
-            r.dragEnd = r.lineEnd(r.dragStart, r.dragEnd);
-            r.commitLine();
-        });
+        }, () => r.commitLine());
         const rect = normRect({ x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 });
         flash(subpixel ? subpixelToCells(rect) : rect);
     },

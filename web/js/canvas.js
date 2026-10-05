@@ -146,7 +146,7 @@ class CanvasRenderer {
         this.dragEnd = null;        // { x, y } current cell
         this.boxLineStyle = 1;      // 0=none, 1=light, 2=heavy, 3=double, 4=subpixels (SUBPIXEL_STYLE)
         this.boxFillMode = 0;       // 0=no fill, 1=fill & clear, 2=recolor only
-        this.linePath = 's';        // the paper view's line: 's' (two knees) or 'straight' (see lineEnd)
+        this.linePath = 's';        // the paper view's line: 's' (two knees) or 'straight' (see linePathCells)
 
         // Draw/erase tool state
         this.brushCell = false;     // Paint whole cells instead of subpixels
@@ -2420,7 +2420,7 @@ class CanvasRenderer {
         if (!this.dragStart) return;
         const p = this.shapePoint(e);
         if (!p) return;
-        this.dragEnd = this.tool === 'line' ? this.lineEnd(this.dragStart, p) : p;
+        this.dragEnd = p;
 
         if (this.subpixelShape()) {
             // Fill and Recolour change the inside too
@@ -2431,16 +2431,18 @@ class CanvasRenderer {
             const r = normRect(this.dragStart, this.dragEnd);
             if (this.editView() === 'paper') this.setOverlay('box', [r]);   // all of it gets the paper
             else this.showBoxPreview(r);
+        } else if (this.editView() === 'paper') {
+            this.setOverlay('box', runsOf(this.linePathCells()));
         } else {
             this.showLinePreview();
         }
     }
 
-    // Where a line from `start` dragged to `p` ends: a straight paper-view
-    // line keeps to the start's row or column, whichever way it goes further
-    lineEnd(start, p) {
-        if (this.linePath !== 'straight' || this.editView() !== 'paper') return p;
-        return Math.abs(p.x - start.x) >= Math.abs(p.y - start.y) ? { x: p.x, y: start.y } : { x: start.x, y: p.y };
+    // The cells of the paper view's line from dragStart to dragEnd: two
+    // knees (as box-drawing lines go), or straight to the end at any angle
+    linePathCells() {
+        const { x: x0, y: y0 } = this.dragStart, { x: x1, y: y1 } = this.dragEnd;
+        return this.linePath === 'straight' ? linePoints(x0, y0, x1, y1) : computeLinePath(x0, y0, x1, y1);
     }
 
     cancelDrag() {
@@ -2709,7 +2711,7 @@ class CanvasRenderer {
 
     commitLine() {
         if (this.editView() === 'paper') {
-            this.paintPaper(computeLinePath(this.dragStart.x, this.dragStart.y, this.dragEnd.x, this.dragEnd.y));
+            this.paintPaper(this.linePathCells());
             return;
         }
         if (this.boxLineStyle === SUBPIXEL_STYLE) {
