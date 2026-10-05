@@ -126,7 +126,9 @@ class CanvasRenderer {
         this.selection = null;      // { x1, y1, x2, y2 } normalized (x1 <= x2, y1 <= y2)
         this.selectionStart = null; // { x, y } start point during drag
         this.clipboard = null;      // 2D array of cells (char-level)
+        this.onPasteMode = null;    // called when pasteMode changes (the toolbar's Paste panel)
         this.pasteMode = false;     // Waiting for click to place paste
+        this.pasteTransparent = false; // pasting leaves what the copy lacks as it is (see pasteCell)
 
         // Subpixel selection state (subpixel-level for 'select-subpixel' tool),
         // same shapes as above but in subpixel coords
@@ -412,6 +414,45 @@ class CanvasRenderer {
         this.selectedChar = charCode;
     }
 
+    get pasteMode() {
+        return this._pasteMode;
+    }
+
+    set pasteMode(on) {
+        const changed = this._pasteMode !== on;
+        this._pasteMode = on;
+        if (changed && this.onPasteMode) this.onPasteMode(on);
+    }
+
+    // A clipboard cell as a transparent paste places it: what it doesn't
+    // have stays as it is under it. With no ink (no lit subpixels, no
+    // character) it pastes only its paper, with the terminal's own paper (or
+    // keep) only its ink, with neither nothing (null), also when the view
+    // pastes only what it lacks. Not transparent: the cell as it is.
+    pasteCell(cell) {
+        if (!this.pasteTransparent || !cell) return cell;
+        const noInk = !!cell.paperOnly || (cell.type === 'sextant' && !cell.subpixels.flat().some(Boolean));
+        const noPaper = !!cell.bg.keep || !!cell.bg.default;
+        const view = this.editView();
+        if ((noInk && noPaper) || (view === 'ink' && noInk) || (view === 'paper' && noPaper)) return null;
+        if (noPaper) return { ...cell, bg: keepColor('bg') };
+        if (noInk) return { ...cell, paperOnly: true };
+        return cell;
+    }
+
+    // As pasteCell, for one entry of the subpixel clipboard: an unlit
+    // subpixel pastes only its cell's paper, a terminal's own paper isn't pasted
+    pasteSubpixel(data) {
+        if (!this.pasteTransparent) return data;
+        const noInk = !!data.paperOnly || !data.filled;
+        const noPaper = !data.bg || !!data.bg.keep || !!data.bg.default;
+        const view = this.editView();
+        if ((noInk && noPaper) || (view === 'ink' && noInk) || (view === 'paper' && noPaper)) return null;
+        if (noPaper) return { ...data, bg: null };
+        if (noInk) return { ...data, paperOnly: true };
+        return data;
+    }
+
     setFgColor(color) {
         this.fgColor = color;
     }
@@ -676,6 +717,13 @@ class CanvasRenderer {
         this.render();
         // An image being placed keeps its proportions in the new cells
         if (this.imagePaste && this.imagePaste.locked) this.setImageOptions({ cols: this.imagePaste.cols, locked: true });
+    }
+
+    // Paste empty cells as they are, or leave what is under them
+    setPasteTransparent(on) {
+        this.pasteTransparent = on;
+        this._pastePreviewKey = null;
+        if (this.pasteMode && this._lastPointerEvent) this.showPastePreview(this._lastPointerEvent);
     }
 
     // Show the canvas at `zoom` times its size, redrawn at that resolution
@@ -1842,7 +1890,8 @@ class CanvasRenderer {
         this.beforeChange(x, y, x + maxWidth, y + this.clipboard.length - 1);
         const view = this.editView();
         this.clipboard.forEach((row, dy) => {
-            row.forEach((cell, dx) => {
+            row.forEach((copied, dx) => {
+                const cell = this.pasteCell(copied);
                 // Transparent (image paste), or a wide char's tail that was
                 // already placed along with its head (the paper view takes
                 // every cell's paper)
@@ -1922,11 +1971,13 @@ class CanvasRenderer {
     // rounding phase and moved by whole device pixels: moving a big paste
     // preview is just an image copy.
     pastePreviewImage(x, y, clipboard = this.clipboard) {
-        if (this._pasteImagesFor !== clipboard) {
+        if (this._pasteImagesFor !== clipboard || this._pasteImagesTransparent !== this.pasteTransparent) {
             this._pasteImages.clear();
             this._pasteImagesFor = clipboard;
+            this._pasteImagesTransparent = this.pasteTransparent;
             // Keep colours show the canvas's, which differ from place to place
-            this._pasteKeeps = clipboard.some(row => row.some(c => c && (c.fg.keep || c.bg.keep || c.paperOnly)));
+            this._pasteKeeps = this.pasteTransparent ||
+                clipboard.some(row => row.some(c => c && (c.fg.keep || c.bg.keep || c.paperOnly)));
         }
         const fx = x * CELL_W * this._scaleX, fy = y * CELL_H * this._scaleY;
         const key = Math.round((fx - Math.floor(fx)) * 1000) + ',' + Math.round((fy - Math.floor(fy)) * 1000);
@@ -1936,7 +1987,10 @@ class CanvasRenderer {
             // a tail without its head becomes a blank cell, and keep colours
             // are the ones there
             const cells = [];
-            clipboard.forEach((row, dy) => row.forEach((cell, dx) => {
+            let skipped = false;
+            clipboard.forEach((row, dy) => row.forEach((copied, dx) => {
+                const cell = this.pasteCell(copied);
+                if (copied && !cell) { skipped = true; return; }   // shows what is there
                 if (!cell || (cell.type === 'wide-tail' && dx > 0 && isWideHead(row[dx - 1]))) return;
                 let placed = cell.type === 'wide-tail' ? { ...cell, type: 'sextant' } : cell;
                 if (placed !== cell) clearCell(placed);
@@ -1950,7 +2004,7 @@ class CanvasRenderer {
             }));
             const width = Math.max(...clipboard.map(row => row.length));
             // Not ragged pasted text, nor an image with transparent cells
-            const rectangular = clipboard.every(row => row.length === width && row.every(Boolean));
+            const rectangular = !skipped && clipboard.every(row => row.length === width && row.every(Boolean));
             cached = this.drawCellsImage(cells, { x1: x, y1: y, x2: x + width - 1, y2: y + clipboard.length - 1 },
                 undefined, rectangular);
             if (!this._pasteKeeps) this._pasteImages.set(key, cached);
@@ -2331,7 +2385,9 @@ class CanvasRenderer {
 
     // Give a cell's subpixel (row, col) the subpixel clipboard's `data`: in
     // the paper view only its paper, in the ink view all but its paper
-    applySubpixelData(cell, row, col, data) {
+    applySubpixelData(cell, row, col, copied) {
+        const data = this.pasteSubpixel(copied);
+        if (!data) return;   // transparent: what is there stays
         const view = this.editView();
         if (view !== 'paper' && !data.paperOnly) {
             setCellSubpixel(cell, row, col, data.filled);
@@ -2353,7 +2409,7 @@ class CanvasRenderer {
         this.subpixelClipboard.forEach((row, dy) => {
             row.forEach((data, dx) => {
                 const sp = this.subpixelAt(sx + dx, sy + dy);
-                if (!sp) return;
+                if (!sp || !this.pasteSubpixel(data)) return;
                 // Painting over half of a wide char blanks it
                 if (this.editView() !== 'paper') detachWide(this.canvas.cells, sp.cellX, sp.cellY);
                 this.applySubpixelData(sp.cell, sp.row, sp.col, data);

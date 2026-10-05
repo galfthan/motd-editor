@@ -233,6 +233,15 @@
                         <p class="hint">Drag to move the view. With any tool you can also hold <kbd>Space</kbd> and drag, or drag with the middle mouse button. <kbd>+</kbd> <kbd>−</kbd> and Ctrl+wheel zoom.</p>
                     </section>
 
+                    <section data-panel="paste">
+                        <span class="label">Empty cells</span>
+                        <div class="segmented wide" role="group" aria-label="Empty cells">
+                            <button data-paste-empty="overwrite" aria-pressed="true" title="Paste empty cells as they are">Overwrite</button>
+                            <button data-paste-empty="transparent" aria-pressed="false" title="Leave what is under empty cells">Transparent</button>
+                        </div>
+                        <p class="hint">Click to place it; <kbd>Esc</kbd> cancels. Transparent leaves what is under the copy's empty parts: in the ink view where it has no ink, in the paper view where its paper is the terminal's own, in both where it has neither. A subpixel copy is transparent subpixel by subpixel.</p>
+                    </section>
+
                     <section data-panel="pick">
                         <p class="hint">Click a cell to take its colours. <kbd>Alt</kbd>-click does this with any tool.</p>
                     </section>
