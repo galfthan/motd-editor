@@ -251,6 +251,8 @@ kbd {
 .color-target.unused,
 .style-toggles.unused { opacity: 0.4; pointer-events: none; }
 .inspector.paper-view .ink-only { display: none; }
+.inspector:not(.paper-view) .paper-only { display: none; }
+.line-path { display: flex; flex-direction: column; gap: 10px; }
 .inspector.ink-view .both-only,
 .inspector.ink-view [data-fill="2"],
 .inspector.ink-view .keep-swatch,
@@ -1071,7 +1073,7 @@ dialog h3 {
    selections and previews (CanvasRenderer.readTheme reads them) */
 .canvas {
     --cell-bg: #0b0b0d;
-    --hidden-paper: #2b2d33;                  /* paper in the ink view */
+    --hidden-paper: #17181c;                  /* paper in the ink view (apart from the grid) */
     --border: #2a2c31;
     --overlay-selection: #2ec4b6;             /* teal */
     --overlay-paste: var(--success);
@@ -1089,7 +1091,7 @@ dialog h3 {
 /* Light terminal: the default colours of a light-background terminal */
 .canvas.light-terminal {
     --cell-bg: #ffffff;
-    --hidden-paper: #d9dbe0;
+    --hidden-paper: #eef0f3;
     --border: #d4d4d4;
     color: #1e1e1e;
 }
@@ -1108,9 +1110,9 @@ dialog h3 {
 
 /* Moving the view: the hand tool, Space held, or a middle-button drag */
 .canvas-scroll.pan-ready,
-.canvas-scroll.pan-ready .grid-canvas { cursor: grab; }
+.canvas-scroll.pan-ready .canvas .grid-canvas { cursor: grab; }
 .canvas-scroll.panning,
-.canvas-scroll.panning .grid-canvas { cursor: grabbing; }
+.canvas-scroll.panning .canvas .grid-canvas { cursor: grabbing; }
 
 /* Placing an image: drags move it, or resize it from its handle */
 .canvas.image-move .grid-canvas { cursor: move; }

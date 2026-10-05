@@ -146,6 +146,7 @@ class CanvasRenderer {
         this.dragEnd = null;        // { x, y } current cell
         this.boxLineStyle = 1;      // 0=none, 1=light, 2=heavy, 3=double, 4=subpixels (SUBPIXEL_STYLE)
         this.boxFillMode = 0;       // 0=no fill, 1=fill & clear, 2=recolor only
+        this.linePath = 's';        // the paper view's line: 's' (two knees) or 'straight' (see lineEnd)
 
         // Draw/erase tool state
         this.brushCell = false;     // Paint whole cells instead of subpixels
@@ -529,12 +530,26 @@ class CanvasRenderer {
         if (paper.keep) return;
         for (const { x, y } of cells) {
             if (x < 0 || y < 0 || x >= this.canvas.width || y >= this.canvas.height) continue;
-            const cell = this.canvas.cells[y][x];
-            if (colorsEqual(cell.bg, paper)) continue;
-            this.beforeChange(x, y, x, y);
-            cell.bg = { ...paper };
-            this.updateCell(x, y);
+            this.setPaper(x, y, paper);
         }
+    }
+
+    // The cell whose paper shows at (x, y): a wide char's tail shows its head's
+    paperCellAt(x, y) {
+        const row = this.canvas.cells[y];
+        return row[x].type === 'wide-tail' && x > 0 ? row[x - 1] : row[x];
+    }
+
+    // Give the cell at (x, y) the paper `color`: both halves of a wide char,
+    // which shows one paper
+    setPaper(x, y, color) {
+        const row = this.canvas.cells[y];
+        if (row[x].type === 'wide-tail' && x > 0) x--;
+        if (colorsEqual(row[x].bg, color) && !isWideHead(row[x])) return;
+        this.beforeChange(x, y, x + 1, y);
+        row[x].bg = { ...color };
+        if (isWideHead(row[x]) && x + 1 < row.length) row[x + 1].bg = { ...color };
+        this.updateCellRect(x, y, x + 1, y);
     }
 
     // Start with `canvas` (a restored autosave), or an empty 80x60 one
@@ -1758,7 +1773,7 @@ class CanvasRenderer {
             for (let x = x1; x <= x2; x++) {
                 const bg = this.canvas.cells[y][x].bg;
                 if (view === 'paper') {
-                    this.canvas.cells[y][x].bg = defaultBG();
+                    this.setPaper(x, y, defaultBG());
                     continue;
                 }
                 detachWide(this.canvas.cells, x, y);
@@ -1779,14 +1794,15 @@ class CanvasRenderer {
         this.clipboard.forEach((row, dy) => {
             row.forEach((cell, dx) => {
                 // Transparent (image paste), or a wide char's tail that was
-                // already placed along with its head
-                if (!cell || (cell.type === 'wide-tail' && dx > 0 && isWideHead(row[dx - 1]))) return;
+                // already placed along with its head (the paper view takes
+                // every cell's paper)
+                if (!cell || (view !== 'paper' && cell.type === 'wide-tail' && dx > 0 && isWideHead(row[dx - 1]))) return;
                 const tx = x + dx;
                 const ty = y + dy;
                 if (tx >= 0 && tx < this.canvas.width && ty >= 0 && ty < this.canvas.height) {
                     // The paper view pastes only paper, the ink view all but it
                     if (view === 'paper') {
-                        if (!cell.bg.keep) this.canvas.cells[ty][tx].bg = { ...cell.bg };
+                        if (!cell.bg.keep) this.setPaper(tx, ty, cell.bg);
                     }
                     else {
                         placeCell(this.canvas.cells, tx, ty, view === 'ink' ? { ...cell, bg: keepColor('bg') } : cell);
@@ -2404,7 +2420,7 @@ class CanvasRenderer {
         if (!this.dragStart) return;
         const p = this.shapePoint(e);
         if (!p) return;
-        this.dragEnd = p;
+        this.dragEnd = this.tool === 'line' ? this.lineEnd(this.dragStart, p) : p;
 
         if (this.subpixelShape()) {
             // Fill and Recolour change the inside too
@@ -2418,6 +2434,13 @@ class CanvasRenderer {
         } else {
             this.showLinePreview();
         }
+    }
+
+    // Where a line from `start` dragged to `p` ends: a straight paper-view
+    // line keeps to the start's row or column, whichever way it goes further
+    lineEnd(start, p) {
+        if (this.linePath !== 'straight' || this.editView() !== 'paper') return p;
+        return Math.abs(p.x - start.x) >= Math.abs(p.y - start.y) ? { x: p.x, y: start.y } : { x: start.x, y: p.y };
     }
 
     cancelDrag() {
@@ -2503,7 +2526,7 @@ class CanvasRenderer {
         const W = this.canvas.width, H = this.canvas.height;
         const paper = this.bgColor;
         if (paper.keep || !(x0 >= 0 && x0 < W && y0 >= 0 && y0 < H)) return { count: 0, changed: 0 };
-        const target = this.canvas.cells[y0][x0].bg;
+        const target = this.paperCellAt(x0, y0).bg;
         if (colorsEqual(target, paper)) return { count: 0, changed: 0 };
         const seen = new Uint8Array(W * H);
         const stack = [y0 * W + x0];
@@ -2517,7 +2540,7 @@ class CanvasRenderer {
                 const j = ny * W + nx;
                 if (nx < 0 || nx >= W || ny < 0 || ny >= H || seen[j]) continue;
                 seen[j] = 1;
-                if (colorsEqual(this.canvas.cells[ny][nx].bg, target)) stack.push(j);
+                if (colorsEqual(this.paperCellAt(nx, ny).bg, target)) stack.push(j);
             }
         }
         this.paintPaper(area);
@@ -2552,7 +2575,8 @@ class CanvasRenderer {
         const cellAt = (x, y) => this.canvas.cells[Math.floor(y / 3)][x >> 1];
         // A cell's colour slots: lit subpixels show `on`, unlit `off`
         // (inverse swaps them)
-        const slots = (cell) => cell.inverse ? { on: 'bg', off: 'fg' } : { on: 'fg', off: 'bg' };
+        // (the ink view shows them unswapped)
+        const slots = (cell) => cell.inverse && !inkView ? { on: 'bg', off: 'fg' } : { on: 'fg', off: 'bg' };
         const start = cellAt(sx, sy);
         if (start.type !== 'sextant') return { count: 0, changed: 0 };
         const startLit = start.subpixels[sy % 3][sx % 2];

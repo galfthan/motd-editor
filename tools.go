@@ -19,7 +19,7 @@ import (
 
 // What an operation changes, like the editor's Ink / Paper / Both views
 type editing struct {
-	Edit string `json:"edit,omitempty" jsonschema:"both (the default), ink (lit subpixels, characters and their colours; the paper stays) or paper (cells' backgrounds only: subpixels paint whole cells' paper, characters are refused)"`
+	Edit string `json:"edit,omitempty" jsonschema:"both (the default), ink (lit subpixels, characters and their colours; the paper stays) or paper (cells' backgrounds only: subpixels, boxes and lines paint the paper of the cells they cover; write_text and place_symbols are refused)"`
 }
 
 type colors struct {
@@ -52,7 +52,7 @@ type viewArgs struct {
 }
 
 type display struct {
-	View          string   `json:"view,omitempty" jsonschema:"ink (lit subpixels and characters only), paper (each cell's background only) or both. set_display: what the user sees and edits (their tools then change only that); view_canvas: what the image shows (default both). Your own edits always change both"`
+	View          string   `json:"view,omitempty" jsonschema:"ink (lit subpixels and characters only), paper (each cell's background only) or both. set_display: what the user sees and edits (their tools then change only that); view_canvas: what the image shows (default both). The user's view doesn't affect your edits: see each tool's edit"`
 	Grid          *bool    `json:"grid,omitempty" jsonschema:"thin lines around every cell (default: as the editor shows it)"`
 	LightTerminal *bool    `json:"light_terminal,omitempty" jsonschema:"the colours of a light-background terminal instead of a dark one (default: as the editor shows it)"`
 	CellAspect    *float64 `json:"cell_aspect,omitempty" jsonschema:"cell width / height, 0.3-0.8, as in the terminal the art is for, e.g. 0.47 for Windows Terminal's 9x19 px cells (default: as the editor shows it; the editor's own default is 0.5)"`
@@ -102,6 +102,7 @@ type boxArgs struct {
 type lineArgs struct {
 	rect
 	Style string `json:"style,omitempty" jsonschema:"light (the default), heavy, double, or subpixel: a straight line of subpixels, with x1-y2 subpixel coordinates"`
+	Path  string `json:"path,omitempty" jsonschema:"with edit paper: s (the default; two knees) or straight (one row or column from (x1, y1), the way to (x2, y2) goes further)"`
 	colors
 }
 
@@ -109,7 +110,7 @@ type fillArgs struct {
 	editing
 	SX   int    `json:"sx" jsonschema:"subpixel column where the fill starts"`
 	SY   int    `json:"sy" jsonschema:"subpixel row"`
-	Mode string `json:"mode,omitempty" jsonschema:"ink (the default): light the area in fg, leaving out cells where that would repaint other lit subpixels (a line through them); paper: give every cell the area reaches bg; both: paper, then ink"`
+	Mode string `json:"mode,omitempty" jsonschema:"ink (the default): light the area in fg, leaving out cells where that would repaint other lit subpixels (a line through them); paper: give every cell the area reaches bg; both: paper, then ink. With edit ink it always fills ink, bounded by lit subpixels and characters alone; with edit paper it floods the connected cells of the same paper with bg (mode not used)"`
 	FG   string `json:"fg,omitempty" jsonschema:"ink colour (modes ink and both): #rrggbb, default (the default) or keep"`
 	BG   string `json:"bg,omitempty" jsonschema:"paper colour (modes paper and both; an unlit area also spreads over drawn cells' subpixels showing it): #rrggbb, default (the default) or keep"`
 }
@@ -128,7 +129,7 @@ type importArgs struct {
 	Text    string `json:"text" jsonschema:"ANSI text, as in a MOTD file"`
 	X       int    `json:"x,omitempty" jsonschema:"where to paste it (default 0)"`
 	Y       int    `json:"y,omitempty"`
-	Replace bool   `json:"replace,omitempty" jsonschema:"replace the whole canvas, sized to the text, like File > Open"`
+	Replace bool   `json:"replace,omitempty" jsonschema:"replace the whole canvas, sized to the text, like File > Open (edit not used)"`
 }
 
 type imageArgs struct {
@@ -139,7 +140,7 @@ type imageArgs struct {
 	Y              int    `json:"y,omitempty" jsonschema:"top cell (default 0)"`
 	Width          int    `json:"width,omitempty" jsonschema:"cells; with only one of width and height the other keeps the image's proportions at the editor's cell aspect (default: as large as fits the canvas from x, y)"`
 	Height         int    `json:"height,omitempty" jsonschema:"cells"`
-	Mono           bool   `json:"mono,omitempty" jsonschema:"use only the colours fg and bg (default: full colour, two colours per cell fitted to the image)"`
+	Mono           bool   `json:"mono,omitempty" jsonschema:"use only the colours fg and bg (default: full colour, two colours per cell fitted to the image). With edit ink the image is always drawn in fg alone over the paper there; with edit paper each cell's paper gets the image's colour there (mono, dither, fg and bg not used)"`
 	Dither         string `json:"dither,omitempty" jsonschema:"floyd-steinberg (the default), atkinson (crisper) or none"`
 	DitherStrength *int   `json:"dither_strength,omitempty" jsonschema:"0-100: how much of each subpixel's error is passed on (default 100); lower is less grainy"`
 	Brightness     int    `json:"brightness,omitempty" jsonschema:"-100 to 100 (default 0): shifts every tone"`
@@ -218,7 +219,8 @@ type sizeArgs struct {
 }
 
 type batchArgs struct {
-	Ops []struct {
+	Edit string `json:"edit,omitempty" jsonschema:"the edit for ops that give none (default both)"`
+	Ops  []struct {
 		Op   string         `json:"op" jsonschema:"name of any other tool except batch, view_canvas, import_image, undo and redo"`
 		Args map[string]any `json:"args,omitempty"`
 	} `json:"ops"`

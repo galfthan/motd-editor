@@ -506,6 +506,11 @@ class Toolbar {
             pressOne(fills, btn);
             this.renderer.boxFillMode = parseInt(btn.dataset.fill);
         }));
+        const paths = [...document.querySelectorAll('[data-line-path]')];
+        paths.forEach(btn => btn.addEventListener('click', () => {
+            pressOne(paths, btn);
+            this.renderer.linePath = btn.dataset.linePath;
+        }));
         const fillModes = [...document.querySelectorAll('[data-fill-mode]')];
         fillModes.forEach(btn => btn.addEventListener('click', () => {
             pressOne(fillModes, btn);
@@ -546,6 +551,7 @@ class Toolbar {
 
         // Fill applies to boxes only, and a line needs a border
         document.querySelector('.box-only').hidden = tool !== 'box';
+        document.querySelector('.line-path').hidden = tool !== 'line';
         const none = document.querySelector('.tile[data-style="0"]');
         none.hidden = tool === 'line';
         if (tool === 'line' && r.boxLineStyle === 0) document.querySelector('.tile[data-style="1"]').click();
@@ -712,6 +718,7 @@ class Toolbar {
         this.setColor('bg', { ...bg });
         if (this.renderer.tool === 'pick' && this.toolBeforePick) {
             this.setTool(this.toolBeforePick);
+            if (this.renderer.tool === 'pick') this.setTool('draw');   // not in this view
             this.toolBeforePick = null;
         }
     }

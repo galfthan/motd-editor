@@ -398,10 +398,12 @@ const OPS = {
         const subpixel = a.style === 'subpixel';
         const rect = normRect({ x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 });
         if (!r.clipRect(rect, subpixel)) throw new Error('rectangle is outside the canvas');
+        // Editing paper: the cells it covers
+        const at = subpixel && r.editView() === 'paper' ? subpixelToCells(rect) : rect;
         withState({
             ...colorState(a),
-            dragStart: { x: rect.x1, y: rect.y1 },
-            dragEnd: { x: rect.x2, y: rect.y2 },
+            dragStart: { x: at.x1, y: at.y1 },
+            dragEnd: { x: at.x2, y: at.y2 },
             boxLineStyle: lookup(STYLES, a.style || 'light', 'style'),
             boxFillMode: lookup(FILLS, a.fill || 'none', 'fill')
         }, () => r.commitBox());
@@ -415,12 +417,19 @@ const OPS = {
             if (subpixel) checkSubpixel(x, y);
             else checkCell(x, y);
         }
+        if (a.path != null && !['s', 'straight'].includes(a.path)) throw new Error(`unknown path "${a.path}": use s or straight`);
+        // Editing paper: a line of the cells it covers
+        const cellOf = (x, y) => subpixel && r.editView() === 'paper' ? { x: x >> 1, y: Math.floor(y / 3) } : { x, y };
         withState({
             ...colorState(a),
-            dragStart: { x: a.x1, y: a.y1 },
-            dragEnd: { x: a.x2, y: a.y2 },
+            linePath: a.path || 's',
+            dragStart: cellOf(a.x1, a.y1),
+            dragEnd: cellOf(a.x2, a.y2),
             boxLineStyle: lookup(STYLES, a.style || 'light', 'style')
-        }, () => r.commitLine());
+        }, () => {
+            r.dragEnd = r.lineEnd(r.dragStart, r.dragEnd);
+            r.commitLine();
+        });
         const rect = normRect({ x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 });
         flash(subpixel ? subpixelToCells(rect) : rect);
     },
@@ -434,7 +443,10 @@ const OPS = {
         const { count, changed, rect } = withState(colorState(a), () => r.editView() === 'paper'
             ? { ...r.fillPaperAt(a.sx >> 1, Math.floor(a.sy / 3)), rect: { x1: a.sx >> 1, y1: Math.floor(a.sy / 3), x2: a.sx >> 1, y2: Math.floor(a.sy / 3) } }
             : r.fillAt(a.sx, a.sy, mode));
-        if (!count) return `nothing was filled: (${a.sx}, ${a.sy}) is in a character cell, or the colours it would use are keep`;
+        if (!count) {
+            return unit === 'cells' ? 'nothing was filled: the cell already has that paper, or bg is keep'
+                : `nothing was filled: (${a.sx}, ${a.sy}) is in a character cell, or the colours it would use are keep`;
+        }
         if (!changed) return `nothing changed: the area (${count} ${unit}) already has those colours, or ink mode left out all its cells (lines of another colour run through them)`;
         flash(rect);
         return `filled an area of ${count} ${unit}, changing ${changed} cells`;
@@ -608,7 +620,7 @@ async function handle(event) {
         a = await prepare(op, args || {});
         // An edit made while the user drags (mouse button down) would end up
         // in the user's undo step: wait for the button to come up
-        while (!NO_STEP.has(op) && r.isDrawing) await new Promise(res => setTimeout(res, 50));
+        while ((!NO_STEP.has(op) || op === 'set_display') && r.isDrawing) await new Promise(res => setTimeout(res, 50));
         reply = { id, result: run(op, a) ?? 'ok' };
     } catch (e) {
         reply = { id, error: e.message };
