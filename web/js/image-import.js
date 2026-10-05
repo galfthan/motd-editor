@@ -3,12 +3,8 @@
 // sextants, 4 octants), and the subpixels are dithered
 // between them by error diffusion, in linear light.
 
-const IMAGE_DITHERS = {
-    'floyd-steinberg': { name: 'Floyd–Steinberg', kernel: [[1, 0, 7 / 16], [-1, 1, 3 / 16], [0, 1, 5 / 16], [1, 1, 1 / 16]] },
-    // Spreads only 3/4 of the error: crisper, with lighter shadows
-    atkinson: { name: 'Atkinson', kernel: [[1, 0, 1 / 8], [2, 0, 1 / 8], [-1, 1, 1 / 8], [0, 1, 1 / 8], [1, 1, 1 / 8], [0, 2, 1 / 8]] },
-    none: { name: 'No dither', kernel: [] }
-};
+// Atkinson's error diffusion: spreads only 3/4 of the error, so it stays crisp
+const DITHER_KERNEL = [[1, 0, 1 / 8], [2, 0, 1 / 8], [-1, 1, 1 / 8], [0, 1, 1 / 8], [1, 1, 1 / 8], [0, 2, 1 / 8]];
 
 // Colour distances weigh the channels by how bright they look
 const LUMA = [0.299, 0.587, 0.114];
@@ -132,10 +128,10 @@ function fitImageCols(image, aspect, maxCols, maxRows) {
 // on the background already there (bg marked `keep`, see placeCell), so
 // outlines keep subpixel detail.
 // Options: mono (only the colours fg and bg), paperOnly (each cell just its
-// paper, the mean colour of the image there), fg, bg, dither (a key of
-// IMAGE_DITHERS), strength (0-1: how much of the error is diffused),
+// paper, the mean colour of the image there), fg, bg, strength (0-1: how
+// much of the error is diffused; 0, none),
 // blockRows (subpixel rows per cell) and the tone (see toneToLinear).
-function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, bg, dither = 'floyd-steinberg', strength = 1, blockRows: R = 3, ...tone } = {}) {
+function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, bg, strength = 1, blockRows: R = 3, ...tone } = {}) {
     const W = cols * 2, H = rows * R, N = 2 * R;
     // Linear colour per subpixel (r, g, b interleaved); err: the error
     // diffused into it so far
@@ -181,7 +177,7 @@ function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, 
     // (1), as perceived. In colour, error the two colours can't pay off (a
     // yellow's blue, for grey ink) would pile up and darken everything.
     const level = mono ? monoLevels(px, W * H, ...monoPair) : null;
-    const kernel = IMAGE_DITHERS[dither].kernel.map(([dx, dy, k]) => [dx, dy, k * strength]);
+    const kernel = strength ? DITHER_KERNEL.map(([dx, dy, k]) => [dx, dy, k * strength]) : [];
     const toColor = (v) => v ? { r: linearToSrgb(v[0]), g: linearToSrgb(v[1]), b: linearToSrgb(v[2]), default: false } : { ...defaultBG(), keep: true };
     const out = [];
 

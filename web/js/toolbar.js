@@ -203,6 +203,7 @@ class Toolbar {
         this.setupImagePanel();
         this.setupViews();
         this.setupPastePanel();
+        this.setupHelp();
         this.setupFileInputs();
         this.setupCharPalette();
         this.setupCommandPalette();
@@ -517,7 +518,6 @@ class Toolbar {
         fillModes.forEach(btn => btn.addEventListener('click', () => {
             pressOne(fillModes, btn);
             this.renderer.fillMode = btn.dataset.fillMode;
-            document.querySelectorAll('[data-fill-hint]').forEach(p => { p.hidden = p.dataset.fillHint !== btn.dataset.fillMode; });
         }));
         const brushes = [...document.querySelectorAll('[data-brush]')];
         brushes.forEach(btn => btn.addEventListener('click', () => {
@@ -603,9 +603,9 @@ class Toolbar {
         // The ink and paper views each fill in one way
         const both = this.renderer.view === 'both';
         document.querySelector('.fill-modes').hidden = !both;
-        document.querySelectorAll('[data-fill-hint]').forEach(p => {
-            p.hidden = !both || p.dataset.fillHint !== this.renderer.fillMode;
-        });
+        // An image in full colour, or as paper, uses neither colour
+        const noColors = image && (this.renderer.view === 'paper' || (both && !this.renderer.imagePaste.mono));
+        document.querySelectorAll('.colors, .colors-divider').forEach(el => { el.hidden = noColors; });
         // Narrow windows: open the inspector for the image, close it after
         const inspector = document.getElementById('inspector');
         if (image && !inspector.classList.contains('open')) {
@@ -655,7 +655,6 @@ class Toolbar {
         const lock = document.getElementById('image-lock');
         lock.addEventListener('click', () => set({ locked: lock.getAttribute('aria-pressed') !== 'true' }));
         document.querySelectorAll('[data-image-mono]').forEach(b => b.addEventListener('click', () => set({ mono: b.dataset.imageMono === 'true' })));
-        document.querySelectorAll('[data-image-dither]').forEach(b => b.addEventListener('click', () => set({ dither: b.dataset.imageDither })));
         document.querySelectorAll('[data-image-slider]').forEach(input => {
             const name = input.dataset.imageSlider;
             input.addEventListener('input', () => set({ [name]: name === 'strength' ? input.value / 100 : +input.value }));
@@ -677,7 +676,6 @@ class Toolbar {
         }
         document.getElementById('image-lock').setAttribute('aria-pressed', String(p.locked));
         pressOne([...document.querySelectorAll('[data-image-mono]')], document.querySelector(`[data-image-mono="${p.mono}"]`));
-        pressOne([...document.querySelectorAll('[data-image-dither]')], document.querySelector(`[data-image-dither="${p.dither}"]`));
         document.querySelectorAll('[data-image-slider]').forEach(input => {
             const name = input.dataset.imageSlider;
             const value = name === 'strength' ? Math.round(p.strength * 100) : p[name];
@@ -783,6 +781,22 @@ class Toolbar {
         // The ink view's box has no Recolour (the Fill tool recolours)
         if (view === 'ink' && this.renderer.boxFillMode === 2) document.querySelector('[data-fill="0"]').click();
         this.showPanel();
+    }
+
+    // The inspector's longer tips (.hint.help): shown or not, remembered
+    setupHelp() {
+        const button = document.getElementById('help-toggle');
+        const show = (on) => {
+            document.body.classList.toggle('show-help', on);
+            button.setAttribute('aria-pressed', String(on));
+            button.title = on ? 'Hide tips' : 'Show tips';
+        };
+        button.addEventListener('click', () => {
+            const on = !document.body.classList.contains('show-help');
+            show(on);
+            saveSetting('motd-editor.tips', on);
+        });
+        show(loadSetting('motd-editor.tips') === 'true');
     }
 
     // --- Paste panel: shown while a paste waits to be placed ---

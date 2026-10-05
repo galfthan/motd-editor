@@ -337,7 +337,7 @@ class CanvasRenderer {
 
             // Image paste: Enter places it, the arrows move it, +/- resize it
             // (by key position, so Shift is free to make the step fine), M
-            // switches colour / mono, D the dithering
+            // switches colour / mono, D dithering on / off
             if (this.isImagePaste() && !e.ctrlKey && !e.metaKey && !e.altKey) {
                 const p = this.imagePaste;
                 const grow = e.code === 'Equal' || e.code === 'NumpadAdd';
@@ -367,8 +367,7 @@ class CanvasRenderer {
                     if (k === 'm') {
                         p.mono = !p.mono;
                     } else {
-                        const names = Object.keys(IMAGE_DITHERS);
-                        p.dither = names[(names.indexOf(p.dither) + 1) % names.length];
+                        p.strength = p.strength ? 0 : 1;
                     }
                     this.updateImagePaste();
                     return;
@@ -2208,7 +2207,7 @@ class CanvasRenderer {
         const rows = imageRows(image, cols, this.cellAspect);
         this.imagePaste = {
             image, cols, rows, locked: true, x: 0, y: 0,
-            mono: false, dither: 'floyd-steinberg', strength: 1,
+            mono: false, strength: 1,
             brightness: 0, contrast: 0, midtones: 0, invert: false
         };
         this.moveImageTo(this.selection ? { x: area.x1, y: area.y1 } : this.imageStartPosition(at, cols, rows));
@@ -2288,7 +2287,7 @@ class CanvasRenderer {
         p.cells = imageToCells(p.image, p.cols, p.rows, {
             mono: p.mono || view === 'ink', paperOnly: view === 'paper',
             fg: this.fgColor, bg: view === 'ink' ? keepColor('bg') : this.bgColor,
-            dither: p.dither, strength: p.strength, blockRows: BLOCK_ROWS,
+            strength: p.strength, blockRows: BLOCK_ROWS,
             brightness: p.brightness, contrast: p.contrast, midtones: p.midtones, invert: p.invert
         });
         this.showImagePreview();
@@ -2319,7 +2318,7 @@ class CanvasRenderer {
         this.setOverlay('image-handle', handle ? [{ ...handle, whole: true }] : []);
     }
 
-    // Change image options ({ cols, rows, locked, mono, dither, strength,
+    // Change image options ({ cols, rows, locked, mono, strength,
     // brightness, contrast, midtones, invert }). Locked, a new width sets the
     // height to keep the image's proportions, and a new height the width.
     setImageOptions(changes) {
