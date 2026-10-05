@@ -1748,6 +1748,7 @@ class CanvasRenderer {
         const { x1, y1, x2, y2 } = this.selection;
         this.clipboard = this.canvas.cells.slice(y1, y2 + 1)
             .map(row => structuredClone(row.slice(x1, x2 + 1)));
+        this.markCopyForView(this.clipboard, this.editView());
 
         // Write text representation to system clipboard
         const text = this.cellsToText(this.clipboard);
@@ -1759,6 +1760,19 @@ class CanvasRenderer {
         }
     }
 
+    // A copy carries what its view shows: copied in the ink view its paper
+    // is keep (pasting leaves the paper there), in the paper view it is
+    // paperOnly (pasting changes only the paper there)
+    markCopyForView(cells, view) {
+        for (const row of cells) {
+            for (const cell of row) {
+                if (!cell) continue;
+                if (view === 'ink') cell.bg = keepColor('bg');
+                if (view === 'paper') cell.paperOnly = true;
+            }
+        }
+    }
+
     // The editor's other tabs get the copy too, with its colours (as ANSI
     // text, and its size), through the browser's storage; a paste whose
     // system clipboard text matches uses it (see sharedClipboard)
@@ -1766,7 +1780,7 @@ class CanvasRenderer {
         const height = this.clipboard.length, width = this.clipboard[0].length;
         try {
             localStorage.setItem(SHARED_CLIPBOARD_KEY, JSON.stringify({
-                text, width, height, ansi: canvasToANSI({ width, height, cells: this.clipboard })
+                text, width, height, view: this.editView(), ansi: canvasToANSI({ width, height, cells: this.clipboard })
             }));
         } catch (e) { /* not shared: other tabs paste plain text */ }
     }
@@ -1778,6 +1792,7 @@ class CanvasRenderer {
             if (!shared || shared.text !== text) return null;
             const canvas = parseANSIText(shared.ansi);
             resizeCanvas(canvas, shared.width, shared.height);
+            this.markCopyForView(canvas.cells, shared.view);
             return canvas.cells;
         } catch (e) {
             return null;
@@ -1825,12 +1840,12 @@ class CanvasRenderer {
                 // Transparent (image paste), or a wide char's tail that was
                 // already placed along with its head (the paper view takes
                 // every cell's paper)
-                if (!cell || (view !== 'paper' && cell.type === 'wide-tail' && dx > 0 && isWideHead(row[dx - 1]))) return;
+                if (!cell || (view !== 'paper' && !cell.paperOnly && cell.type === 'wide-tail' && dx > 0 && isWideHead(row[dx - 1]))) return;
                 const tx = x + dx;
                 const ty = y + dy;
                 if (tx >= 0 && tx < this.canvas.width && ty >= 0 && ty < this.canvas.height) {
                     // The paper view pastes only paper, the ink view all but it
-                    if (view === 'paper') {
+                    if (view === 'paper' || cell.paperOnly) {
                         if (!cell.bg.keep) this.setPaper(tx, ty, cell.bg);
                     }
                     else {
@@ -1905,7 +1920,7 @@ class CanvasRenderer {
             this._pasteImages.clear();
             this._pasteImagesFor = clipboard;
             // Keep colours show the canvas's, which differ from place to place
-            this._pasteKeeps = clipboard.some(row => row.some(c => c && (c.fg.keep || c.bg.keep)));
+            this._pasteKeeps = clipboard.some(row => row.some(c => c && (c.fg.keep || c.bg.keep || c.paperOnly)));
         }
         const fx = x * CELL_W * this._scaleX, fy = y * CELL_H * this._scaleY;
         const key = Math.round((fx - Math.floor(fx)) * 1000) + ',' + Math.round((fy - Math.floor(fy)) * 1000);
@@ -1920,7 +1935,9 @@ class CanvasRenderer {
                 let placed = cell.type === 'wide-tail' ? { ...cell, type: 'sextant' } : cell;
                 if (placed !== cell) clearCell(placed);
                 const under = this.canvas.cells[y + dy] && this.canvas.cells[y + dy][x + dx];
-                if (under && (cell.fg.keep || cell.bg.keep)) {
+                if (under && cell.paperOnly) {
+                    placed = under.type === 'wide-tail' ? { ...under, type: 'sextant', bg: cell.bg } : { ...under, bg: cell.bg };
+                } else if (under && (cell.fg.keep || cell.bg.keep)) {
                     placed = { ...placed, fg: cell.fg.keep ? under.fg : cell.fg, bg: cell.bg.keep ? under.bg : cell.bg };
                 }
                 cells.push({ x: x + dx, y: y + dy, cell: placed });
@@ -2274,7 +2291,11 @@ class CanvasRenderer {
         for (let sy = y1; sy <= y2; sy++) {
             const row = [];
             for (let sx = x1; sx <= x2; sx++) {
-                row.push(this.getSubpixelDataAt(sx, sy));
+                const data = this.getSubpixelDataAt(sx, sy);
+                // As for cells (markCopyForView): only what the view shows
+                if (this.editView() === 'ink') data.bg = null;
+                if (this.editView() === 'paper') data.paperOnly = true;
+                row.push(data);
             }
             this.subpixelClipboard.push(row);
         }
@@ -2308,7 +2329,7 @@ class CanvasRenderer {
     // the paper view only its paper, in the ink view all but its paper
     applySubpixelData(cell, row, col, data) {
         const view = this.editView();
-        if (view !== 'paper') {
+        if (view !== 'paper' && !data.paperOnly) {
             setCellSubpixel(cell, row, col, data.filled);
             if (data.fg) Object.assign(cell, { fg: { ...data.fg }, bold: data.bold, inverse: data.inverse });
         }
