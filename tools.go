@@ -94,14 +94,14 @@ type textArgs struct {
 
 type boxArgs struct {
 	rect
-	Style string `json:"style,omitempty" jsonschema:"border: light (the default), heavy, double, subpixel (drawn with subpixels; x1-y2 are then subpixel coordinates) or none"`
+	Style string `json:"style,omitempty" jsonschema:"border: light (the default), heavy, double, rounded (light with rounded corners ╭╮╯╰), subpixel (drawn with subpixels; x1-y2 are then subpixel coordinates) or none"`
 	Fill  string `json:"fill,omitempty" jsonschema:"none (the default); fill: clear the inside and give it the colours (subpixel style: a solid rectangle of subpixels); recolor: only give the inside the colours. With style none they cover the whole rectangle, its edge cells included"`
 	colors
 }
 
 type lineArgs struct {
 	rect
-	Style string `json:"style,omitempty" jsonschema:"light (the default), heavy, double, or subpixel: a straight line of subpixels, with x1-y2 subpixel coordinates"`
+	Style string `json:"style,omitempty" jsonschema:"light (the default), heavy, double, rounded (light, knees rounded), or subpixel: a straight line of subpixels, with x1-y2 subpixel coordinates"`
 	Path  string `json:"path,omitempty" jsonschema:"with edit paper: s (the default; two knees) or straight (a direct line of cells from (x1, y1) to (x2, y2), at any angle)"`
 	colors
 }

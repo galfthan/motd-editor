@@ -200,7 +200,8 @@ const BOX_ARCS = new Map([
 
 // Arms of a box-drawing char, or null if it isn't drawn from arms
 function boxArms(code) {
-    if (code < 0x2500 || code > 0x257F) return null;
+    // Rounded corners join like light ones but are drawn as arcs (BOX_ARCS)
+    if (code < 0x2500 || code > 0x257F || BOX_ARCS.has(code)) return null;
     const stub = BOX_STUB_ARMS.get(code);
     if (stub) return { up: 0, down: 0, left: 0, right: 0, ...stub };
     return boxDrawLookup.getConnections(code);

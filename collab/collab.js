@@ -7,7 +7,7 @@
 
 (() => {
 
-const STYLES = { none: 0, light: 1, heavy: 2, double: 3, subpixel: SUBPIXEL_STYLE };
+const STYLES = { none: 0, light: 1, heavy: 2, double: 3, rounded: ROUNDED_STYLE, subpixel: SUBPIXEL_STYLE };
 const FILLS = { none: 0, fill: 1, recolor: 2 };
 
 // Operations that aren't an undo step of their own
@@ -411,7 +411,7 @@ const OPS = {
     },
 
     draw_line(a) {
-        if (a.style === 'none') throw new Error('a line needs a style: light, heavy, double or subpixel');
+        if (a.style === 'none') throw new Error('a line needs a style: light, heavy, double, rounded or subpixel');
         const subpixel = a.style === 'subpixel';
         for (const [x, y] of [[a.x1, a.y1], [a.x2, a.y2]]) {
             if (subpixel) checkSubpixel(x, y);

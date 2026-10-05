@@ -150,7 +150,22 @@ class BoxDrawLookup {
             this.charToConn.set(code, { up, down, left, right });
             this.connToChar.set(this.encode(up, down, left, right), code);
         }
+        // Rounded corners join like light ones (lookups give the square
+        // ones; see roundCorners)
+        for (const [arc, square] of ROUNDED_CORNERS) this.charToConn.set(arc, this.charToConn.get(square));
     }
+}
+
+// Rounded corners ╭ ╮ ╯ ╰ and the light square corners they stand for
+const ROUNDED_CORNERS = [[0x256D, 0x250C], [0x256E, 0x2510], [0x256F, 0x2518], [0x2570, 0x2514]];
+
+// The rounded border style: drawn as light lines, with light corners made
+// round (T-junctions and crosses stay square: Unicode has no rounded ones)
+const ROUNDED_STYLE = 5;
+
+function roundCorners(chars) {
+    const round = new Map(ROUNDED_CORNERS.map(([arc, square]) => [square, arc]));
+    return chars.map(c => round.has(c.charCode) ? { ...c, charCode: round.get(c.charCode) } : c);
 }
 
 // Compute what connections a new box wants at position (x,y)

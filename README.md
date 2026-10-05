@@ -19,7 +19,7 @@ npx serve web
 - Sextant character editing (2x3 subpixel grid per cell)
 - Extended diagonal and triangle characters (U+1FB3C-1FB6F), blocks, shades
   and emoji, searchable by name
-- Box and line drawing with light/heavy/double borders, or with subpixels
+- Box and line drawing with light/heavy/double/rounded borders, or with subpixels
   (straight lines, and boxes that blend with subpixel art)
 - Fill: from the clicked subpixel to the touching ones that look the same;
   other colours and cells holding a character stop it. Ink lights the area
