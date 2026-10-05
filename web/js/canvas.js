@@ -1,6 +1,6 @@
 // Canvas rendering and interaction
 
-// Cells are CELL_H tall and CELL_W wide, holding 2x3 subpixels. The width
+// Cells are CELL_H tall and CELL_W wide, holding 2xBLOCK_ROWS subpixels. The width
 // follows the cell aspect (width / height) the user previews, to match the
 // terminal the art is for (see setCellAspect). By default it is a typical
 // terminal's 0.5; the glyph styles in style.css are sized for 18x34 cells.
@@ -54,6 +54,11 @@ function subpixelEdgeY(sy) { return Math.floor(sy / BLOCK_ROWS) * CELL_H + subRo
 
 // Cap on the grid canvas's backing store, in device pixels (see render)
 const MAX_CANVAS_PIXELS = 16 * 1024 * 1024;
+
+// The cell holding subpixel (sx, sy)
+function subpixelCell(sx, sy) {
+    return { x: sx >> 1, y: Math.floor(sy / BLOCK_ROWS) };
+}
 
 // The cells covering a rect in subpixel coordinates
 function subpixelToCellRect(r) {
@@ -140,7 +145,11 @@ class CanvasRenderer {
         // same shapes as above but in subpixel coords
         this.subpixelSelection = null;
         this.subpixelSelectionStart = null;
-        this.subpixelClipboard = null;      // 2D array of {filled, fg, bg} objects
+        // Subpixel rows per cell the user's subpixel tools use (BLOCK_ROWS,
+        // see setBlockRows): 2 quadrants, 3 sextants, 4 octants. Cells keep
+        // their own until drawn on.
+        this.blockRows = BLOCK_ROWS;
+        this.subpixelCopy = null;           // { rows, data: 2D array of {filled, fg, bg} } (see subpixelClipboard)
 
         // Image being placed (see startImagePaste): { image, cols, rows,
         // locked, x, y, options, cells }; onImagePaste(it, or null when it
@@ -420,37 +429,49 @@ class CanvasRenderer {
         this.selectedChar = charCode;
     }
 
-    // Subpixel rows per cell for the subpixel tools (BLOCK_ROWS): 2 quadrants,
-    // 3 sextants, 4 octants. Cells keep their own until drawn on. A subpixel
-    // copy is converted to the new rows (best effort) so it pastes at its size.
-    get blockRows() {
-        return BLOCK_ROWS;
-    }
-
-    set blockRows(rows) {
-        if (rows === BLOCK_ROWS) return;
-        const from = BLOCK_ROWS;
+    // Run fn with other subpixel rows (an AI operation's; blockRows stays
+    // the user's)
+    withBlockRows(rows, fn) {
+        const saved = BLOCK_ROWS;
         BLOCK_ROWS = rows;
-        if (this.subpixelClipboard && this.subpixelClipboardRows !== rows) {
-            const clip = this.subpixelClipboard, h = Math.max(1, Math.round(clip.length * rows / (this.subpixelClipboardRows || from)));
-            this.subpixelClipboard = Array.from({ length: h }, (_, i) => clip[Math.min(clip.length - 1, Math.floor(i * clip.length / h))]);
-            this.subpixelClipboardRows = rows;
+        try {
+            return fn();
+        } finally {
+            BLOCK_ROWS = saved;
         }
     }
 
     // Change the subpixel rows from the user's controls: subpixel selections
-    // and drags are in the old ones, so they end
+    // and drags are in the old ones, so they end; a subpixel paste or an
+    // image being placed is shown again in the new ones
     setBlockRows(rows) {
         if (rows === BLOCK_ROWS) return;
         this.cancelDrag();
         this.clearSubpixelSelection();
-        if (this.pasteMode && this.pastingSubpixels()) {
-            this.pasteMode = false;
-            this.clearPastePreview();
-        }
-        this.blockRows = rows;
+        BLOCK_ROWS = this.blockRows = rows;
         if (this.imagePaste) this.scheduleImageUpdate();
-        if (this._hoverEvent) this.updateHover(this._hoverEvent);
+        if (this.pasteMode) {
+            this.clearPastePreview();
+            if (this._lastPointerEvent) this.showPastePreview(this._lastPointerEvent);
+        }
+        if (this._hoverEvent) {
+            this.updateHover(this._hoverEvent);
+            this.updatePointerInfo(this._hoverEvent);
+        }
+    }
+
+    // The subpixel copy at the current rows (converted best effort, see
+    // resampleGrid, from the rows it was copied in)
+    get subpixelClipboard() {
+        const copy = this.subpixelCopy;
+        if (!copy) return null;
+        if (copy.rows === BLOCK_ROWS) return copy.data;
+        if (copy.at?.rows !== BLOCK_ROWS) {
+            copy.at = { rows: BLOCK_ROWS, data: resampleGrid(copy.data, copy.rows, BLOCK_ROWS, {
+                set: d => d?.filled, make: (d, on) => d && { ...d, filled: on }
+            }) };
+        }
+        return copy.at.data;
     }
 
     get pasteMode() {
@@ -476,7 +497,7 @@ class CanvasRenderer {
         if (view === 'both' && cell.inverse) return cell;
         // A wide char's tail has nothing of its own
         const noInk = !!cell.paperOnly || cell.type === 'wide-tail' ||
-            (cell.type === 'sextant' && !cell.subpixels.flat().some(Boolean));
+            (cell.type === 'block' && !cell.subpixels.flat().some(Boolean));
         const noPaper = !!cell.bg.keep || !!cell.bg.default;
         if ((noInk && noPaper) || (view === 'ink' && noInk) || (view === 'paper' && noPaper)) return null;
         if (noPaper) return { ...cell, bg: keepColor('bg') };
@@ -959,8 +980,8 @@ class CanvasRenderer {
             ctx.clip();
             ctx.fillStyle = fg;
             ctx.strokeStyle = fg;
-            if (cell.type === 'sextant') {
-                this.drawSextant(cell, g);
+            if (cell.type === 'block') {
+                this.drawBlock(cell, g);
             } else if (hasGlyphShape(code)) {
                 this.drawShape(code, g);
             } else {
@@ -1055,7 +1076,7 @@ class CanvasRenderer {
     // Block cells (quadrants, sextants, octants, and the block chars they
     // cover): the subpixels as rectangles on the shared subpixel edges, so
     // they exactly fill the inside and line up with hit-testing and overlays
-    drawSextant(cell, g) {
+    drawBlock(cell, g) {
         const rows = cell.subpixels.length;
         for (let row = 0; row < rows; row++) {
             for (let col = 0; col < 2; col++) {
@@ -1071,7 +1092,8 @@ class CanvasRenderer {
         const ctx = this.ctx;
         // Unit coords of the inside → CSS px in the cell. 0 and 1 map to the
         // cell's outer edges (the clip trims the border off), so shapes reach
-        // the inside's edges exactly; interior thirds match the sextant rows.
+        // the inside's edges exactly; interior halves, thirds and quarters
+        // match the subpixel rows.
         const ux = (u) => u * g.w;
         const uy = (v) => v * CELL_H;
 
@@ -1578,7 +1600,7 @@ class CanvasRenderer {
 
     // --- Overlays ---
 
-    // Show `rects` (grid coordinates, inclusive; in subpixels, 2x3 per cell,
+    // Show `rects` (grid coordinates, inclusive; in subpixels with
     // with `subpixel`) as the given kind of overlay, in the kind's colour (see
     // OVERLAY_ORDER and the --overlay-* CSS variables): an outline as thick
     // as the grid lines, and hairlines between the cells or subpixels in it
@@ -1989,10 +2011,7 @@ class CanvasRenderer {
                 return;
             }
             this._subpixelPasteImage = this._subpixelPasteImage || document.createElement('canvas');
-            const image = this.drawCellsImage(this.subpixelPasteResult(sp.sx, sp.sy, r), {
-                x1: Math.floor(r.x1 / 2), y1: Math.floor(r.y1 / BLOCK_ROWS),
-                x2: Math.floor(r.x2 / 2), y2: Math.floor(r.y2 / BLOCK_ROWS)
-            }, this._subpixelPasteImage, true);
+            const image = this.drawCellsImage(this.subpixelPasteResult(sp.sx, sp.sy, r), subpixelToCellRect(r), this._subpixelPasteImage, true);
             this.setOverlay('paste-subpixel', [{ ...r, whole: true }], true, [image]);
             return;
         }
@@ -2042,11 +2061,11 @@ class CanvasRenderer {
                 const cell = this.pasteCell(copied);
                 if (copied && !cell) { skipped = true; return; }   // shows what is there
                 if (!cell || (cell.type === 'wide-tail' && dx > 0 && isWideHead(row[dx - 1]))) return;
-                let placed = cell.type === 'wide-tail' ? { ...cell, type: 'sextant' } : cell;
+                let placed = cell.type === 'wide-tail' ? { ...cell, type: 'block' } : cell;
                 if (placed !== cell) clearCell(placed);
                 const under = this.canvas.cells[y + dy] && this.canvas.cells[y + dy][x + dx];
                 if (under && cell.paperOnly) {
-                    placed = under.type === 'wide-tail' ? { ...under, type: 'sextant', bg: cell.bg } : { ...under, bg: cell.bg };
+                    placed = under.type === 'wide-tail' ? { ...under, type: 'block', bg: cell.bg } : { ...under, bg: cell.bg };
                 } else if (under && (cell.fg.keep || cell.bg.keep)) {
                     placed = { ...placed, fg: cell.fg.keep ? under.fg : cell.fg, bg: cell.bg.keep ? under.bg : cell.bg };
                 }
@@ -2399,8 +2418,7 @@ class CanvasRenderer {
         if (!this.subpixelSelection) return;
 
         const { x1, y1, x2, y2 } = this.subpixelSelection;
-        this.subpixelClipboard = [];
-        this.subpixelClipboardRows = BLOCK_ROWS;
+        const data = [];
         for (let sy = y1; sy <= y2; sy++) {
             const row = [];
             for (let sx = x1; sx <= x2; sx++) {
@@ -2410,8 +2428,9 @@ class CanvasRenderer {
                 if (this.editView() === 'paper') data.paperOnly = true;
                 row.push(data);
             }
-            this.subpixelClipboard.push(row);
+            data.push(row);
         }
+        this.subpixelCopy = { rows: BLOCK_ROWS, data };
     }
 
     // Subpixel-level cut: copy subpixels then clear source
@@ -2527,7 +2546,7 @@ class CanvasRenderer {
 
         // Nothing to do if the subpixel and the colours it sets already match
         const paper = this.paperColor();
-        if (cell.type === 'sextant' && cell.subpixels.length === BLOCK_ROWS && cell.subpixels[row][col] === filled && colorKeeps(cell.bg, paper) &&
+        if (cell.type === 'block' && cellSubpixelAt(cell, row, col, BLOCK_ROWS) === filled && colorKeeps(cell.bg, paper) &&
             (filled ? colorKeeps(cell.fg, this.inkColor()) && !!cell.bold === this.bold && !!cell.inverse === this.inverse
                 : !cell.bold && !cell.inverse)) {
             return null;
@@ -2757,8 +2776,17 @@ class CanvasRenderer {
         // A character cell is ink all over (a wide char's tail is its head's)
         const glyphAt = (x, y) => {
             const row = this.canvas.cells[Math.floor(y / BLOCK_ROWS)], cx = x >> 1;
-            if (row[cx].type === 'sextant') return null;
+            if (row[cx].type === 'block') return null;
             return row[cx].type === 'wide-tail' && cx > 0 ? row[cx - 1] : row[cx];
+        };
+        // A block cell's subpixels at the current rows. Cells with others are
+        // converted once: for an unlit area, wherever any ink covers (finer
+        // lines stay walls, and keep their ink when the area lights the cell)
+        const views = new Map();
+        const view = (cell) => {
+            if (cell.subpixels.length === BLOCK_ROWS) return cell.subpixels;
+            if (!views.has(cell)) views.set(cell, resampleSubpixels(cell.subpixels, BLOCK_ROWS, !startLit));
+            return views.get(cell);
         };
         const startGlyph = glyphAt(sx, sy);
         const start = startGlyph || cellAt(sx, sy);
@@ -2772,7 +2800,7 @@ class CanvasRenderer {
             const glyph = glyphAt(x, y);
             if (glyph) return startLit && colorsEqual(glyph[slots(glyph).on], colour);
             const cell = cellAt(x, y);
-            if (cellSubpixelAt(cell, y % BLOCK_ROWS, x % 2, BLOCK_ROWS) !== startLit) return false;
+            if (view(cell)[y % BLOCK_ROWS][x % 2] !== startLit) return false;
             if (inkView && !startLit) return true;   // paper unseen: any unlit subpixel
             const c = cell[slots(cell)[startLit ? 'on' : 'off']];
             return colorsEqual(c, colour) ||
@@ -2812,7 +2840,7 @@ class CanvasRenderer {
         for (const [k, subs] of byCell) {
             let x = k % cols;
             const y = (k - x) / cols;
-            if (this.canvas.cells[y][x].type !== 'sextant') {
+            if (this.canvas.cells[y][x].type !== 'block') {
                 // A character takes the colours whole (both halves of a wide one)
                 if (this.canvas.cells[y][x].type === 'wide-tail' && x > 0) x--;
                 const row = this.canvas.cells[y], head = row[x];
@@ -2839,13 +2867,14 @@ class CanvasRenderer {
                 // An unlit area: other lit subpixels would take the new ink,
                 // so leave the cell (a lit area has all the cell's lit ones'
                 // colour, so recolouring them all is right)
-                // (subpixels as at the current resolution)
                 const inArea = new Set(subs.map(([r, c]) => r * 2 + c));
-                const others = !startLit && resampleSubpixels(cell.subpixels, BLOCK_ROWS).flat()
-                    .some((on, i) => on && !inArea.has(i));
+                const others = !startLit && view(cell).flat().some((on, i) => on && !inArea.has(i));
                 if (!others || colorsEqual(cell[slot.on], this.fgColor)) {
                     cell[slot.on] = { ...this.fgColor };
-                    if (!startLit) for (const [r, c] of subs) setCellSubpixel(cell, r, c, true, BLOCK_ROWS);
+                    if (!startLit) {
+                        cell.subpixels = view(cell).map(row => row.slice());
+                        for (const [r, c] of subs) cell.subpixels[r][c] = true;
+                    }
                 }
             }
             if (JSON.stringify(cell) === before) continue;
@@ -3135,12 +3164,11 @@ class CanvasRenderer {
         this.drawAll();
     }
 
-    createNew(width, height, mode) {
+    createNew(width, height) {
         this.resetInteractionState();
         this.recordEdit('New', () => {
             this.snapshotCanvas();
             this.canvas = createCanvas(width, height);
-            this.canvas.mode = mode || 'sextant';
         });
         this.render();
         this.updateStatus();

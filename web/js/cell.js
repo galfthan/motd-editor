@@ -14,19 +14,20 @@ function defaultBG() {
 // which follows the terminal's own colours where they are "default")
 function createCell() {
     return {
-        type: 'sextant',
+        type: 'block',
         fg: defaultFG(),
         bg: defaultBG(),
-        subpixels: [[false, false], [false, false], [false, false]],
+        subpixels: patternToSubpixels(0),
         charCode: 0,
         bold: false,
         inverse: false
     };
 }
 
-function clearCell(cell) {
-    cell.type = 'sextant';
-    cell.subpixels = [[false, false], [false, false], [false, false]];
+// An empty block cell, `rows` subpixels high
+function clearCell(cell, rows = 3) {
+    cell.type = 'block';
+    cell.subpixels = patternToSubpixels(0, rows);
     cell.charCode = 0;
 }
 
@@ -39,13 +40,13 @@ function isTriangleChar(code) {
 }
 
 // Set or clear subpixel (row, col) of a block cell `rows` subpixels high:
-// another resolution is converted first (best effort), a character cell
-// becomes an empty block cell
+// another resolution is converted first (best effort) unless that subpixel
+// already is so, a character cell becomes an empty block cell
 function setCellSubpixel(cell, row, col, filled, rows = 3) {
-    if (cell.type !== 'sextant') {
-        cell.type = 'sextant';
-        cell.charCode = 0;
-        cell.subpixels = patternToSubpixels(0, rows);
+    if (cell.type !== 'block') {
+        clearCell(cell, rows);
+    } else if (cellSubpixelAt(cell, row, col, rows) === filled) {
+        return;
     } else if (cell.subpixels.length !== rows) {
         cell.subpixels = resampleSubpixels(cell.subpixels, rows);
     }
@@ -55,12 +56,12 @@ function setCellSubpixel(cell, row, col, filled, rows = 3) {
 // Whether a block cell's area at subpixel (row, col) of a `rows`-high grid
 // is set (read at that resolution, best effort, if the cell has another)
 function cellSubpixelAt(cell, row, col, rows = 3) {
-    if (cell.type !== 'sextant') return false;
+    if (cell.type !== 'block') return false;
     return cell.subpixels.length === rows ? cell.subpixels[row][col] : resampleSubpixels(cell.subpixels, rows)[row][col];
 }
 
-// Set a cell from a character. Sextant/block chars (and space) become sextant
-// cells, so they stay editable with the draw tools.
+// Set a cell from a character. Block chars (quadrants, sextants, octants and
+// space) become block cells, so they stay editable with the draw tools.
 function setCellChar(cell, charCode) {
     const block = charToBlock(charCode || 32);
     if (block) {
@@ -76,7 +77,7 @@ function setCellChar(cell, charCode) {
         cell.type = 'custom';
     }
     cell.charCode = charCode;
-    cell.subpixels = [[false, false], [false, false], [false, false]];
+    cell.subpixels = patternToSubpixels(0);
 }
 
 // --- Wide characters ---
@@ -181,7 +182,7 @@ function createCanvas(width, height) {
         }
         cells.push(row);
     }
-    return { width, height, cells, mode: 'sextant' };
+    return { width, height, cells };
 }
 
 function resizeCanvas(canvas, newWidth, newHeight) {
@@ -235,7 +236,7 @@ function colorsEqual(a, b) {
 // character already covers both columns)
 function cellToChar(cell) {
     if (cell.type === 'wide-tail') return '';
-    if (cell.type === 'sextant') {
+    if (cell.type === 'block') {
         return blockToChar(cell.subpixels);
     }
     return cell.charCode ? String.fromCodePoint(cell.charCode) : ' ';

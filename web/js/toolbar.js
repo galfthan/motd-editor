@@ -249,7 +249,7 @@ class Toolbar {
             case 'redo': r.redo(); break;
             case 'new':
                 if (confirm('Create a new canvas? Unsaved changes will be lost.')) {
-                    r.createNew(80, 60, 'sextant');
+                    r.createNew(80, 60);
                     this.setFilename('motd.txt');
                     this.saveFormat = 'ansi';
                 }
@@ -528,20 +528,20 @@ class Toolbar {
         // Subpixels per cell, one setting shown in each panel it applies to
         document.querySelectorAll('[data-pixels-in]').forEach(row => {
             row.innerHTML = '<span class="label">Pixels</span><div class="segmented wide" role="group" aria-label="Subpixels per cell">' +
-                [[2, 'Quadrant', '2×2 subpixels per cell (quadrant blocks)'], [3, 'Sextant', '2×3 subpixels per cell (sextants)'],
-                    [4, 'Octant', '2×4 subpixels per cell (octants: Unicode 16, so older terminal fonts can\'t show them)']]
-                    .map(([rows, name, title]) => `<button data-pixels="${rows}" aria-pressed="false" title="${title}">${name}</button>`).join('') +
-                '</div>';
+                Object.entries(BLOCK_MODES).map(([rows, name]) =>
+                    `<button data-pixels="${rows}" aria-pressed="false" title="2×${rows} subpixels per cell">${name[0].toUpperCase() + name.slice(1)}</button>`).join('') +
+                '</div><p class="hint" data-pixels-hint hidden>Octants are new in Unicode 16: older terminal fonts show boxes instead.</p>';
         });
-        const pixels = [...document.querySelectorAll('[data-pixels]')];
-        this.setBlockRows = (rows, save = true) => {
-            this.renderer.setBlockRows(rows);
-            pixels.forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.pixels === rows)));
-            if (save) saveSetting('motd-editor.pixels', rows);
-        };
-        pixels.forEach(b => b.addEventListener('click', () => this.setBlockRows(+b.dataset.pixels)));
-        const saved = +loadSetting('motd-editor.pixels');
-        this.setBlockRows([2, 3, 4].includes(saved) ? saved : 3, false);
+        document.querySelectorAll('[data-pixels]').forEach(b => b.addEventListener('click', () => this.setBlockRows(+b.dataset.pixels)));
+        const saved = loadSetting('motd-editor.pixels');
+        this.setBlockRows(saved in BLOCK_MODES ? +saved : 3, false);
+    }
+
+    setBlockRows(rows, save = true) {
+        this.renderer.setBlockRows(rows);
+        document.querySelectorAll('[data-pixels]').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.pixels === rows)));
+        document.querySelectorAll('[data-pixels-hint]').forEach(p => { p.hidden = rows !== 4; });
+        if (save) saveSetting('motd-editor.pixels', rows);
     }
 
     // The Pixels control where subpixels are drawn: not for whole-cell
@@ -1143,7 +1143,7 @@ class Toolbar {
             ['Tools', 'Hand: move the view', 'H', tool('hand')],
             ['Brush', 'Brush tip: subpixel', '', () => { this.setTool('brush'); document.querySelector('[data-brush="subpixel"]').click(); }],
             ['Brush', 'Brush tip: whole cell', '', () => { this.setTool('brush'); document.querySelector('[data-brush="cell"]').click(); }],
-            ...[[2, 'quadrant (2×2)'], [3, 'sextant (2×3)'], [4, 'octant (2×4)']].map(([rows, name]) => ['Pixels', `Pixels: ${name}`, '', () => this.setBlockRows(rows)]),
+            ...Object.entries(BLOCK_MODES).map(([rows, name]) => ['Pixels', `Pixels: ${name} (2×${rows})`, '', () => this.setBlockRows(+rows)]),
             ['File', 'New canvas', '', act('new')],
             ['File', 'Open…', '', act('open')],
             ['File', 'Save', '⌘S', act('save')],

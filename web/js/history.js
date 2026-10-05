@@ -43,7 +43,7 @@ const HISTORY_MAX_CELLS = 1000000;
 // objects: a large step then costs one array instead of ~100k small objects.
 
 const RECORD_SIZE = 6;
-const CELL_TYPES = ['sextant', 'diagonal', 'triangle', 'custom', 'wide-tail'];
+const CELL_TYPES = ['block', 'diagonal', 'triangle', 'custom', 'wide-tail'];
 
 function packColor(c) {
     return (c.default ? 1 << 24 : 0) | (c.r << 16) | (c.g << 8) | c.b;
@@ -98,7 +98,7 @@ function snapshotCanvas(canvas) {
             if (!recordMatches(blank, 0, cell)) pushRecord(cells, x, y, cell);
         }
     }
-    return { width: canvas.width, height: canvas.height, mode: canvas.mode, cells, blank };
+    return { width: canvas.width, height: canvas.height, cells, blank };
 }
 
 function canvasFromSnapshot(snap) {
@@ -117,11 +117,11 @@ function canvasFromSnapshot(snap) {
         }
         cells.push(row);
     }
-    return { width: snap.width, height: snap.height, cells, mode: snap.mode };
+    return { width: snap.width, height: snap.height, cells };
 }
 
 function canvasMatchesSnapshot(canvas, snap) {
-    if (canvas.width !== snap.width || canvas.height !== snap.height || canvas.mode !== snap.mode) {
+    if (canvas.width !== snap.width || canvas.height !== snap.height) {
         return false;
     }
     const recs = snap.cells;

@@ -181,7 +181,7 @@ function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, 
             const count = set.reduce((a, v) => a + v, 0);
             const same = f.r === b.r && f.g === b.g && f.b === b.b;
             if (!edge[cx] && (count === 0 || count === N || same)) {
-                cell.subpixels = Array.from({ length: R }, () => [false, false]);
+                cell.subpixels = patternToSubpixels(0, R);
                 cell.bg = count === N ? f : b;
                 return cell;
             }

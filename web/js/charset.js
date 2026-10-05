@@ -97,6 +97,9 @@ const BLOCK_CHARS = (() => {
     return { 2: quadrant, 3: sextant, 4: octant };
 })();
 
+// The block resolutions: subpixel rows per cell and their names
+const BLOCK_MODES = { 2: 'quadrant', 3: 'sextant', 4: 'octant' };
+
 // Character → { rows, pattern }. A character several resolutions have is
 // read as a sextant (space, █, ▌, ▐) or else a quadrant (▀, ▄, ▘, ...).
 const CHAR_BLOCKS = new Map();
@@ -114,20 +117,28 @@ function charToBlock(code) {
     return block ? patternToSubpixels(block.pattern, block.rows) : null;
 }
 
-// Subpixels at another resolution, best effort: a subpixel is set where at
-// least half of what it covers was set
-function resampleSubpixels(subpixels, rows) {
-    const from = subpixels.length;
-    if (from === rows) return subpixels.map(row => row.slice());
-    return Array.from({ length: rows }, (_, r) => [0, 1].map(c => {
-        const top = r / rows, bottom = (r + 1) / rows;
-        let covered = 0;
-        for (let s = 0; s < from; s++) {
-            const overlap = Math.min(bottom, (s + 1) / from) - Math.max(top, s / from);
-            if (overlap > 0 && subpixels[s][c]) covered += overlap;
+// Rows of a grid of subpixels `from` per cell high, resampled to `to` per
+// cell: a subpixel is set where set ones cover at least a third of it (with
+// `any`, where any covers it). set(v) says whether an entry is set and
+// make(v, on) gives the new entry, v being the one covering most of it.
+function resampleGrid(grid, from, to, { any = false, set = v => v, make = (v, on) => on } = {}) {
+    const h = Math.max(1, Math.round(grid.length * to / from));
+    return Array.from({ length: h }, (_, r) => grid[0].map((_, c) => {
+        const top = r * from / to, bottom = (r + 1) * from / to;   // in source rows
+        let covered = 0, most = 0, v = null;
+        for (let s = Math.floor(top); s < Math.min(grid.length, Math.ceil(bottom)); s++) {
+            const overlap = Math.min(bottom, s + 1) - Math.max(top, s);
+            if (overlap <= 0) continue;
+            if (overlap > most) { most = overlap; v = grid[s][c]; }
+            if (set(grid[s][c])) covered += overlap;
         }
-        return covered * rows >= 0.5 - 1e-9;
+        return make(v, any ? covered > 0 : covered * to / from >= 1 / 3 - 1e-9);
     }));
+}
+
+// A block cell's subpixels at `rows` per cell (see resampleGrid)
+function resampleSubpixels(subpixels, rows, any = false) {
+    return resampleGrid(subpixels, subpixels.length, rows, { any });
 }
 
 // CSS class with the font styles for a glyph (see .glyph-* in style.css).

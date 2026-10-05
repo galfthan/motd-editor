@@ -5,8 +5,8 @@
 // browser, font and zoom level, the way terminals render them.
 //
 // Block and polygon shapes are in unit coordinates of a cell's inside: x from
-// 0 (left) to 1 (right), y from 0 (top) to 1 (bottom). Thirds line up with the
-// sextant subpixel rows.
+// 0 (left) to 1 (right), y from 0 (top) to 1 (bottom). Halves, thirds and
+// quarters line up with the quadrant, sextant and octant subpixel rows.
 
 // Shades are dot patterns, as most terminals show them (a font's shade glyph,
 // or the terminal's own pixel pattern). Dots are 1 CSS px on one grid across

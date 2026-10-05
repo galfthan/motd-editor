@@ -24,7 +24,7 @@ type editing struct {
 
 // The subpixels per cell an operation's subpixel coordinates and drawing use
 type pixels struct {
-	Pixels string `json:"pixels,omitempty" jsonschema:"subpixels per cell: sextant (the default; 2x3, subpixel row sy = 3*y + row), quadrant (2x2, sy = 2*y + row) or octant (2x4, sy = 4*y + row; finest, but needs a terminal font with Unicode 16 octants). Cells drawn on at another resolution are converted (best effort)"`
+	Pixels string `json:"pixels,omitempty" jsonschema:"subpixels per cell for subpixel coordinates and drawing: quadrant (2x2, subpixel row sy = 2*y + row), sextant (2x3, sy = 3*y + row) or octant (2x4, sy = 4*y + row; finest, but needs a terminal font with Unicode 16 octants). Default: the user's, get_state's user.pixels. Cells drawn on at another resolution are converted (best effort)"`
 }
 
 type colors struct {
@@ -66,7 +66,7 @@ type display struct {
 type readArgs struct {
 	region
 	pixels
-	Format string `json:"format,omitempty" jsonschema:"text (the default): one line per row; subpixels: one line per subpixel row (3 per row; see pixels), 2 chars per cell, # set, . clear, + a cell holding a character; cells: JSON for every non-blank cell with its char, colours, and bold / inverse when set"`
+	Format string `json:"format,omitempty" jsonschema:"text (the default): one line per row; subpixels: one line per subpixel row (2, 3 or 4 per cell row, by pixels), 2 chars per cell, # set, . clear, + a cell holding a character; cells: JSON for every non-blank cell with its char, colours, and bold / inverse when set"`
 }
 
 type bitmapArgs struct {
@@ -235,7 +235,7 @@ type sizeArgs struct {
 
 type batchArgs struct {
 	Edit   string `json:"edit,omitempty" jsonschema:"the edit for ops that give none (default both)"`
-	Pixels string `json:"pixels,omitempty" jsonschema:"the pixels for ops that give none (default sextant)"`
+	Pixels string `json:"pixels,omitempty" jsonschema:"the pixels for ops that give none (default: the user's)"`
 	Ops    []struct {
 		Op   string         `json:"op" jsonschema:"name of any other tool except batch, view_canvas, import_image, undo and redo"`
 		Args map[string]any `json:"args,omitempty"`
@@ -243,8 +243,8 @@ type batchArgs struct {
 }
 
 func addTools(s *mcp.Server, l *link) {
-	relay[pixels](s, l, "get_state",
-		"Canvas size in cells and subpixels (at pixels); what the user is doing: current tool and colours, cell or subpixel selection, text cursor, and the note they left for you; and the editor's display settings.")
+	relay[struct{}](s, l, "get_state",
+		"Canvas size in cells and subpixels; what the user is doing: current tool and colours, cell or subpixel selection, the subpixels per cell they draw in (pixels; the subpixel sizes and selection are in it, and your tools use it by default), text cursor, and the note they left for you; and the editor's display settings.")
 	relay[viewArgs](s, l, "view_canvas",
 		"The canvas, or a region of it, as a PNG image drawn by the editor. MOTDs show in both dark and light terminals: check both with light_terminal.")
 	relay[display](s, l, "set_display",

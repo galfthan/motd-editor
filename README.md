@@ -99,7 +99,7 @@ The agent gets tools mirroring the editor's: `draw_bitmap` and
 (text, subpixel bitmap or per-cell colours), `view_canvas` (a PNG, in dark
 or light terminal colours and any cell aspect) and `set_display` (Show Grid,
 Light Terminal, cell aspect). Subpixel tools take `pixels`: quadrant,
-sextant (the default) or octant.
+sextant or octant (by default the user's Pixels setting).
 
 How it works: the browser tab holds the canvas. The server relays each tool
 call to the tab over Server-Sent Events, the tab runs it with the editor's own

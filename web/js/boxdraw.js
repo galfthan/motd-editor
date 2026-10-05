@@ -201,7 +201,7 @@ function getNewBoxConnections(x, y, x1, y1, x2, y2, style) {
 // (e.g. heavy+double); then the existing arms are redrawn in the new style, and
 // failing that the new stroke is drawn on its own.
 function mergeWithExisting(conn, existingCell, style, lookup) {
-    const ec = existingCell && existingCell.type !== 'sextant'
+    const ec = existingCell && existingCell.type !== 'block'
         ? lookup.getConnections(existingCell.charCode)
         : null;
     if (ec) {
@@ -315,7 +315,7 @@ function computeLineChars(x1, y1, x2, y2, style, canvasCells, lookup) {
         // extended to a full segment (no half-line chars exist)
         const end = i === 0 ? path[1] : i === path.length - 1 ? path[i - 1] : null;
         if (end) {
-            const joins = existingCell && existingCell.type !== 'sextant' && lookup.getConnections(existingCell.charCode);
+            const joins = existingCell && existingCell.type !== 'block' && lookup.getConnections(existingCell.charCode);
             if (joins) charCode = mergeWithExisting(conn, existingCell, style, lookup);
             if (end.x !== x) { conn.left = style; conn.right = style; }
             if (end.y !== y) { conn.up = style; conn.down = style; }
