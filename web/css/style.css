@@ -184,6 +184,13 @@ kbd {
 .icon-btn:hover { background: var(--raised); color: var(--text); }
 .icon-btn:disabled { opacity: 0.35; cursor: default; background: transparent; }
 .icon-btn[aria-pressed="true"] { background: var(--raised); color: var(--accent); }
+.icon-btn.small { width: 28px; height: 28px; }
+
+.head-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
 
 /* Segmented control: buttons (aria-pressed) or radio labels in a track */
 .segmented {
@@ -408,6 +415,7 @@ kbd {
     gap: 10px;
 }
 
+.inspector section[hidden],
 .inspector section[data-panel] { display: none; }
 .inspector section[data-panel].active { display: flex; }
 
@@ -425,6 +433,10 @@ kbd {
 }
 
 .hint kbd { font-size: 9px; padding: 2px 4px; }
+
+/* Longer tips, shown with the inspector's tips toggle */
+.hint.help { display: none; }
+.show-help .hint.help { display: block; }
 
 .divider {
     height: 1px;

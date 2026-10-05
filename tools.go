@@ -155,9 +155,8 @@ type imageArgs struct {
 	Y              int    `json:"y,omitempty" jsonschema:"top cell (default 0)"`
 	Width          int    `json:"width,omitempty" jsonschema:"cells; with only one of width and height the other keeps the image's proportions at the editor's cell aspect (default: as large as fits the canvas from x, y)"`
 	Height         int    `json:"height,omitempty" jsonschema:"cells"`
-	Mono           bool   `json:"mono,omitempty" jsonschema:"use only the colours fg and bg (default: full colour, two colours per cell fitted to the image). With edit ink the image is always drawn in fg alone over the paper there; with edit paper each cell's paper gets the image's colour there (mono, dither, fg and bg not used)"`
-	Dither         string `json:"dither,omitempty" jsonschema:"floyd-steinberg (the default), atkinson (crisper) or none"`
-	DitherStrength *int   `json:"dither_strength,omitempty" jsonschema:"0-100: how much of each subpixel's error is passed on (default 100); lower is less grainy"`
+	Mono           bool   `json:"mono,omitempty" jsonschema:"use only the colours fg and bg (default: full colour, two colours per cell fitted to the image). With edit ink the image is always drawn in fg alone over the paper there; with edit paper each cell's paper gets the image's colour there (mono, dither_strength, fg and bg not used)"`
+	DitherStrength *int   `json:"dither_strength,omitempty" jsonschema:"dithering (Atkinson error diffusion), 0 (none) to 100 (the default): how much of each subpixel's error is passed on; lower is less grainy"`
 	Brightness     int    `json:"brightness,omitempty" jsonschema:"-100 to 100 (default 0): shifts every tone"`
 	Contrast       int    `json:"contrast,omitempty" jsonschema:"-100 to 100 (default 0): spreads tones from the middle, or squeezes them to it"`
 	Midtones       int    `json:"midtones,omitempty" jsonschema:"-100 to 100 (default 0): lightens or darkens the middle tones, black and white stay; mono images look dark at 0, which mixes light physically, so try 30-50 to lighten them"`

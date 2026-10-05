@@ -490,9 +490,6 @@ const OPS = {
         const x = a.x ?? 0, y = a.y ?? 0;
         checkCell(x, y);
         if (a.width < 0 || a.height < 0) throw new Error('width and height must be positive');
-        if (!Object.hasOwn(IMAGE_DITHERS, a.dither || 'floyd-steinberg')) {
-            throw new Error(`unknown dither "${a.dither}": use ${Object.keys(IMAGE_DITHERS).join(', ')}`);
-        }
         let cols = a.width, rows = a.height;
         if (!cols && !rows) cols = fitImageCols(image, r.cellAspect, r.canvas.width - x, r.canvas.height - y);
         cols ||= Math.max(1, Math.round(rows * image.width / (image.height * r.cellAspect)));
@@ -512,7 +509,7 @@ const OPS = {
         const cells = imageToCells(image, cols, rows, {
             mono: a.mono || edit === 'ink', paperOnly: edit === 'paper',
             fg: parseColor(a.fg, defaultFG), bg: edit === 'ink' ? keepColor('bg') : parseColor(a.bg, defaultBG),
-            dither: a.dither || 'floyd-steinberg', strength: strength / 100, blockRows: BLOCK_ROWS, invert: !!a.invert, ...tone
+            strength: strength / 100, blockRows: BLOCK_ROWS, invert: !!a.invert, ...tone
         });
         withState({ clipboard: cells, pasteMode: false }, () => r.pasteAt(x, y));
         flash({ x1: x, y1: y, x2: x + cols - 1, y2: y + rows - 1 });
