@@ -514,11 +514,6 @@ class Toolbar {
             pressOne(paths, btn);
             this.renderer.linePath = btn.dataset.linePath;
         }));
-        const fillModes = [...document.querySelectorAll('[data-fill-mode]')];
-        fillModes.forEach(btn => btn.addEventListener('click', () => {
-            pressOne(fillModes, btn);
-            this.renderer.fillMode = btn.dataset.fillMode;
-        }));
         const brushes = [...document.querySelectorAll('[data-brush]')];
         brushes.forEach(btn => btn.addEventListener('click', () => {
             pressOne(brushes, btn);
@@ -600,9 +595,7 @@ class Toolbar {
         const note = document.getElementById('view-note');
         note.textContent = this.viewNote();
         note.hidden = !note.textContent;
-        // The ink and paper views each fill in one way
         const both = this.renderer.view === 'both';
-        document.querySelector('.fill-modes').hidden = !both;
         // An image in full colour, or as paper, uses neither colour
         const noColors = image && (this.renderer.view === 'paper' || (both && !this.renderer.imagePaste.mono));
         document.querySelectorAll('.colors, .colors-divider').forEach(el => { el.hidden = noColors; });
@@ -1142,10 +1135,6 @@ class Toolbar {
         const cmds = [
             ['Tools', 'Brush', 'B', tool('draw')],
             ['Tools', 'Fill', 'F', tool('fill')],
-            ...['ink', 'paper', 'both'].map(m => ['Fill', `Fill with ${m}`, '', () => {
-                this.setTool('fill');
-                document.querySelector(`[data-fill-mode="${m}"]`).click();
-            }]),
             ['Tools', 'Erase', 'E', tool('erase')],
             ['Tools', 'Glyph', 'G', tool('char')],
             ['Tools', 'Text', 'T', tool('text')],

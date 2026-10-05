@@ -136,13 +136,8 @@
                     </section>
 
                     <section data-panel="fill">
-                        <div class="segmented wide fill-modes" role="group" aria-label="Fill with">
-                            <button data-fill-mode="ink" aria-pressed="true" title="Lights the area in the ink colour. Cells a line of another colour runs through are left as they are, so lines keep their colour.">Ink</button>
-                            <button data-fill-mode="paper" aria-pressed="false" title="Gives every cell the area reaches the paper colour. Lines keep their ink; in cells a line runs through, the paper shows on both sides of it.">Paper</button>
-                            <button data-fill-mode="both" aria-pressed="false" title="Paper, then ink: no gaps along lines. With the paper at the terminal's colour it is the same as Ink.">Both</button>
-                        </div>
                         <div class="pixels-row ink-only" data-pixels-in="fill"></div>
-                        <p class="hint help">The area spreads from the subpixel you click to the touching ones that look the same, and in an empty area also over the paper colour around drawn subpixels; other colours stop it. Characters (blocks, slants) count as ink: a fill started on ink recolours touching ones of its colour, and they stop a fill of an empty area.</p>
+                        <p class="hint help">In the Ink view the fill lights the area in the ink colour; cells a line of another colour runs through keep theirs. In the Both view it also gives the area the paper colour, and cells along such lines take the ink colour as paper, so the area is solid up to the line. In the Paper view it floods the touching cells of the same paper. The area spreads from the subpixel you click to the touching ones that look the same, and in an empty area also over the paper colour around drawn subpixels; other colours stop it. Characters (blocks, slants) count as ink: a fill started on ink recolours touching ones of its colour, and they stop a fill of an empty area.</p>
                     </section>
 
                     <section data-panel="text">

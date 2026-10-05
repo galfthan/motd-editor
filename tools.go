@@ -119,11 +119,10 @@ type lineArgs struct {
 type fillArgs struct {
 	editing
 	pixels
-	SX   int    `json:"sx" jsonschema:"subpixel column where the fill starts"`
-	SY   int    `json:"sy" jsonschema:"subpixel row"`
-	Mode string `json:"mode,omitempty" jsonschema:"ink (the default): light the area in fg, leaving out cells where that would repaint other lit subpixels (a line through them); paper: give every cell the area reaches bg; both: paper, then ink. With edit ink it always fills ink, bounded by lit subpixels and characters alone; with edit paper it floods the connected cells of the same paper with bg (mode not used)"`
-	FG   string `json:"fg,omitempty" jsonschema:"ink colour (modes ink and both): #rrggbb, default (the default) or keep"`
-	BG   string `json:"bg,omitempty" jsonschema:"paper colour (modes paper and both; an unlit area also spreads over drawn cells' subpixels showing it): #rrggbb, default (the default) or keep"`
+	SX int    `json:"sx" jsonschema:"subpixel column where the fill starts"`
+	SY int    `json:"sy" jsonschema:"subpixel row"`
+	FG string `json:"fg,omitempty" jsonschema:"ink colour (not with edit paper): #rrggbb, default (the default) or keep"`
+	BG string `json:"bg,omitempty" jsonschema:"paper colour (not with edit ink; an unlit area also spreads over drawn cells' subpixels showing it): #rrggbb, default (the default) or keep"`
 }
 
 type copyArgs struct {
@@ -263,7 +262,7 @@ func addTools(s *mcp.Server, l *link) {
 	relay[lineArgs](s, l, "draw_line",
 		"Draw a line of box-drawing characters from (x1, y1) to (x2, y2), like the Line tool: straight, or if both x and y differ a Z of three straight legs, the middle one halfway (horizontal-vertical-horizontal when at least as wide as tall, else vertical-horizontal-vertical). Ends on another line join it (╠, ┯). Both ends must be on the canvas. Style subpixel draws a straight line of subpixels between subpixel points instead.")
 	relay[fillArgs](s, l, "fill",
-		"Fill an area, like the Fill tool: from (sx, sy) it spreads to the subpixels that look the same (lit or unlit alike, showing the same colour; an unlit area also over the unlit subpixels of drawn cells showing bg; unlit areas connect up, down, left and right, lit ones also diagonally); other colours stop it. Cells holding a character count as lit in their fg: a fill started on lit subpixels or a character takes in touching ones of its colour, and they stop a fill of unlit subpixels. mode says what it does there. Text style (bold, inverse) is left as it is.")
+		"Fill an area, like the Fill tool: from (sx, sy) it spreads to the subpixels that look the same (lit or unlit alike, showing the same colour; an unlit area also over the unlit subpixels of drawn cells showing bg; unlit areas connect up, down, left and right, lit ones also diagonally); other colours stop it. Cells holding a character count as lit in their fg: a fill started on lit subpixels or a character takes in touching ones of its colour, and they stop a fill of unlit subpixels. What it does follows edit: ink lights the area in fg, leaving out cells where that would repaint other lit subpixels (a line of another colour through them), bounded by lit subpixels and characters alone; both (the default) gives the area bg, then fg, and the cells along a line of another colour take fg as paper where the area covers all their unlit subpixels (solid up to the line); paper floods the connected cells of the same paper with bg. Text style (bold, inverse) is left as it is.")
 	relay[copyArgs](s, l, "copy_region",
 		"Copy or move the rectangle (x1, y1)-(x2, y2), inclusive, to (to_x, to_y), like Select with copy/cut and paste.")
 	relay[importArgs](s, l, "import_ansi",

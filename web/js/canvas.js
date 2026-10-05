@@ -170,7 +170,6 @@ class CanvasRenderer {
 
         // Draw/erase tool state
         this.brushCell = false;     // Paint whole cells instead of subpixels
-        this.fillMode = 'ink';      // what the fill tool paints: ink, paper or both (see fillAt)
 
         // Grid canvas drawing state (see render / drawCell)
         this.ctx = null;                // 2D context of the grid canvas
@@ -2769,23 +2768,28 @@ class CanvasRenderer {
     // the paper colour: the paper a shape drawn in these colours put around
     // it. Unlit areas connect up, down, left and right, lit ones also
     // diagonally (drawn lines often only touch at corners, and such a line
-    // still bounds an unlit area). `mode` (default this.fillMode) says what
-    // it does there:
+    // still bounds an unlit area). What it does there follows the view
+    // (the paper view floods cells instead, see fillPaperAt):
     //   ink    lights the area in the ink colour. An unlit area leaves out
     //          cells where that would repaint other lit subpixels (a line
     //          through them).
-    //   paper  gives every cell the area reaches the paper colour; lit
-    //          subpixels keep their ink.
-    //   both   paper, then ink.
+    //   both   gives every cell the area reaches the paper colour, then the
+    //          ink. A cell left out of the ink for a line of another colour,
+    //          where the area covers all its unlit subpixels, takes the ink
+    //          colour as paper instead: the area looks solid up to the line
+    //          (also with the paper colour keep). Started on ink, the same
+    //          for the enclosed unlit gaps between the area and such lines.
     // Returns the area's size (0: (sx, sy) is in a character cell, or the
     // colours to use are keep), how many cells changed, and their rect.
-    fillAt(sx, sy, mode = this.fillMode) {
+    fillAt(sx, sy) {
         // The ink view fills ink, bounded by ink alone (see editView)
         const inkView = this.editView() === 'ink';
-        if (inkView) mode = 'ink';
         const cols = this.canvas.width, W = cols * 2, H = this.canvas.height * BLOCK_ROWS;
-        const ink = mode !== 'paper' && !this.fgColor.keep;
-        const paper = mode !== 'ink' && !this.bgColor.keep;
+        const ink = !this.fgColor.keep;
+        const paper = !inkView && !this.bgColor.keep;
+        // Both: cells along lines of other colours take the ink as paper
+        // (whatever the paper colour, keep too)
+        const solid = !inkView && ink;
         if ((!ink && !paper) || !(sx >= 0 && sx < W && sy >= 0 && sy < H)) return { count: 0, changed: 0 };
         const cellAt = (x, y) => this.canvas.cells[Math.floor(y / BLOCK_ROWS)][x >> 1];
         // A cell's colour slots: lit subpixels show `on`, unlit `off`
@@ -2846,16 +2850,74 @@ class CanvasRenderer {
             }
         }
 
-        // The area's subpixels by cell
-        const byCell = new Map();
-        for (const i of area) {
-            const x = i % W, y = (i - x) / W;
-            const k = Math.floor(y / BLOCK_ROWS) * cols + (x >> 1);
-            if (!byCell.has(k)) byCell.set(k, []);
-            byCell.get(k).push([y % BLOCK_ROWS, x % 2]);
+        // Subpixels (indices) by cell: cell index → [[row, col], ...]
+        const byCellOf = (indices) => {
+            const map = new Map();
+            for (const i of indices) {
+                const x = i % W, y = (i - x) / W;
+                const k = Math.floor(y / BLOCK_ROWS) * cols + (x >> 1);
+                if (!map.has(k)) map.set(k, []);
+                map.get(k).push([y % BLOCK_ROWS, x % 2]);
+            }
+            return map;
+        };
+        const byCell = byCellOf(area);
+        // Both: cells that get the ink as paper (see the end).
+        // Started on ink, the unlit gaps between the area and lines of other
+        // colours (those cells kept their own ink): unlit subpixels next to
+        // it, 4-connected, that reach no cell without ink. (Space between
+        // the area and other shapes' ink alone counts as a gap too.)
+        const toSolid = new Map();
+        if (startLit && solid) {
+            const inked = new Map();
+            const hasInk = (cell) => {
+                if (!inked.has(cell)) inked.set(cell, view(cell).some(row => row[0] || row[1]));
+                return inked.get(cell);
+            };
+            const unlit = (x, y) => !glyphAt(x, y) && !view(cellAt(x, y))[y % BLOCK_ROWS][x % 2];
+            const four = steps.slice(0, 4);
+            // 1: in a gap so far, 2: in open space
+            const done = new Uint8Array(W * H);
+            const flood = (j0) => {
+                // Only through cells with ink: reaching one without (or open
+                // space) ends it, and what it went through is open space
+                const part = [j0], stack = [j0];
+                done[j0] = 1;
+                while (stack.length) {
+                    const j = stack.pop(), x = j % W, y = (j - x) / W;
+                    for (const [dx, dy] of four) {
+                        const nx = x + dx, ny = y + dy, n = ny * W + nx;
+                        if (nx < 0 || nx >= W || ny < 0 || ny >= H || done[n] === 1 || !unlit(nx, ny)) continue;
+                        if (done[n] === 2 || !hasInk(cellAt(nx, ny))) {
+                            for (const p of part) done[p] = 2;
+                            return null;
+                        }
+                        done[n] = 1;
+                        part.push(n);
+                        stack.push(n);
+                    }
+                }
+                return part;
+            };
+            const gaps = [];
+            for (const i of area) {
+                const x = i % W, y = (i - x) / W;
+                for (const [dx, dy] of four) {
+                    const nx = x + dx, ny = y + dy, j = ny * W + nx;
+                    if (nx < 0 || nx >= W || ny < 0 || ny >= H || done[j] || !unlit(nx, ny)) continue;
+                    if (!hasInk(cellAt(nx, ny))) continue;
+                    gaps.push(...(flood(j) || []));
+                }
+            }
+            for (const [k, subs] of byCellOf(gaps)) toSolid.set(k, subs);
         }
         const box = { x1: cols, y1: this.canvas.height, x2: 0, y2: 0 };
-        let changed = 0;
+        const changed = new Set();
+        const grow = (x1, x2, y) => {
+            changed.add(y * cols + x1);
+            box.x1 = Math.min(box.x1, x1); box.x2 = Math.max(box.x2, x2);
+            box.y1 = Math.min(box.y1, y); box.y2 = Math.max(box.y2, y);
+        };
         for (const [k, subs] of byCell) {
             let x = k % cols;
             const y = (k - x) / cols;
@@ -2871,10 +2933,7 @@ class CanvasRenderer {
                     if (paper) cell[slot.off] = { ...this.bgColor };
                     if (ink) cell[slot.on] = { ...this.fgColor };
                 }
-                if (JSON.stringify([head, tail]) === before) continue;
-                changed++;
-                box.x1 = Math.min(box.x1, x); box.x2 = Math.max(box.x2, x + (tail ? 1 : 0));
-                box.y1 = Math.min(box.y1, y); box.y2 = Math.max(box.y2, y);
+                if (JSON.stringify([head, tail]) !== before) grow(x, x + (tail ? 1 : 0), y);
                 continue;
             }
             const cell = this.canvas.cells[y][x];
@@ -2894,15 +2953,25 @@ class CanvasRenderer {
                         cell.subpixels = view(cell).map(row => row.slice());
                         for (const [r, c] of subs) cell.subpixels[r][c] = true;
                     }
+                } else if (solid) {
+                    toSolid.set(k, subs);
                 }
             }
-            if (JSON.stringify(cell) === before) continue;
-            changed++;
-            box.x1 = Math.min(box.x1, x); box.x2 = Math.max(box.x2, x);
-            box.y1 = Math.min(box.y1, y); box.y2 = Math.max(box.y2, y);
+            if (JSON.stringify(cell) !== before) grow(x, x, y);
         }
-        if (changed) this.updateCellRect(box.x1, box.y1, box.x2, box.y2);
-        return { count: area.length, changed, rect: changed ? box : null };
+        // The cells along lines whose unlit subpixels are all in the area or
+        // its gaps take the ink as paper (last, over the paper given above)
+        for (const [k, subs] of toSolid) {
+            const x = k % cols, y = (k - x) / cols, cell = this.canvas.cells[y][x];
+            const set = new Set(subs.map(([r, c]) => r * 2 + c));
+            const slot = slots(cell);
+            if (!view(cell).flat().every((on, i) => on || set.has(i)) || colorsEqual(cell[slot.off], this.fgColor)) continue;
+            this.beforeChange(x, y, x, y);
+            cell[slot.off] = { ...this.fgColor };
+            grow(x, x, y);
+        }
+        if (changed.size) this.updateCellRect(box.x1, box.y1, box.x2, box.y2);
+        return { count: area.length, changed: changed.size, rect: changed.size ? box : null };
     }
 
     commitBox() {

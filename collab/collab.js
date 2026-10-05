@@ -439,19 +439,17 @@ const OPS = {
 
     fill(a) {
         checkSubpixel(a.sx, a.sy);
-        const mode = a.mode || 'ink';
-        if (!['ink', 'paper', 'both'].includes(mode)) throw new Error(`unknown mode "${mode}": use ink, paper or both`);
         // Editing paper: connected cells of the same paper
         const unit = r.editView() === 'paper' ? 'cells' : 'subpixels';
         const c = subpixelCell(a.sx, a.sy);
         const { count, changed, rect } = withState(colorState(a), () => r.editView() === 'paper'
             ? { ...r.fillPaperAt(c.x, c.y), rect: { x1: c.x, y1: c.y, x2: c.x, y2: c.y } }
-            : r.fillAt(a.sx, a.sy, mode));
+            : r.fillAt(a.sx, a.sy));
         if (!count) {
             return unit === 'cells' ? 'nothing was filled: the cell already has that paper, or bg is keep'
                 : `nothing was filled: (${a.sx}, ${a.sy}) is in a character cell, or the colours it would use are keep`;
         }
-        if (!changed) return `nothing changed: the area (${count} ${unit}) already has those colours, or ink mode left out all its cells (lines of another colour run through them)`;
+        if (!changed) return `nothing changed: the area (${count} ${unit}) already has those colours, or all its cells hold lines of another colour`;
         flash(rect);
         return `filled an area of ${count} ${unit}, changing ${changed} cells`;
     },
