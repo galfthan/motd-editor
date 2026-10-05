@@ -25,7 +25,7 @@ function linearToSrgb(v) {
 
 // Cells whose paper is the mean colour of the image's opaque subpixels
 // there (null where most of the cell is transparent)
-function paperCells(px, opaque, cols, rows, R) {
+function paperCells(px, opaque, cols, rows, R, snap) {
     const W = cols * 2;
     return Array.from({ length: rows }, (_, cy) => Array.from({ length: cols }, (_, cx) => {
         const idx = [];
@@ -36,7 +36,7 @@ function paperCells(px, opaque, cols, rows, R) {
             }
         }
         if (idx.length < R) return null;
-        const v = mean(px, idx);
+        const v = snap(mean(px, idx));
         const cell = createCell();
         cell.bg = { r: linearToSrgb(v[0]), g: linearToSrgb(v[1]), b: linearToSrgb(v[2]), default: false };
         return cell;
@@ -57,6 +57,54 @@ function toneToLinear({ brightness = 0, contrast = 0, midtones = 0, invert = fal
         v = Math.min(1, Math.max(0, (v - 0.5) * spread + 0.5 + brightness / 200)) ** gamma;
         return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
     });
+}
+
+// The image's pixels (RGBA), at most IMAGE_SOURCE_MAX on its longer side;
+// kept for the next conversion of the same image (a resize)
+const IMAGE_SOURCE_MAX = 1600;
+const imageSources = new WeakMap();
+function imagePixels(image) {
+    if (!imageSources.has(image)) {
+        const scale = Math.min(1, IMAGE_SOURCE_MAX / Math.max(image.width, image.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+        imageSources.set(image, ctx.getImageData(0, 0, canvas.width, canvas.height));
+    }
+    return imageSources.get(image);
+}
+
+// The main colours of a simple image, like a logo: when at most 8 colours
+// (to 4 bits a channel) make up 97% of its opaque pixels, their mean sRGB
+// values, else null. Fitted cell colours snap to them, so the edges' blends
+// (anti-aliasing) don't leave fringes of other colours.
+const imagePalettes = new WeakMap();
+function imagePalette(image) {
+    if (!imagePalettes.has(image)) {
+        const { data } = imagePixels(image);
+        const buckets = new Map();
+        let total = 0;
+        for (let j = 0; j < data.length; j += 4) {
+            if (data[j + 3] < 128) continue;
+            const key = (data[j] >> 4) << 8 | (data[j + 1] >> 4) << 4 | data[j + 2] >> 4;
+            const b = buckets.get(key) || buckets.set(key, [0, 0, 0, 0]).get(key);
+            b[0]++; b[1] += data[j]; b[2] += data[j + 1]; b[3] += data[j + 2];
+            total++;
+        }
+        const main = [...buckets.values()].sort((a, b) => b[0] - a[0]);
+        let palette = [], covered = 0;
+        for (const [n, r, g, b] of main) {
+            if (covered >= 0.97 * total) break;
+            if (palette.length === 8) { palette = null; break; }
+            palette.push([r / n, g / n, b / n].map(Math.round));
+            covered += n;
+        }
+        imagePalettes.set(image, total && palette);
+    }
+    return imagePalettes.get(image);
 }
 
 // Rows for an image `cols` cells wide, keeping its proportions in cells of
@@ -82,27 +130,44 @@ function fitImageCols(image, aspect, maxCols, maxRows) {
 // blockRows (subpixel rows per cell) and the tone (see toneToLinear).
 function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, bg, dither = 'floyd-steinberg', strength = 1, blockRows: R = 3, ...tone } = {}) {
     const W = cols * 2, H = rows * R, N = 2 * R;
-    const canvas = document.createElement('canvas');
-    canvas.width = W;
-    canvas.height = H;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(image, 0, 0, W, H);
-    const data = ctx.getImageData(0, 0, W, H).data;
-
     // Linear colour per subpixel (r, g, b interleaved); err: the error
     // diffused into it so far
     const px = new Float32Array(W * H * 3), err = new Float32Array(W * H * 3);
     const opaque = new Uint8Array(W * H);
     const toLinearToned = toneToLinear(tone);
-    for (let i = 0; i < W * H; i++) {
-        px[3 * i] = toLinearToned[data[4 * i]];
-        px[3 * i + 1] = toLinearToned[data[4 * i + 1]];
-        px[3 * i + 2] = toLinearToned[data[4 * i + 2]];
-        opaque[i] = data[4 * i + 3] >= 128 ? 1 : 0;
+    // Each subpixel the mean of the image's pixels it covers, weighted by
+    // their opacity (a browser's own scaling overshoots at sharp edges,
+    // leaving light or dark fringes)
+    const { data, width: sw, height: sh } = imagePixels(image);
+    for (let y = 0; y < H; y++) {
+        const y0 = Math.floor(y * sh / H), y1 = Math.max(y0 + 1, Math.floor((y + 1) * sh / H));
+        for (let x = 0; x < W; x++) {
+            const x0 = Math.floor(x * sw / W), x1 = Math.max(x0 + 1, Math.floor((x + 1) * sw / W));
+            let a = 0, r = 0, g = 0, b = 0;
+            for (let v = y0; v < y1; v++) {
+                for (let u = x0, j = 4 * (v * sw + x0); u < x1; u++, j += 4) {
+                    const w = data[j + 3];
+                    if (!w) continue;
+                    a += w;
+                    r += w * toLinearToned[data[j]];
+                    g += w * toLinearToned[data[j + 1]];
+                    b += w * toLinearToned[data[j + 2]];
+                }
+            }
+            const i = y * W + x;
+            if (a) {
+                px[3 * i] = r / a;
+                px[3 * i + 1] = g / a;
+                px[3 * i + 2] = b / a;
+            }
+            opaque[i] = a >= 128 * (x1 - x0) * (y1 - y0) ? 1 : 0;
+        }
     }
 
-    if (paperOnly) return paperCells(px, opaque, cols, rows, R);
+    // A simple image's colours (see imagePalette), as cells' colours snap to them
+    const palette = imagePalette(image)?.map(c => c.map(v => toLinearToned[v]));
+    const snap = (v) => !palette || !v ? v : palette.reduce((best, q) => dist(v[0], v[1], v[2], q) < dist(v[0], v[1], v[2], best) ? q : best);
+    if (paperOnly) return paperCells(px, opaque, cols, rows, R, snap);
     const toLinear = (col) => [col.r, col.g, col.b].map(v => SRGB_TO_LINEAR[v]);
     const monoPair = mono ? [toLinear(bg), toLinear(fg)] : null;
     // Mono dithers one value per subpixel: where it lies from bg (0) to fg
@@ -125,7 +190,7 @@ function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, 
             const solid = idx.filter(i => opaque[i]);
             edge.push(solid.length < N);
             pairs.push(solid.length === 0 ? null
-                : monoPair || (solid.length < N ? [null, mean(px, solid)] : bestPair(px, idx)));
+                : monoPair || (solid.length < N ? [null, mean(px, solid)] : bestPair(px, idx)).map(snap));
         }
 
         // Dither the band's subpixel rows between them, serpentine
