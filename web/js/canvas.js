@@ -1749,6 +1749,7 @@ class CanvasRenderer {
         this.clipboard = this.canvas.cells.slice(y1, y2 + 1)
             .map(row => structuredClone(row.slice(x1, x2 + 1)));
         this.markCopyForView(this.clipboard, this.editView());
+        this.clipboardTime = Date.now();
 
         // Write text representation to system clipboard
         const text = this.cellsToText(this.clipboard);
@@ -1780,12 +1781,17 @@ class CanvasRenderer {
         const height = this.clipboard.length, width = this.clipboard[0].length;
         try {
             localStorage.setItem(SHARED_CLIPBOARD_KEY, JSON.stringify({
-                text, width, height, view: this.editView(), ansi: canvasToANSI({ width, height, cells: this.clipboard })
+                text, width, height, view: this.editView(), time: this.clipboardTime,
+                ansi: canvasToANSI({ width, height, cells: this.clipboard })
             }));
-        } catch (e) { /* not shared: other tabs paste plain text */ }
+        } catch (e) {
+            // Not shared (storage full?): other tabs paste plain text, not
+            // an older copy that happens to have the same text
+            try { localStorage.removeItem(SHARED_CLIPBOARD_KEY); } catch (e2) { /* nothing to remove */ }
+        }
     }
 
-    // The copy another tab shared, as cells, if `text` is its text
+    // The copy another tab shared, if `text` is its text: { cells, time }
     sharedClipboard(text) {
         try {
             const shared = JSON.parse(localStorage.getItem(SHARED_CLIPBOARD_KEY));
@@ -1793,7 +1799,7 @@ class CanvasRenderer {
             const canvas = parseANSIText(shared.ansi);
             resizeCanvas(canvas, shared.width, shared.height);
             this.markCopyForView(canvas.cells, shared.view);
-            return canvas.cells;
+            return { cells: canvas.cells, time: shared.time || 0 };
         } catch (e) {
             return null;
         }
@@ -2013,20 +2019,18 @@ class CanvasRenderer {
             }
         }
 
-        // If we have an internal clipboard, check if system clipboard matches it
-        // (same copy session) — if so, use the rich internal clipboard to preserve colors
-        if (systemText && this.clipboard) {
-            const internalText = this.cellsToText(this.clipboard);
-            if (systemText === internalText) {
-                this.pasteMode = true;
-                return;
-            }
-        }
-
-        // A copy from another of the editor's tabs, with its colours
+        // The system clipboard's text as this tab's last copy, or another
+        // tab's (shared): paste that copy, colours and all. Copies differing
+        // only in colours have the same text, so the newer one wins.
+        const own = systemText && this.clipboard && systemText === this.cellsToText(this.clipboard);
         const shared = systemText && this.sharedClipboard(systemText);
-        if (shared) {
-            this.clipboard = shared;
+        if (shared && (!own || shared.time > (this.clipboardTime || 0))) {
+            this.clipboard = shared.cells;
+            this.clipboardTime = shared.time;
+            this.pasteMode = true;
+            return;
+        }
+        if (own) {
             this.pasteMode = true;
             return;
         }
