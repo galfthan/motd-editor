@@ -121,7 +121,7 @@ type fillArgs struct {
 	pixels
 	SX   int    `json:"sx" jsonschema:"subpixel column where the fill starts"`
 	SY   int    `json:"sy" jsonschema:"subpixel row"`
-	Mode string `json:"mode,omitempty" jsonschema:"ink (the default): light the area in fg, leaving out cells where that would repaint other lit subpixels (a line through them); paper: give every cell the area reaches bg; both: paper, then ink. With edit ink it always fills ink, bounded by lit subpixels and characters alone; with edit paper it floods the connected cells of the same paper with bg (mode not used)"`
+	Mode string `json:"mode,omitempty" jsonschema:"ink (the default): light the area in fg, leaving out cells where that would repaint other lit subpixels (a line through them); paper: give every cell the area reaches bg; both: paper, then ink, and the cells left out for a line of another colour take fg as paper where the area covers all their unlit subpixels (solid up to the line). With edit ink it always fills ink, bounded by lit subpixels and characters alone; with edit paper it floods the connected cells of the same paper with bg (mode not used)"`
 	FG   string `json:"fg,omitempty" jsonschema:"ink colour (modes ink and both): #rrggbb, default (the default) or keep"`
 	BG   string `json:"bg,omitempty" jsonschema:"paper colour (modes paper and both; an unlit area also spreads over drawn cells' subpixels showing it): #rrggbb, default (the default) or keep"`
 }

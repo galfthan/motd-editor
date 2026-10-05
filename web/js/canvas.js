@@ -2776,7 +2776,10 @@ class CanvasRenderer {
     //          through them).
     //   paper  gives every cell the area reaches the paper colour; lit
     //          subpixels keep their ink.
-    //   both   paper, then ink.
+    //   both   paper, then ink. A cell left out of the ink for a line of
+    //          another colour, where the area covers all its unlit
+    //          subpixels, takes the ink colour as paper instead: the area
+    //          looks solid up to the line.
     // Returns the area's size (0: (sx, sy) is in a character cell, or the
     // colours to use are keep), how many cells changed, and their rect.
     fillAt(sx, sy, mode = this.fillMode) {
@@ -2894,6 +2897,8 @@ class CanvasRenderer {
                         cell.subpixels = view(cell).map(row => row.slice());
                         for (const [r, c] of subs) cell.subpixels[r][c] = true;
                     }
+                } else if (paper && view(cell).flat().every((on, i) => on || inArea.has(i))) {
+                    cell[slot.off] = { ...this.fgColor };
                 }
             }
             if (JSON.stringify(cell) === before) continue;
