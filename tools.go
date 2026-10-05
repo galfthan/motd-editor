@@ -96,7 +96,7 @@ type symbolsArgs struct {
 type textArgs struct {
 	X    int    `json:"x"`
 	Y    int    `json:"y"`
-	Text string `json:"text" jsonschema:"text to write from (x, y); each line starts again at x on the next row; text past the right edge is dropped"`
+	Text string `json:"text" jsonschema:"text to write from (x, y), which must be on the canvas; each line starts again at x on the next row; text past the right or bottom edge is left out (the reply says how much)"`
 	colors
 }
 
@@ -279,5 +279,5 @@ func addTools(s *mcp.Server, l *link) {
 	relay[struct{}](s, l, "undo", "Undo the last step, the user's or yours.")
 	relay[struct{}](s, l, "redo", "Redo the last undone step.")
 	relay[batchArgs](s, l, "batch",
-		"Run several operations in order as one undo step, e.g. [{op: \"draw_box\", args: {...}}, {op: \"write_text\", args: {...}}]. Op names are checked first: an unknown or disallowed op changes nothing. Otherwise stops at the first failing op; the ones before it stay applied.")
+		"Run several operations in order as one undo step, e.g. [{op: \"draw_box\", args: {...}}, {op: \"write_text\", args: {...}}]. All or nothing: if an op fails (or an op name is unknown or not allowed), nothing is changed.")
 }
