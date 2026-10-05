@@ -2779,8 +2779,9 @@ class CanvasRenderer {
     //   both   paper, then ink. A cell left out of the ink for a line of
     //          another colour, where the area covers all its unlit
     //          subpixels, takes the ink colour as paper instead: the area
-    //          looks solid up to the line. Started on ink, the same for
-    //          the enclosed unlit gaps between the area and such lines.
+    //          looks solid up to the line (also with the paper colour
+    //          keep). Started on ink, the same for the enclosed unlit gaps
+    //          between the area and such lines.
     // Returns the area's size (0: (sx, sy) is in a character cell, or the
     // colours to use are keep), how many cells changed, and their rect.
     fillAt(sx, sy, mode = this.fillMode) {
@@ -2790,6 +2791,9 @@ class CanvasRenderer {
         const cols = this.canvas.width, W = cols * 2, H = this.canvas.height * BLOCK_ROWS;
         const ink = mode !== 'paper' && !this.fgColor.keep;
         const paper = mode !== 'ink' && !this.bgColor.keep;
+        // Both: cells along lines of other colours take the ink as paper
+        // (whatever the paper colour, keep too)
+        const solid = mode === 'both' && ink;
         if ((!ink && !paper) || !(sx >= 0 && sx < W && sy >= 0 && sy < H)) return { count: 0, changed: 0 };
         const cellAt = (x, y) => this.canvas.cells[Math.floor(y / BLOCK_ROWS)][x >> 1];
         // A cell's colour slots: lit subpixels show `on`, unlit `off`
@@ -2866,7 +2870,7 @@ class CanvasRenderer {
         // other colours (those cells kept their own ink): unlit subpixels
         // next to it, 4-connected, that reach no cell without ink
         const gaps = [];
-        if (startLit && ink && paper) {
+        if (startLit && solid) {
             const unlit = (x, y) => !glyphAt(x, y) && !view(cellAt(x, y))[y % BLOCK_ROWS][x % 2];
             const done = new Uint8Array(W * H);
             const near = (i, fn) => {
@@ -2949,7 +2953,7 @@ class CanvasRenderer {
                         cell.subpixels = view(cell).map(row => row.slice());
                         for (const [r, c] of subs) cell.subpixels[r][c] = true;
                     }
-                } else if (paper && covers(cell, subs)) {
+                } else if (solid && covers(cell, subs)) {
                     cell[slot.off] = { ...this.fgColor };
                 }
             }
