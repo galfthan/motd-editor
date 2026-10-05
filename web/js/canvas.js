@@ -108,6 +108,12 @@ class CanvasRenderer {
         this.fgColor = defaultFG();
         this.bgColor = defaultBG();
         this.bold = false;          // text style drawn cells get (see applyCurrentColors)
+        // What the user sees and edits: 'both', 'ink' (lit subpixels and
+        // characters, in their ink; paper hidden and never changed) or
+        // 'paper' (each cell's paper; art hidden and never changed). See
+        // editView: the AI add-on sets editOverride for its operations.
+        this.view = 'both';
+        this.editOverride = null;
         this.inverse = false;
         this.isDrawing = false;
         this.lastPoint = null;     // Previous point of a draw/erase/symbol stroke
@@ -140,6 +146,7 @@ class CanvasRenderer {
         this.dragEnd = null;        // { x, y } current cell
         this.boxLineStyle = 1;      // 0=none, 1=light, 2=heavy, 3=double, 4=subpixels (SUBPIXEL_STYLE)
         this.boxFillMode = 0;       // 0=no fill, 1=fill & clear, 2=recolor only
+        this.linePath = 's';        // the paper view's line: 's' (two knees) or 'straight' (see linePathCells)
 
         // Draw/erase tool state
         this.brushCell = false;     // Paint whole cells instead of subpixels
@@ -477,13 +484,72 @@ class CanvasRenderer {
         if (cursor && this.tool === 'text') this.setTextCursor(cursor.x, cursor.y);
     }
 
+    // The view editing follows: the user's, or editOverride (the AI add-on's
+    // operations choose their own)
+    editView() {
+        return this.editOverride || this.view;
+    }
+
+    // The ink and paper drawing gives cells: keep for the one the view hides
+    inkColor() {
+        return this.editView() === 'paper' ? keepColor('fg') : this.fgColor;
+    }
+
+    paperColor() {
+        return this.editView() === 'ink' ? keepColor('bg') : this.bgColor;
+    }
+
     // Give a cell the currently picked colours (but not "keep" ones) and
-    // text style
+    // text style (not in the paper view)
     applyCurrentColors(cell) {
-        if (!this.fgColor.keep) cell.fg = { ...this.fgColor };
-        if (!this.bgColor.keep) cell.bg = { ...this.bgColor };
-        cell.bold = this.bold;
-        cell.inverse = this.inverse;
+        const ink = this.inkColor(), paper = this.paperColor();
+        if (!ink.keep) cell.fg = { ...ink };
+        if (!paper.keep) cell.bg = { ...paper };
+        if (this.editView() !== 'paper') {
+            cell.bold = this.bold;
+            cell.inverse = this.inverse;
+        }
+    }
+
+    // Show and edit only the ink, only the paper, or both (see this.view)
+    setView(view) {
+        this.view = view;
+        this.cancelDrag();
+        this.redrawEverything();
+        if (this.imagePaste) this.updateImagePaste();   // converted for the view
+        if (this._hoverEvent) {
+            this.updateHover(this._hoverEvent);
+            this.updatePointerInfo(this._hoverEvent);
+        }
+    }
+
+    // Give cells ({ x, y }, off-canvas ones skipped) the paper colour, or
+    // with `clear` the terminal's own: the paper view's brush, box and line
+    paintPaper(cells, clear = false) {
+        const paper = clear ? defaultBG() : this.bgColor;
+        if (paper.keep) return;
+        for (const { x, y } of cells) {
+            if (x < 0 || y < 0 || x >= this.canvas.width || y >= this.canvas.height) continue;
+            this.setPaper(x, y, paper);
+        }
+    }
+
+    // The cell whose paper shows at (x, y): a wide char's tail shows its head's
+    paperCellAt(x, y) {
+        const row = this.canvas.cells[y];
+        return row[x].type === 'wide-tail' && x > 0 ? row[x - 1] : row[x];
+    }
+
+    // Give the cell at (x, y) the paper `color`: both halves of a wide char,
+    // which shows one paper
+    setPaper(x, y, color) {
+        const row = this.canvas.cells[y];
+        if (row[x].type === 'wide-tail' && x > 0) x--;
+        if (colorsEqual(row[x].bg, color) && !isWideHead(row[x])) return;
+        this.beforeChange(x, y, x + 1, y);
+        row[x].bg = { ...color };
+        if (isWideHead(row[x]) && x + 1 < row.length) row[x + 1].bg = { ...color };
+        this.updateCellRect(x, y, x + 1, y);
     }
 
     // Start with `canvas` (a restored autosave), or an empty 80x60 one
@@ -632,6 +698,7 @@ class CanvasRenderer {
         this.theme = {
             border: style.getPropertyValue('--border').trim(),
             cellBg: style.getPropertyValue('--cell-bg').trim(),
+            hiddenPaper: style.getPropertyValue('--hidden-paper').trim(),
             fg: style.color,
             overlay: {
                 hover: { line: style.getPropertyValue('--overlay-hover').trim() },
@@ -775,17 +842,20 @@ class CanvasRenderer {
         const ctx = this.ctx;
         const g = this.cellGeometry(x, y, isWideHead(cell) ? 2 * CELL_W : CELL_W);
 
-        // Inverse swaps the colours as the terminal shows them
+        // Inverse swaps the colours as the terminal shows them. The ink view
+        // hides the paper behind a neutral colour, the paper view the art;
+        // they show the cell's own ink and paper, which they edit.
         let fg = cell.fg.default ? this.theme.fg : `rgb(${cell.fg.r},${cell.fg.g},${cell.fg.b})`;
         let bg = cell.bg.default ? this.theme.cellBg : `rgb(${cell.bg.r},${cell.bg.g},${cell.bg.b})`;
-        if (cell.inverse) [fg, bg] = [bg, fg];
+        if (cell.inverse && this.view === 'both') [fg, bg] = [bg, fg];
+        if (this.view === 'ink') bg = this.theme.hiddenPaper;
 
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.fillStyle = bg;
         ctx.fillRect(...g.rect);
 
         const char = cellToChar(cell);
-        if (char !== ' ') {
+        if (char !== ' ' && this.view !== 'paper') {
             const code = char.codePointAt(0);
             ctx.save();
             ctx.beginPath();
@@ -1216,6 +1286,8 @@ class CanvasRenderer {
             this.handleSelectToolDown(e);
         } else if (this.tool === 'char') {
             this.handleCharTool(e);
+        } else if (this.tool === 'hand') {
+            // Moving the view (the toolbar handles the drag)
         } else if (this.tool === 'fill') {
             this.handleFillTool(e);
         } else {
@@ -1303,8 +1375,10 @@ class CanvasRenderer {
         const cell = row[c.cellX].type === 'wide-tail' ? row[c.cellX - 1] : row[c.cellX];
 
         if (this.toolbar) {
-            this.toolbar.setStyle(!!cell.bold, !!cell.inverse);
-            this.toolbar.setColors(cell.fg, cell.bg);
+            // Only the colour the view shows
+            const view = this.editView();
+            if (view !== 'paper') this.toolbar.setStyle(!!cell.bold, !!cell.inverse);
+            this.toolbar.setColors(view === 'paper' ? this.fgColor : cell.fg, view === 'ink' ? this.bgColor : cell.bg);
         }
     }
 
@@ -1553,6 +1627,7 @@ class CanvasRenderer {
 
     // Whether the current tool works on subpixels rather than whole cells
     usesSubpixels() {
+        if (this.view === 'paper') return this.tool === 'select-subpixel';
         return this.tool === 'select-subpixel' || this.tool === 'fill' || this.subpixelShape() ||
             ((this.tool === 'draw' || this.tool === 'erase') && !this.brushCell);
     }
@@ -1560,7 +1635,8 @@ class CanvasRenderer {
     // Whether the box/line tool draws with subpixels (its points are then
     // subpixel coordinates)
     subpixelShape() {
-        return (this.tool === 'box' || this.tool === 'line') && this.boxLineStyle === SUBPIXEL_STYLE;
+        return (this.tool === 'box' || this.tool === 'line') && this.boxLineStyle === SUBPIXEL_STYLE &&
+            this.editView() !== 'paper';
     }
 
     // Size of a rect as "W×H"
@@ -1684,17 +1760,28 @@ class CanvasRenderer {
 
         this.copySelection();
 
-        const { x1, y1, x2, y2 } = this.selection;
+        this.clearCells(this.selection);
+        this.clearSelection();
+    }
+
+    // Empty the cells in a rect: in the paper view only their paper, in the
+    // ink view all but it
+    clearCells({ x1, y1, x2, y2 }) {
+        const view = this.editView();
         this.beforeChange(x1, y1, x2, y2);
         for (let y = y1; y <= y2; y++) {
             for (let x = x1; x <= x2; x++) {
+                const bg = this.canvas.cells[y][x].bg;
+                if (view === 'paper') {
+                    this.setPaper(x, y, defaultBG());
+                    continue;
+                }
                 detachWide(this.canvas.cells, x, y);
                 this.canvas.cells[y][x] = createCell();
+                if (view === 'ink') this.canvas.cells[y][x].bg = bg;
             }
         }
-
         this.updateCellRect(x1, y1, x2, y2);
-        this.clearSelection();
     }
 
     pasteAt(x, y) {
@@ -1703,15 +1790,23 @@ class CanvasRenderer {
         // One column extra for the tail of a wide char at the right edge
         const maxWidth = Math.max(...this.clipboard.map(row => row.length));
         this.beforeChange(x, y, x + maxWidth, y + this.clipboard.length - 1);
+        const view = this.editView();
         this.clipboard.forEach((row, dy) => {
             row.forEach((cell, dx) => {
                 // Transparent (image paste), or a wide char's tail that was
-                // already placed along with its head
-                if (!cell || (cell.type === 'wide-tail' && dx > 0 && isWideHead(row[dx - 1]))) return;
+                // already placed along with its head (the paper view takes
+                // every cell's paper)
+                if (!cell || (view !== 'paper' && cell.type === 'wide-tail' && dx > 0 && isWideHead(row[dx - 1]))) return;
                 const tx = x + dx;
                 const ty = y + dy;
                 if (tx >= 0 && tx < this.canvas.width && ty >= 0 && ty < this.canvas.height) {
-                    placeCell(this.canvas.cells, tx, ty, cell);
+                    // The paper view pastes only paper, the ink view all but it
+                    if (view === 'paper') {
+                        if (!cell.bg.keep) this.setPaper(tx, ty, cell.bg);
+                    }
+                    else {
+                        placeCell(this.canvas.cells, tx, ty, view === 'ink' ? { ...cell, bg: keepColor('bg') } : cell);
+                    }
                 }
             });
         });
@@ -1828,11 +1923,7 @@ class CanvasRenderer {
                     if (cell.type === 'wide-tail' || isWideHead(cell)) clearCell(cell);
                     cells.set(key, cell);
                 }
-                const data = this.subpixelClipboard[py - sy][px - sx];
-                setCellSubpixel(cell, sp.row, sp.col, data.filled);
-                if (data.fg) cell.fg = { ...data.fg };
-                if (data.bg) cell.bg = { ...data.bg };
-                if (data.fg) Object.assign(cell, { bold: data.bold, inverse: data.inverse });
+                this.applySubpixelData(cell, sp.row, sp.col, this.subpixelClipboard[py - sy][px - sx]);
             }
         }
         return [...cells].map(([key, cell]) => {
@@ -2006,8 +2097,13 @@ class CanvasRenderer {
     // Convert the image again (after a change of size or options) and show it
     updateImagePaste() {
         const p = this.imagePaste;
+        // The ink view draws it in the ink alone over the paper there, the
+        // paper view gives each cell's paper the image's colour
+        const view = this.editView();
         p.cells = imageToCells(p.image, p.cols, p.rows, {
-            mono: p.mono, fg: this.fgColor, bg: this.bgColor, dither: p.dither, strength: p.strength,
+            mono: p.mono || view === 'ink', paperOnly: view === 'paper',
+            fg: this.fgColor, bg: view === 'ink' ? keepColor('bg') : this.bgColor,
+            dither: p.dither, strength: p.strength,
             brightness: p.brightness, contrast: p.contrast, midtones: p.midtones, invert: p.invert
         });
         this.showImagePreview();
@@ -2159,12 +2255,27 @@ class CanvasRenderer {
             for (let sx = r.x1; sx <= r.x2; sx++) {
                 const sp = this.subpixelAt(sx, sy);
                 if (!sp) continue;
+                if (this.editView() === 'paper') {
+                    sp.cell.bg = defaultBG();
+                    continue;
+                }
                 detachWide(this.canvas.cells, sp.cellX, sp.cellY);
                 setCellSubpixel(sp.cell, sp.row, sp.col, false);
             }
         }
         this.updateSubpixelRect(r);
         this.clearSubpixelSelection();
+    }
+
+    // Give a cell's subpixel (row, col) the subpixel clipboard's `data`: in
+    // the paper view only its paper, in the ink view all but its paper
+    applySubpixelData(cell, row, col, data) {
+        const view = this.editView();
+        if (view !== 'paper') {
+            setCellSubpixel(cell, row, col, data.filled);
+            if (data.fg) Object.assign(cell, { fg: { ...data.fg }, bold: data.bold, inverse: data.inverse });
+        }
+        if (view !== 'ink' && data.bg) cell.bg = { ...data.bg };
     }
 
     // Subpixel-level paste at subpixel coordinates
@@ -2181,11 +2292,9 @@ class CanvasRenderer {
             row.forEach((data, dx) => {
                 const sp = this.subpixelAt(sx + dx, sy + dy);
                 if (!sp) return;
-                detachWide(this.canvas.cells, sp.cellX, sp.cellY);
-                setCellSubpixel(sp.cell, sp.row, sp.col, data.filled);
-                if (data.fg) sp.cell.fg = { ...data.fg };
-                if (data.bg) sp.cell.bg = { ...data.bg };
-                if (data.fg) Object.assign(sp.cell, { bold: data.bold, inverse: data.inverse });
+                // Painting over half of a wide char blanks it
+                if (this.editView() !== 'paper') detachWide(this.canvas.cells, sp.cellX, sp.cellY);
+                this.applySubpixelData(sp.cell, sp.row, sp.col, data);
             });
         });
 
@@ -2208,6 +2317,11 @@ class CanvasRenderer {
     }
 
     handleDrawTool(e) {
+        if (this.editView() === 'paper') {
+            const c = this.cellCoordsFromEvent(e);
+            if (c) this.strokeTo(c.cellX, c.cellY, (x, y) => this.paintPaper([{ x, y }], this.tool === 'erase'));
+            return;
+        }
         const p = this.subpixelCoordsFromEvent(e);
         if (!p) return;
 
@@ -2239,8 +2353,9 @@ class CanvasRenderer {
         const { cell, cellX, cellY, row, col } = sp;
 
         // Nothing to do if the subpixel and the colours it sets already match
-        if (cell.type === 'sextant' && cell.subpixels[row][col] === filled && colorKeeps(cell.bg, this.bgColor) &&
-            (filled ? colorKeeps(cell.fg, this.fgColor) && !!cell.bold === this.bold && !!cell.inverse === this.inverse
+        const paper = this.paperColor();
+        if (cell.type === 'sextant' && cell.subpixels[row][col] === filled && colorKeeps(cell.bg, paper) &&
+            (filled ? colorKeeps(cell.fg, this.inkColor()) && !!cell.bold === this.bold && !!cell.inverse === this.inverse
                 : !cell.bold && !cell.inverse)) {
             return null;
         }
@@ -2250,7 +2365,7 @@ class CanvasRenderer {
             this.applyCurrentColors(cell);
         } else {
             // Erased, the cell shows plainly (an inverse blank would be a block)
-            if (!this.bgColor.keep) cell.bg = { ...this.bgColor };
+            if (!paper.keep) cell.bg = { ...paper };
             cell.bold = cell.inverse = false;
         }
         detachWide(this.canvas.cells, cellX, cellY);
@@ -2259,7 +2374,7 @@ class CanvasRenderer {
     }
 
     handleCharTool(e) {
-        if (!this.selectedChar) return;
+        if (!this.selectedChar || this.editView() === 'paper') return;   // glyphs are ink
 
         const c = this.cellCoordsFromEvent(e);
         if (!c) return;
@@ -2313,10 +2428,21 @@ class CanvasRenderer {
                 : this.boxFillMode > 0 ? [normRect(this.dragStart, this.dragEnd)] : this.subpixelBoxRects();
             this.setOverlay('box-subpixel', rects, true);
         } else if (this.tool === 'box') {
-            this.showBoxPreview(normRect(this.dragStart, this.dragEnd));
+            const r = normRect(this.dragStart, this.dragEnd);
+            if (this.editView() === 'paper') this.setOverlay('box', [r]);   // all of it gets the paper
+            else this.showBoxPreview(r);
+        } else if (this.editView() === 'paper') {
+            this.setOverlay('box', runsOf(this.linePathCells()));
         } else {
             this.showLinePreview();
         }
+    }
+
+    // The cells of the paper view's line from dragStart to dragEnd: two
+    // knees (as box-drawing lines go), or straight to the end at any angle
+    linePathCells() {
+        const { x: x0, y: y0 } = this.dragStart, { x: x1, y: y1 } = this.dragEnd;
+        return this.linePath === 'straight' ? linePoints(x0, y0, x1, y1) : computeLinePath(x0, y0, x1, y1);
     }
 
     cancelDrag() {
@@ -2386,8 +2512,41 @@ class CanvasRenderer {
     // --- Fill tool ---
 
     handleFillTool(e) {
+        if (this.editView() === 'paper') {
+            const c = this.cellCoordsFromEvent(e);
+            if (c) this.fillPaperAt(c.cellX, c.cellY);
+            return;
+        }
         const sp = this.subpixelCoordsFromEvent(e);
         if (sp) this.fillAt(sp.sx, sp.sy);
+    }
+
+    // The paper view's fill: the cells connected to (x, y) (up, down, left,
+    // right) with the same paper get the paper colour; what they hold
+    // doesn't matter. Returns the area's size in cells and how many changed.
+    fillPaperAt(x0, y0) {
+        const W = this.canvas.width, H = this.canvas.height;
+        const paper = this.bgColor;
+        if (paper.keep || !(x0 >= 0 && x0 < W && y0 >= 0 && y0 < H)) return { count: 0, changed: 0 };
+        const target = this.paperCellAt(x0, y0).bg;
+        if (colorsEqual(target, paper)) return { count: 0, changed: 0 };
+        const seen = new Uint8Array(W * H);
+        const stack = [y0 * W + x0];
+        const area = [];
+        seen[stack[0]] = 1;
+        while (stack.length) {
+            const i = stack.pop();
+            const x = i % W, y = (i - x) / W;
+            area.push({ x, y });
+            for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]) {
+                const j = ny * W + nx;
+                if (nx < 0 || nx >= W || ny < 0 || ny >= H || seen[j]) continue;
+                seen[j] = 1;
+                if (colorsEqual(this.paperCellAt(nx, ny).bg, target)) stack.push(j);
+            }
+        }
+        this.paintPaper(area);
+        return { count: area.length, changed: area.length };
     }
 
     // Fill: the area is the subpixels connected to (sx, sy) that look the
@@ -2408,6 +2567,9 @@ class CanvasRenderer {
     // Returns the area's size (0: (sx, sy) is in a character cell, or the
     // colours to use are keep), how many cells changed, and their rect.
     fillAt(sx, sy, mode = this.fillMode) {
+        // The ink view fills ink, bounded by ink alone (see editView)
+        const inkView = this.editView() === 'ink';
+        if (inkView) mode = 'ink';
         const cols = this.canvas.width, W = cols * 2, H = this.canvas.height * 3;
         const ink = mode !== 'paper' && !this.fgColor.keep;
         const paper = mode !== 'ink' && !this.bgColor.keep;
@@ -2415,7 +2577,8 @@ class CanvasRenderer {
         const cellAt = (x, y) => this.canvas.cells[Math.floor(y / 3)][x >> 1];
         // A cell's colour slots: lit subpixels show `on`, unlit `off`
         // (inverse swaps them)
-        const slots = (cell) => cell.inverse ? { on: 'bg', off: 'fg' } : { on: 'fg', off: 'bg' };
+        // (the ink view shows them unswapped)
+        const slots = (cell) => cell.inverse && !inkView ? { on: 'bg', off: 'fg' } : { on: 'fg', off: 'bg' };
         const start = cellAt(sx, sy);
         if (start.type !== 'sextant') return { count: 0, changed: 0 };
         const startLit = start.subpixels[sy % 3][sx % 2];
@@ -2425,6 +2588,7 @@ class CanvasRenderer {
         const fits = (x, y) => {
             const cell = cellAt(x, y);
             if (cell.type !== 'sextant' || cell.subpixels[y % 3][x % 2] !== startLit) return false;
+            if (inkView && !startLit) return true;   // paper unseen: any unlit subpixel
             const c = cell[slots(cell)[startLit ? 'on' : 'off']];
             return colorsEqual(c, colour) ||
                 (!!passPaper && colorsEqual(c, passPaper) && cell.subpixels.some(row => row[0] || row[1]));
@@ -2488,6 +2652,14 @@ class CanvasRenderer {
     }
 
     commitBox() {
+        if (this.editView() === 'paper') {
+            // The paper of every cell in it
+            const { x1, y1, x2, y2 } = normRect(this.dragStart, this.dragEnd);
+            const cells = [];
+            for (let y = y1; y <= y2; y++) for (let x = x1; x <= x2; x++) cells.push({ x, y });
+            this.paintPaper(cells);
+            return;
+        }
         if (this.boxLineStyle === SUBPIXEL_STYLE) {
             this.commitSubpixelShape('box');
             return;
@@ -2538,6 +2710,10 @@ class CanvasRenderer {
     }
 
     commitLine() {
+        if (this.editView() === 'paper') {
+            this.paintPaper(this.linePathCells());
+            return;
+        }
         if (this.boxLineStyle === SUBPIXEL_STYLE) {
             this.commitSubpixelShape('line');
             return;
@@ -2582,6 +2758,7 @@ class CanvasRenderer {
     // --- Text tool methods ---
 
     handleTextToolClick(e) {
+        if (this.editView() === 'paper') return;   // text is ink
         const c = this.cellCoordsFromEvent(e);
         if (!c) return;
         this.history.breakGroup(); // Typing at a new spot is a new undo step

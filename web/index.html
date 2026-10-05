@@ -30,6 +30,7 @@
         <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
         <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14 M5 12h14"/></symbol>
         <symbol id="i-fill" viewBox="0 0 24 24"><path d="M4 12l7-7 7 7-7 7z M4 12h14 M20 15c0 1.6 1.2 2.6 1.2 3.8a1.2 1.2 0 0 1-2.4 0c0-1.2 1.2-2.2 1.2-3.8z"/></symbol>
+        <symbol id="i-hand" viewBox="0 0 24 24"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12 M11 11V4.5a1.5 1.5 0 0 1 3 0V12 M14 11.5V6a1.5 1.5 0 0 1 3 0v8 M8 12.5 6.6 11a1.6 1.6 0 0 0-2.4 2.1L8 18c1.2 1.5 2.8 2.5 5 2.5h1a5 5 0 0 0 5-5V9.5a1.5 1.5 0 0 0-3 0"/></symbol>
         <symbol id="i-lock" viewBox="0 0 24 24"><path d="M6 11h12v9H6z M9 11V8a3 3 0 0 1 6 0v3"/></symbol>
         <symbol id="i-panel" viewBox="0 0 24 24"><path d="M4 4h16v16H4z M14 4v16"/></symbol>
         <symbol id="i-github" viewBox="0 0 16 16"><path fill="currentColor" stroke="none" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></symbol>
@@ -67,6 +68,11 @@
             </button>
 
             <div class="menu-bar-right">
+                <div class="segmented" role="group" aria-label="See and edit">
+                    <button data-view="ink" aria-pressed="false" title="See and edit only the ink: lit subpixels and characters">Ink</button>
+                    <button data-view="paper" aria-pressed="false" title="See and edit only the paper: each cell's background">Paper</button>
+                    <button data-view="both" aria-pressed="true" title="See and edit everything">Both</button>
+                </div>
                 <div class="segmented" role="group" aria-label="Terminal background">
                     <button data-action="dark-terminal" aria-pressed="true">Dark terminal</button>
                     <button data-action="light-terminal" aria-pressed="false">Light terminal</button>
@@ -94,13 +100,14 @@
                     <kbd id="tool-key">B</kbd>
                 </div>
                 <div class="inspector-body">
+                    <p class="hint view-note" id="view-note" hidden></p>
                     <section data-panel="brush">
                         <div class="segmented wide" role="group" aria-label="Brush mode">
                             <button data-tool-set="draw" aria-pressed="true">Paint</button>
                             <button data-tool-set="erase" aria-pressed="false">Erase <kbd>E</kbd></button>
                         </div>
-                        <span class="label">Tip</span>
-                        <div class="tiles cols-2" role="group" aria-label="Brush tip">
+                        <span class="label ink-only">Tip</span>
+                        <div class="tiles cols-2 ink-only" role="group" aria-label="Brush tip">
                             <button class="tile" data-brush="subpixel" aria-pressed="true"><span class="tile-glyph">⠿</span>Subpixel</button>
                             <button class="tile" data-brush="cell" aria-pressed="false"><span class="tile-glyph">█</span>Whole cell</button>
                         </div>
@@ -124,7 +131,7 @@
                     </section>
 
                     <section data-panel="fill">
-                        <div class="segmented wide" role="group" aria-label="Fill with">
+                        <div class="segmented wide fill-modes" role="group" aria-label="Fill with">
                             <button data-fill-mode="ink" aria-pressed="true">Ink</button>
                             <button data-fill-mode="paper" aria-pressed="false">Paper</button>
                             <button data-fill-mode="both" aria-pressed="false">Both</button>
@@ -144,8 +151,15 @@
                             <button data-tool-set="box" aria-pressed="true">Box</button>
                             <button data-tool-set="line" aria-pressed="false">Line <kbd>L</kbd></button>
                         </div>
-                        <span class="label">Border</span>
-                        <div class="tiles row" role="group" aria-label="Border style">
+                        <div class="line-path paper-only">
+                            <span class="label">Path</span>
+                            <div class="segmented wide" role="group" aria-label="Line path">
+                                <button data-line-path="s" aria-pressed="true" title="Across, down, across: two knees">Two knees</button>
+                                <button data-line-path="straight" aria-pressed="false" title="A direct line of cells to the end point, at any angle">Straight</button>
+                            </div>
+                        </div>
+                        <span class="label ink-only">Border</span>
+                        <div class="tiles row ink-only" role="group" aria-label="Border style">
                             <button class="tile" data-style="1" aria-pressed="true"><span class="tile-glyph">┌─┐
 └─┘</span>Light</button>
                             <button class="tile" data-style="2" aria-pressed="false"><span class="tile-glyph">┏━┓
@@ -157,7 +171,7 @@
                             <button class="tile" data-style="0" aria-pressed="false"><span class="tile-glyph">╌╌╌
 ╌╌╌</span>None</button>
                         </div>
-                        <div class="box-only">
+                        <div class="box-only ink-only">
                             <span class="label">Inside</span>
                             <div class="segmented wide" role="group" aria-label="Inside the box">
                                 <button data-fill="0" aria-pressed="true">Keep</button>
@@ -170,7 +184,7 @@
                     <section data-panel="selection">
                         <div class="segmented wide" role="group" aria-label="Select precision">
                             <button data-tool-set="select" aria-pressed="true">Cells</button>
-                            <button data-tool-set="select-subpixel" aria-pressed="false">Subpixels</button>
+                            <button class="ink-only" data-tool-set="select-subpixel" aria-pressed="false">Subpixels</button>
                         </div>
                         <p class="hint">Drag to select, then <kbd>⌘C</kbd> copy, <kbd>⌘X</kbd> cut, <kbd>⌘V</kbd> paste. Paste or drop an image and scroll to scale it before placing.</p>
                     </section>
@@ -192,18 +206,18 @@
                             <button class="btn small" data-image-action="fit-canvas">Fit canvas</button>
                             <button class="btn small" data-image-action="fit-selection">Fit selection</button>
                         </div>
-                        <span class="label">Colours</span>
-                        <div class="segmented wide" role="group" aria-label="Image colours">
+                        <span class="label both-only ink-only">Colours</span>
+                        <div class="segmented wide both-only ink-only" role="group" aria-label="Image colours">
                             <button data-image-mono="false" aria-pressed="true">Full colour</button>
                             <button data-image-mono="true" aria-pressed="false" title="Only the ink and paper colours below">Two colours</button>
                         </div>
-                        <span class="label">Dither</span>
-                        <div class="segmented wide" role="group" aria-label="Dithering">
+                        <span class="label ink-only">Dither</span>
+                        <div class="segmented wide ink-only" role="group" aria-label="Dithering">
                             <button data-image-dither="floyd-steinberg" aria-pressed="true">Floyd–Steinberg</button>
                             <button data-image-dither="atkinson" aria-pressed="false">Atkinson</button>
                             <button data-image-dither="none" aria-pressed="false">None</button>
                         </div>
-                        <label class="slider"><span>Strength</span><input type="range" data-image-slider="strength" min="0" max="100" value="100"><output></output></label>
+                        <label class="slider ink-only"><span>Strength</span><input type="range" data-image-slider="strength" min="0" max="100" value="100"><output></output></label>
                         <span class="label">Tone</span>
                         <label class="slider"><span>Brightness</span><input type="range" data-image-slider="brightness" min="-100" max="100" value="0"><output></output></label>
                         <label class="slider"><span>Contrast</span><input type="range" data-image-slider="contrast" min="-100" max="100" value="0"><output></output></label>
@@ -213,6 +227,10 @@
                             <button class="btn small" data-image-action="reset-tone">Reset tone</button>
                         </div>
                         <p class="hint">Drag the image to move it, or its corner handle to resize it; the wheel and <kbd>+</kbd> <kbd>−</kbd> resize it too, the arrow keys move it.</p>
+                    </section>
+
+                    <section data-panel="hand">
+                        <p class="hint">Drag to move the view. With any tool you can also hold <kbd>Space</kbd> and drag, or drag with the middle mouse button. <kbd>+</kbd> <kbd>−</kbd> and Ctrl+wheel zoom.</p>
                     </section>
 
                     <section data-panel="pick">
@@ -233,7 +251,7 @@
                                 <button class="color-target-name" data-target-pick="bg" aria-pressed="false"><span>Paper</span><span class="color-value" id="bg-value">Terminal</span></button>
                             </div>
                         </div>
-                        <div class="segmented wide" role="group" aria-label="Text style">
+                        <div class="segmented wide style-toggles" role="group" aria-label="Text style">
                             <button data-style-toggle="bold" aria-pressed="false" title="Bold text"><strong>B</strong> Bold</button>
                             <button data-style-toggle="inverse" aria-pressed="false" title="Swap ink and paper as the terminal shows them, also its own colours"><span class="inverse-icon" aria-hidden="true"></span>Inverse</button>
                         </div>
@@ -254,6 +272,7 @@
                 <button class="dock-btn" aria-pressed="false" data-tool="text" title="Text (T)" aria-label="Text"><svg class="ic lg"><use href="#i-text"></use></svg><kbd>T</kbd></button>
                 <button class="dock-btn" aria-pressed="false" data-tool="shape" title="Shape (S)" aria-label="Shape"><svg class="ic lg"><use href="#i-shape"></use></svg><kbd>S</kbd></button>
                 <button class="dock-btn" aria-pressed="false" data-tool="selection" title="Select (V)" aria-label="Select"><svg class="ic lg"><use href="#i-select"></use></svg><kbd>V</kbd></button>
+                <button class="dock-btn" aria-pressed="false" data-tool="hand" title="Hand: move the view (H, or hold Space)" aria-label="Hand"><svg class="ic lg"><use href="#i-hand"></use></svg><kbd>H</kbd></button>
                 <span class="dock-sep"></span>
                 <div class="dock-colors" aria-hidden="true">
                     <span class="chip-bg" id="dock-bg"></span>

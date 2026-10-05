@@ -238,6 +238,27 @@ kbd {
 
 .segmented kbd { padding: 2px 4px; font-size: 9px; }
 
+/* How the current tool works in the ink or paper view */
+.view-note {
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    background: rgba(255, 106, 61, 0.1);
+    border: 1px solid rgba(255, 106, 61, 0.35);
+    color: var(--text);
+}
+
+/* What the view doesn't use: dimmed and out of reach, or not shown */
+.color-target.unused,
+.style-toggles.unused { opacity: 0.4; pointer-events: none; }
+.inspector.paper-view .ink-only { display: none; }
+.inspector:not(.paper-view) .paper-only { display: none; }
+.line-path { display: flex; flex-direction: column; gap: 10px; }
+.inspector.ink-view .both-only,
+.inspector.ink-view [data-fill="2"],
+.inspector.ink-view .keep-swatch,
+.inspector.paper-view .keep-swatch { display: none; }
+.dock-btn:disabled { opacity: 0.3; cursor: default; background: transparent; }
+
 /* Autosave status next to the file name */
 .save-state {
     font-size: 12px;
@@ -1052,6 +1073,7 @@ dialog h3 {
    selections and previews (CanvasRenderer.readTheme reads them) */
 .canvas {
     --cell-bg: #0b0b0d;
+    --hidden-paper: #17181c;                  /* paper in the ink view (apart from the grid) */
     --border: #2a2c31;
     --overlay-selection: #2ec4b6;             /* teal */
     --overlay-paste: var(--success);
@@ -1069,6 +1091,7 @@ dialog h3 {
 /* Light terminal: the default colours of a light-background terminal */
 .canvas.light-terminal {
     --cell-bg: #ffffff;
+    --hidden-paper: #eef0f3;
     --border: #d4d4d4;
     color: #1e1e1e;
 }
@@ -1084,6 +1107,12 @@ dialog h3 {
     display: block;
     cursor: crosshair;
 }
+
+/* Moving the view: the hand tool, Space held, or a middle-button drag */
+.canvas-scroll.pan-ready,
+.canvas-scroll.pan-ready .canvas .grid-canvas { cursor: grab; }
+.canvas-scroll.panning,
+.canvas-scroll.panning .canvas .grid-canvas { cursor: grabbing; }
 
 /* Placing an image: drags move it, or resize it from its handle */
 .canvas.image-move .grid-canvas { cursor: move; }

@@ -105,6 +105,7 @@ const TOOL_GROUPS = {
     text: ['text'],
     shape: ['box', 'line'],
     selection: ['select', 'select-subpixel'],
+    hand: ['hand'],
     pick: ['pick']
 };
 
@@ -115,6 +116,7 @@ const GROUP_INFO = {
     text: { title: 'Text', key: 'T' },
     shape: { title: 'Shape', key: 'S' },
     selection: { title: 'Select', key: 'V' },
+    hand: { title: 'Hand', key: 'H' },
     pick: { title: 'Pick colour', key: 'I' }
 };
 
@@ -122,7 +124,7 @@ const GROUP_INFO = {
 // and P are the older keys for draw, symbol and pick.
 const KEY_TOOLS = {
     b: 'brush', e: 'erase', d: 'draw', f: 'fill', g: 'glyph', c: 'glyph', t: 'text',
-    s: 'shape', l: 'line', v: 'selection', i: 'pick', p: 'pick'
+    s: 'shape', l: 'line', v: 'selection', h: 'hand', i: 'pick', p: 'pick'
 };
 
 // Where the canvas is autosaved (see Toolbar.autosave)
@@ -194,10 +196,12 @@ class Toolbar {
         });
         this.setupCellAspect();
         this.setupZoom();
+        this.setupPanning();
         this.setupTools();
         this.setupColors();
         this.setupStyle();
         this.setupImagePanel();
+        this.setupViews();
         this.setupFileInputs();
         this.setupCharPalette();
         this.setupCommandPalette();
@@ -265,7 +269,7 @@ class Toolbar {
             case 'zoom-out': this.stepZoom(-1); break;
             case 'zoom-fit': this.zoomToFit(); break;
             case 'zoom-reset': this.setZoom(1); break;
-            case 'swap-colors': this.setColors(r.bgColor, r.fgColor); break;
+            case 'swap-colors': if (r.view === 'both') this.setColors(r.bgColor, r.fgColor); break;
             case 'default-colors':
                 this.setStyle(false, false);
                 this.setColors(defaultFG(), defaultBG());
@@ -363,6 +367,56 @@ class Toolbar {
         }, { passive: false });
     }
 
+    // Moving the view by dragging: with the hand tool, while Space is held
+    // (any tool; not while typing on the canvas), or with the middle button
+    setupPanning() {
+        const s = this.scroller, r = this.renderer;
+        let space = false, drag = null;
+        const ready = () => s.classList.toggle('pan-ready', !drag && (space || r.tool === 'hand'));
+        this.updatePanCursor = ready;
+
+        // Capture phase: before the canvas sees the press
+        s.addEventListener('mousedown', (e) => {
+            if (!(e.button === 1 || (e.button === 0 && (space || r.tool === 'hand')))) return;
+            e.preventDefault();
+            e.stopPropagation();
+            drag = { x: e.clientX, y: e.clientY, left: s.scrollLeft, top: s.scrollTop };
+            s.classList.add('panning');
+            ready();
+        }, true);
+        window.addEventListener('mousemove', (e) => {
+            if (!drag) return;
+            if (e.buttons === 0) return end();   // released where we didn't see it
+            s.scrollLeft = drag.left - (e.clientX - drag.x);
+            s.scrollTop = drag.top - (e.clientY - drag.y);
+        });
+        const end = () => {
+            drag = null;
+            s.classList.remove('panning');
+            ready();
+        };
+        window.addEventListener('mouseup', () => { if (drag) end(); });
+        // The middle button's click mustn't start auto-scrolling either
+        s.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefault(); });
+
+        const typing = (e) => (e.target.closest && e.target.closest('input, textarea, dialog')) ||
+            (r.tool === 'text' && r.textCursor);
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== ' ' || typing(e)) return;
+            e.preventDefault();   // no scrolling, no pressing a focused button
+            if (space) return;    // held: the key repeats
+            space = true;
+            ready();
+        });
+        document.addEventListener('keyup', (e) => {
+            if (e.key !== ' ' || !space) return;
+            e.preventDefault();   // a focused button would activate on key-up
+            space = false;
+            ready();
+        });
+        window.addEventListener('blur', () => { space = false; ready(); });
+    }
+
     // Zoom to `zoom`, keeping the canvas point under `at` (a pointer event;
     // default the middle of the view) where it is
     setZoom(zoom, at = null) {
@@ -452,6 +506,11 @@ class Toolbar {
             pressOne(fills, btn);
             this.renderer.boxFillMode = parseInt(btn.dataset.fill);
         }));
+        const paths = [...document.querySelectorAll('[data-line-path]')];
+        paths.forEach(btn => btn.addEventListener('click', () => {
+            pressOne(paths, btn);
+            this.renderer.linePath = btn.dataset.linePath;
+        }));
         const fillModes = [...document.querySelectorAll('[data-fill-mode]')];
         fillModes.forEach(btn => btn.addEventListener('click', () => {
             pressOne(fillModes, btn);
@@ -474,6 +533,7 @@ class Toolbar {
         const group = Object.keys(TOOL_GROUPS).find(g => TOOL_GROUPS[g].includes(tool));
         if (!group) return;
         const r = this.renderer;
+        if (r.view === 'paper' && (group === 'glyph' || group === 'text' || tool === 'select-subpixel')) return;   // ink only
         if (tool === 'pick' && r.tool !== 'pick') this.toolBeforePick = r.tool;
         if (group in this.lastTool) this.lastTool[group] = tool;
 
@@ -485,11 +545,13 @@ class Toolbar {
             b.setAttribute('aria-pressed', String(b.dataset.tool === group));
         });
         document.querySelectorAll('[data-tool-set]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.toolSet === tool)));
+        if (this.updatePanCursor) this.updatePanCursor();
         this.currentGroup = group;
         this.showPanel();
 
         // Fill applies to boxes only, and a line needs a border
         document.querySelector('.box-only').hidden = tool !== 'box';
+        document.querySelector('.line-path').hidden = tool !== 'line';
         const none = document.querySelector('.tile[data-style="0"]');
         none.hidden = tool === 'line';
         if (tool === 'line' && r.boxLineStyle === 0) document.querySelector('.tile[data-style="1"]').click();
@@ -505,6 +567,15 @@ class Toolbar {
         const key = document.getElementById('tool-key');
         key.textContent = image ? '' : GROUP_INFO[panel].key;
         key.hidden = image;
+        const note = document.getElementById('view-note');
+        note.textContent = this.viewNote();
+        note.hidden = !note.textContent;
+        // The ink and paper views each fill in one way
+        const both = this.renderer.view === 'both';
+        document.querySelector('.fill-modes').hidden = !both;
+        document.querySelectorAll('[data-fill-hint]').forEach(p => {
+            p.hidden = !both || p.dataset.fillHint !== this.renderer.fillMode;
+        });
         // Narrow windows: open the inspector for the image, close it after
         const inspector = document.getElementById('inspector');
         if (image && !inspector.classList.contains('open')) {
@@ -647,8 +718,67 @@ class Toolbar {
         this.setColor('bg', { ...bg });
         if (this.renderer.tool === 'pick' && this.toolBeforePick) {
             this.setTool(this.toolBeforePick);
+            if (this.renderer.tool === 'pick') this.setTool('draw');   // not in this view
             this.toolBeforePick = null;
         }
+    }
+
+    // --- Views: see and edit only the ink, only the paper, or both ---
+
+    setupViews() {
+        document.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', () => this.setView(btn.dataset.view)));
+    }
+
+    setView(view) {
+        this.renderer.setView(view);
+        document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
+        // The colour the view doesn't edit is dimmed, and the palette sets the other
+        document.querySelector('.color-target[data-target="bg"]').classList.toggle('unused', view === 'ink');
+        document.querySelector('.color-target[data-target="fg"]').classList.toggle('unused', view === 'paper');
+        document.querySelector('.style-toggles').classList.toggle('unused', view === 'paper');
+        document.getElementById('fg-color').disabled = view === 'paper';
+        document.getElementById('bg-color').disabled = view === 'ink';
+        const inspector = document.getElementById('inspector');
+        inspector.classList.toggle('paper-view', view === 'paper');
+        inspector.classList.toggle('ink-view', view === 'ink');
+        if (view === 'ink') this.setColorTarget('fg');
+        if (view === 'paper') this.setColorTarget('bg');
+        // Swapping would change the colour the view hides
+        document.querySelector('[data-action="swap-colors"]').disabled = view !== 'both';
+        // Subpixel selection: paper is per cell
+        if (view === 'paper' && this.renderer.tool === 'select-subpixel') this.setTool('select');
+        // Glyphs and text are ink: not in the paper view
+        for (const group of ['glyph', 'text']) document.querySelector(`.dock-btn[data-tool="${group}"]`).disabled = view === 'paper';
+        if (view === 'paper' && ['char', 'text'].includes(this.renderer.tool)) this.setTool('brush');
+        // The ink view's box has no Recolour (the Fill tool recolours)
+        if (view === 'ink' && this.renderer.boxFillMode === 2) document.querySelector('[data-fill="0"]').click();
+        this.showPanel();
+    }
+
+    // What the current tool does in the ink or paper view, if it differs
+    viewNote() {
+        const view = this.renderer.view, group = this.renderer.imagePaste ? 'image' : this.currentGroup;
+        const notes = {
+            paper: {
+                brush: "Paper view: paints whole cells' paper; Erase gives them the terminal's own.",
+                fill: 'Paper view: fills connected cells of the same paper with the paper colour, whatever they hold.',
+                glyph: 'Glyphs are ink: switch to Ink or Both to use this tool.',
+                text: 'Text is ink: switch to Ink or Both to use this tool.',
+                shape: 'Paper view: the box or line gives every cell it covers the paper colour.',
+                selection: 'Paper view: copy, cut and paste move only the paper.',
+                image: "Paper view: each cell's paper gets the image's colour there."
+            },
+            ink: {
+                brush: 'Ink view: the paper stays as it is.',
+                fill: 'Ink view: lights the area in the ink colour; only lit subpixels and characters stop it.',
+                glyph: 'Ink view: the paper stays as it is.',
+                text: 'Ink view: the paper stays as it is.',
+                shape: 'Ink view: the paper stays as it is.',
+                selection: 'Ink view: copy, cut and paste leave the paper as it is.',
+                image: 'Ink view: the image is drawn in the ink colour over the paper there.'
+            }
+        };
+        return (notes[view] || {})[group] || '';
     }
 
     // --- Text style ---
@@ -962,6 +1092,7 @@ class Toolbar {
             ['Tools', 'Select cells', 'V', tool('select')],
             ['Tools', 'Select subpixels', '⇧V', tool('select-subpixel')],
             ['Tools', 'Pick colour', 'I', tool('pick')],
+            ['Tools', 'Hand: move the view', 'H', tool('hand')],
             ['Brush', 'Brush tip: subpixel', '', () => { this.setTool('brush'); document.querySelector('[data-brush="subpixel"]').click(); }],
             ['Brush', 'Brush tip: whole cell', '', () => { this.setTool('brush'); document.querySelector('[data-brush="cell"]').click(); }],
             ['File', 'New canvas', '', act('new')],
@@ -979,6 +1110,9 @@ class Toolbar {
             ['Colour', "Reset to the terminal's colours", '', act('default-colors')],
             ['Style', r.bold ? 'Bold off' : 'Bold on', '', () => this.setStyle(!r.bold, r.inverse)],
             ['Style', r.inverse ? 'Inverse off' : 'Inverse on', '', () => this.setStyle(r.bold, !r.inverse)],
+            ['View', 'See and edit only the ink', '', () => this.setView('ink')],
+            ['View', 'See and edit only the paper', '', () => this.setView('paper')],
+            ['View', 'See and edit ink and paper', '', () => this.setView('both')],
             ['View', r.showGrid ? 'Hide grid' : 'Show grid', '', act('toggle-grid')],
             ['View', r.lightTerminal ? 'Preview in a dark terminal' : 'Preview in a light terminal', '', act('toggle-light-terminal')],
             ['View', 'Zoom in', '+', act('zoom-in')],
