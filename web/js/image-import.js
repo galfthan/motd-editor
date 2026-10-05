@@ -24,7 +24,8 @@ function linearToSrgb(v) {
 }
 
 // Cells whose paper is the mean colour of the image's opaque subpixels
-// there (null where most of the cell is transparent)
+// there (null where most of the cell is transparent), snapped (see
+// imagePalette)
 function paperCells(px, opaque, cols, rows, R, snap) {
     const W = cols * 2;
     return Array.from({ length: rows }, (_, cy) => Array.from({ length: cols }, (_, cx) => {
@@ -77,18 +78,24 @@ function imagePixels(image) {
     return imageSources.get(image);
 }
 
-// The main colours of a simple image, like a logo: when at most 8 colours
-// (to 4 bits a channel) make up 97% of its opaque pixels, their mean sRGB
-// values, else null. Fitted cell colours snap to them, so the edges' blends
-// (anti-aliasing) don't leave fringes of other colours.
+// The main colours of a simple cut-out image, like a logo with a
+// transparent background: when it has transparent pixels and at most 8
+// colours (to 4 bits a channel) make up 97% of its opaque ones, their mean
+// sRGB values, else null. Cell colours snap to them: its edges were blended
+// (anti-aliased) with a background it no longer has, which would leave a
+// fringe of that colour. (With a background of its own, the blends are
+// smooth edges.)
 const imagePalettes = new WeakMap();
 function imagePalette(image) {
     if (!imagePalettes.has(image)) {
         const { data } = imagePixels(image);
         const buckets = new Map();
-        let total = 0;
+        let total = 0, cutOut = false;
         for (let j = 0; j < data.length; j += 4) {
-            if (data[j + 3] < 128) continue;
+            if (data[j + 3] < 128) {
+                cutOut = true;
+                continue;
+            }
             const key = (data[j] >> 4) << 8 | (data[j + 1] >> 4) << 4 | data[j + 2] >> 4;
             const b = buckets.get(key) || buckets.set(key, [0, 0, 0, 0]).get(key);
             b[0]++; b[1] += data[j]; b[2] += data[j + 1]; b[3] += data[j + 2];
@@ -102,7 +109,7 @@ function imagePalette(image) {
             palette.push([r / n, g / n, b / n].map(Math.round));
             covered += n;
         }
-        imagePalettes.set(image, total && palette);
+        imagePalettes.set(image, cutOut && total ? palette : null);
     }
     return imagePalettes.get(image);
 }
@@ -164,7 +171,7 @@ function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, 
         }
     }
 
-    // A simple image's colours (see imagePalette), as cells' colours snap to them
+    // A simple image's colours (see imagePalette)
     const palette = imagePalette(image)?.map(c => c.map(v => toLinearToned[v]));
     const snap = (v) => !palette || !v ? v : palette.reduce((best, q) => dist(v[0], v[1], v[2], q) < dist(v[0], v[1], v[2], best) ? q : best);
     if (paperOnly) return paperCells(px, opaque, cols, rows, R, snap);
