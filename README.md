@@ -45,6 +45,11 @@ npx serve web
 - Zoom with + and −, Ctrl+wheel, or 0 to fit the window; move the view with
   the Hand tool, by holding Space and dragging, or with the middle button
 
+The Ink / Paper / Both switch in the top bar chooses what you see and edit:
+Ink shows only the lit subpixels and characters and changes only them (the
+paper stays), Paper shows only each cell's background and changes only that
+(the brush, box, line and fill then paint cells' paper), Both is everything.
+
 Tools are in the dock at the bottom; the panel on the right has the current
 tool's options and the colours. Shortcuts: B brush, E erase, F fill, G glyph, T text,
 S box, L line, V select (Shift+V subpixels), H hand, I pick a colour (or Alt-click

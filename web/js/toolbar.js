@@ -201,6 +201,7 @@ class Toolbar {
         this.setupColors();
         this.setupStyle();
         this.setupImagePanel();
+        this.setupViews();
         this.setupFileInputs();
         this.setupCharPalette();
         this.setupCommandPalette();
@@ -559,6 +560,15 @@ class Toolbar {
         const key = document.getElementById('tool-key');
         key.textContent = image ? '' : GROUP_INFO[panel].key;
         key.hidden = image;
+        const note = document.getElementById('view-note');
+        note.textContent = this.viewNote();
+        note.hidden = !note.textContent;
+        // The ink and paper views each fill in one way
+        const both = this.renderer.view === 'both';
+        document.querySelector('.fill-modes').hidden = !both;
+        document.querySelectorAll('[data-fill-hint]').forEach(p => {
+            p.hidden = !both || p.dataset.fillHint !== this.renderer.fillMode;
+        });
         // Narrow windows: open the inspector for the image, close it after
         const inspector = document.getElementById('inspector');
         if (image && !inspector.classList.contains('open')) {
@@ -703,6 +713,51 @@ class Toolbar {
             this.setTool(this.toolBeforePick);
             this.toolBeforePick = null;
         }
+    }
+
+    // --- Views: see and edit only the ink, only the paper, or both ---
+
+    setupViews() {
+        document.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', () => this.setView(btn.dataset.view)));
+    }
+
+    setView(view) {
+        this.renderer.setView(view);
+        document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
+        // The colour the view doesn't edit is dimmed, and the palette sets the other
+        document.querySelector('.color-target[data-target="bg"]').classList.toggle('unused', view === 'ink');
+        document.querySelector('.color-target[data-target="fg"]').classList.toggle('unused', view === 'paper');
+        document.querySelector('.style-toggles').classList.toggle('unused', view === 'paper');
+        document.getElementById('inspector').classList.toggle('paper-view', view === 'paper');
+        if (view === 'ink') this.setColorTarget('fg');
+        if (view === 'paper') this.setColorTarget('bg');
+        this.showPanel();
+    }
+
+    // What the current tool does in the ink or paper view, if it differs
+    viewNote() {
+        const view = this.renderer.view, group = this.renderer.imagePaste ? 'image' : this.currentGroup;
+        const notes = {
+            paper: {
+                brush: "Paper view: paints whole cells' paper; Erase gives them the terminal's own.",
+                fill: 'Paper view: fills connected cells of the same paper with the paper colour, whatever they hold.',
+                glyph: 'Glyphs are ink: switch to Ink or Both to use this tool.',
+                text: 'Text is ink: switch to Ink or Both to use this tool.',
+                shape: 'Paper view: gives every cell the box or line covers the paper colour.',
+                selection: 'Paper view: copy, cut and paste move only the paper.',
+                image: 'Paper view: placing the image changes only the paper.'
+            },
+            ink: {
+                brush: 'Ink view: the paper stays as it is.',
+                fill: 'Ink view: lights the area in the ink colour; only lit subpixels and characters stop it.',
+                glyph: 'Ink view: the paper stays as it is.',
+                text: 'Ink view: the paper stays as it is.',
+                shape: 'Ink view: the paper stays as it is.',
+                selection: 'Ink view: copy, cut and paste leave the paper as it is.',
+                image: 'Ink view: placing the image leaves the paper as it is.'
+            }
+        };
+        return (notes[view] || {})[group] || '';
     }
 
     // --- Text style ---
@@ -1034,6 +1089,9 @@ class Toolbar {
             ['Colour', "Reset to the terminal's colours", '', act('default-colors')],
             ['Style', r.bold ? 'Bold off' : 'Bold on', '', () => this.setStyle(!r.bold, r.inverse)],
             ['Style', r.inverse ? 'Inverse off' : 'Inverse on', '', () => this.setStyle(r.bold, !r.inverse)],
+            ['View', 'See and edit only the ink', '', () => this.setView('ink')],
+            ['View', 'See and edit only the paper', '', () => this.setView('paper')],
+            ['View', 'See and edit ink and paper', '', () => this.setView('both')],
             ['View', r.showGrid ? 'Hide grid' : 'Show grid', '', act('toggle-grid')],
             ['View', r.lightTerminal ? 'Preview in a dark terminal' : 'Preview in a light terminal', '', act('toggle-light-terminal')],
             ['View', 'Zoom in', '+', act('zoom-in')],

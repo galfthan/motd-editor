@@ -131,6 +131,11 @@ function paintSubpixels(points) {
     }
 }
 
+function checkView(view) {
+    if (!['ink', 'paper', 'both'].includes(view)) throw new Error(`unknown view "${view}": use ink, paper or both`);
+    return view;
+}
+
 function checkAspect(aspect) {
     if (!isCellAspect(aspect)) throw new Error(`cell_aspect must be ${CELL_ASPECT_RANGE.join('-')} (cell width / height)`);
     return aspect;
@@ -138,6 +143,7 @@ function checkAspect(aspect) {
 
 function displayState() {
     return {
+        view: r.view,
         grid: r.showGrid,
         light_terminal: r.lightTerminal,
         cell_aspect: +r.cellAspect.toFixed(4),
@@ -156,7 +162,7 @@ function setSize(a) {
 // A PNG (base64) of the cells in `rect`, drawn by the editor's own code
 // with the grid and terminal colours asked for, `scale` image px per CSS px,
 // with optional rulers and a line every 10th cell
-function renderPNG(rect, scale, rulers, grid, light) {
+function renderPNG(rect, scale, rulers, grid, light, view = 'both') {
     const cells = [];
     for (let y = rect.y1; y <= rect.y2; y++) {
         const row = r.canvas.cells[y];
@@ -171,8 +177,9 @@ function renderPNG(rect, scale, rulers, grid, light) {
     }
     // The terminal colours come from the canvas's CSS class (see
     // CanvasRenderer.setLightTerminal); switch it just while drawing
-    const shown = { showGrid: r.showGrid, light: r.lightTerminal };
+    const shown = { showGrid: r.showGrid, light: r.lightTerminal, view: r.view };
     r.showGrid = grid;
+    r.view = view;
     r.container.classList.toggle('light-terminal', light);
     r.readTheme();
     let src;
@@ -181,6 +188,7 @@ function renderPNG(rect, scale, rulers, grid, light) {
         src = withState({ _scaleX: scale, _scaleY: scale }, () => r.drawCellsImage(cells, rect, undefined, true).image);
     } finally {
         r.showGrid = shown.showGrid;
+        r.view = shown.view;
         r.container.classList.toggle('light-terminal', shown.light);
         r.readTheme();
     }
@@ -248,6 +256,7 @@ const OPS = {
     set_display(a) {
         // Absent or null: leave as is
         if (a.cell_aspect != null) toolbar.setCellAspect(checkAspect(a.cell_aspect), false);
+        if (a.view != null) toolbar.setView(checkView(a.view));
         if (a.grid != null && a.grid !== r.showGrid) toolbar.toggleGrid(false);
         if (a.light_terminal != null && a.light_terminal !== r.lightTerminal) toolbar.toggleLightTerminal(false);
         return displayState();
@@ -266,7 +275,7 @@ const OPS = {
             // Keep the image within about 1600px on its longer side
             const scale = Math.min((a.cell_px || CELL_W) / CELL_W, 1600 / Math.max(w, h));
             return {
-                image: renderPNG(rect, scale, rulers, grid, light),
+                image: renderPNG(rect, scale, rulers, grid, light, a.view == null ? 'both' : checkView(a.view)),
                 info: `Cells x ${rect.x1}-${rect.x2}, y ${rect.y1}-${rect.y2}, ` +
                     `${(CELL_W * scale).toFixed(1)}x${(CELL_H * scale).toFixed(1)} px each (aspect ${aspect.toFixed(3)}), ` +
                     `${light ? 'light' : 'dark'} terminal${grid ? ', with cell grid' : ''}.` +
@@ -543,10 +552,11 @@ async function prepare(op, args) {
 
 // Run one operation; each one that edits is one undo step. Operations are
 // synchronous, so the user's own edits can't end up inside the step.
+// The AI edits ink and paper whatever the user's view (see editView)
 function run(op, args) {
     if (!Object.hasOwn(OPS, op)) throw new Error(`unknown operation "${op}"`);
     if (NO_STEP.has(op)) return OPS[op](args);
-    return r.recordEdit(`AI ${op}`, () => OPS[op](args));
+    return withState({ editAll: true }, () => r.recordEdit(`AI ${op}`, () => OPS[op](args)));
 }
 
 // --- Connection and activity panel ---

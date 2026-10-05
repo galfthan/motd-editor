@@ -238,6 +238,20 @@ kbd {
 
 .segmented kbd { padding: 2px 4px; font-size: 9px; }
 
+/* How the current tool works in the ink or paper view */
+.view-note {
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    background: rgba(255, 106, 61, 0.1);
+    border: 1px solid rgba(255, 106, 61, 0.35);
+    color: var(--text);
+}
+
+/* What the paper view doesn't use */
+.color-target.unused,
+.style-toggles.unused { opacity: 0.4; }
+.inspector.paper-view .ink-only { display: none; }
+
 /* Autosave status next to the file name */
 .save-state {
     font-size: 12px;
@@ -1052,6 +1066,7 @@ dialog h3 {
    selections and previews (CanvasRenderer.readTheme reads them) */
 .canvas {
     --cell-bg: #0b0b0d;
+    --hidden-paper: #2b2d33;                  /* paper in the ink view */
     --border: #2a2c31;
     --overlay-selection: #2ec4b6;             /* teal */
     --overlay-paste: var(--success);
@@ -1069,6 +1084,7 @@ dialog h3 {
 /* Light terminal: the default colours of a light-background terminal */
 .canvas.light-terminal {
     --cell-bg: #ffffff;
+    --hidden-paper: #d9dbe0;
     --border: #d4d4d4;
     color: #1e1e1e;
 }

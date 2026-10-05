@@ -46,6 +46,7 @@ type viewArgs struct {
 }
 
 type display struct {
+	View          string   `json:"view,omitempty" jsonschema:"ink (lit subpixels and characters only), paper (each cell's background only) or both. set_display: what the user sees and edits (their tools then change only that); view_canvas: what the image shows (default both). Your own edits always change both"`
 	Grid          *bool    `json:"grid,omitempty" jsonschema:"thin lines around every cell (default: as the editor shows it)"`
 	LightTerminal *bool    `json:"light_terminal,omitempty" jsonschema:"the colours of a light-background terminal instead of a dark one (default: as the editor shows it)"`
 	CellAspect    *float64 `json:"cell_aspect,omitempty" jsonschema:"cell width / height, 0.3-0.8, as in the terminal the art is for, e.g. 0.47 for Windows Terminal's 9x19 px cells (default: as the editor shows it; the editor's own default is 0.5)"`
@@ -219,7 +220,7 @@ func addTools(s *mcp.Server, l *link) {
 	relay[viewArgs](s, l, "view_canvas",
 		"The canvas, or a region of it, as a PNG image drawn by the editor. MOTDs show in both dark and light terminals: check both with light_terminal.")
 	relay[display](s, l, "set_display",
-		"Change how the editor shows the canvas to the user (its grid, dark or light terminal and cell shape controls) until they reload it; leave a setting out to keep it. Doesn't change the art or the export.")
+		"Change how the editor shows the canvas to the user (its ink/paper/both view, grid, dark or light terminal and cell shape controls) until they reload it; leave a setting out to keep it. Doesn't change the art or the export.")
 	relay[readArgs](s, l, "read_region",
 		"Read the exact content of the canvas or a region as text, a subpixel bitmap, or per-cell JSON with colours.")
 	relay[bitmapArgs](s, l, "draw_bitmap",

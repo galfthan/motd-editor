@@ -68,6 +68,11 @@
             </button>
 
             <div class="menu-bar-right">
+                <div class="segmented" role="group" aria-label="See and edit">
+                    <button data-view="ink" aria-pressed="false" title="See and edit only the ink: lit subpixels and characters">Ink</button>
+                    <button data-view="paper" aria-pressed="false" title="See and edit only the paper: each cell's background">Paper</button>
+                    <button data-view="both" aria-pressed="true" title="See and edit everything">Both</button>
+                </div>
                 <div class="segmented" role="group" aria-label="Terminal background">
                     <button data-action="dark-terminal" aria-pressed="true">Dark terminal</button>
                     <button data-action="light-terminal" aria-pressed="false">Light terminal</button>
@@ -95,13 +100,14 @@
                     <kbd id="tool-key">B</kbd>
                 </div>
                 <div class="inspector-body">
+                    <p class="hint view-note" id="view-note" hidden></p>
                     <section data-panel="brush">
                         <div class="segmented wide" role="group" aria-label="Brush mode">
                             <button data-tool-set="draw" aria-pressed="true">Paint</button>
                             <button data-tool-set="erase" aria-pressed="false">Erase <kbd>E</kbd></button>
                         </div>
-                        <span class="label">Tip</span>
-                        <div class="tiles cols-2" role="group" aria-label="Brush tip">
+                        <span class="label ink-only">Tip</span>
+                        <div class="tiles cols-2 ink-only" role="group" aria-label="Brush tip">
                             <button class="tile" data-brush="subpixel" aria-pressed="true"><span class="tile-glyph">⠿</span>Subpixel</button>
                             <button class="tile" data-brush="cell" aria-pressed="false"><span class="tile-glyph">█</span>Whole cell</button>
                         </div>
@@ -125,7 +131,7 @@
                     </section>
 
                     <section data-panel="fill">
-                        <div class="segmented wide" role="group" aria-label="Fill with">
+                        <div class="segmented wide fill-modes" role="group" aria-label="Fill with">
                             <button data-fill-mode="ink" aria-pressed="true">Ink</button>
                             <button data-fill-mode="paper" aria-pressed="false">Paper</button>
                             <button data-fill-mode="both" aria-pressed="false">Both</button>
@@ -238,7 +244,7 @@
                                 <button class="color-target-name" data-target-pick="bg" aria-pressed="false"><span>Paper</span><span class="color-value" id="bg-value">Terminal</span></button>
                             </div>
                         </div>
-                        <div class="segmented wide" role="group" aria-label="Text style">
+                        <div class="segmented wide style-toggles" role="group" aria-label="Text style">
                             <button data-style-toggle="bold" aria-pressed="false" title="Bold text"><strong>B</strong> Bold</button>
                             <button data-style-toggle="inverse" aria-pressed="false" title="Swap ink and paper as the terminal shows them, also its own colours"><span class="inverse-icon" aria-hidden="true"></span>Inverse</button>
                         </div>
