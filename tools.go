@@ -248,7 +248,7 @@ func addTools(s *mcp.Server, l *link) {
 	relay[lineArgs](s, l, "draw_line",
 		"Draw a line of box-drawing characters from (x1, y1) to (x2, y2), like the Line tool: straight, or if both x and y differ a Z of three straight legs, the middle one halfway (horizontal-vertical-horizontal when at least as wide as tall, else vertical-horizontal-vertical). Ends on another line join it (╠, ┯). Both ends must be on the canvas. Style subpixel draws a straight line of subpixels between subpixel points instead.")
 	relay[fillArgs](s, l, "fill",
-		"Fill an area, like the Fill tool: from (sx, sy) it spreads to the subpixels that look the same (lit or unlit alike, showing the same colour; an unlit area also over the unlit subpixels of drawn cells showing bg; unlit areas connect up, down, left and right, lit ones also diagonally); other colours and cells holding a character stop it. mode says what it does there. Text style (bold, inverse) is left as it is.")
+		"Fill an area, like the Fill tool: from (sx, sy) it spreads to the subpixels that look the same (lit or unlit alike, showing the same colour; an unlit area also over the unlit subpixels of drawn cells showing bg; unlit areas connect up, down, left and right, lit ones also diagonally); other colours stop it. Cells holding a character count as lit in their fg: a fill started on lit subpixels or a character takes in touching ones of its colour, and they stop a fill of unlit subpixels. mode says what it does there. Text style (bold, inverse) is left as it is.")
 	relay[copyArgs](s, l, "copy_region",
 		"Copy or move the rectangle (x1, y1)-(x2, y2), inclusive, to (to_x, to_y), like Select with copy/cut and paste.")
 	relay[importArgs](s, l, "import_ansi",

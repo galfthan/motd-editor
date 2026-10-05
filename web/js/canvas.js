@@ -2608,8 +2608,10 @@ class CanvasRenderer {
     }
 
     // Fill: the area is the subpixels connected to (sx, sy) that look the
-    // same as it: lit or unlit alike, showing the same colour; anything else,
-    // and cells holding a character, stop it. An unlit area also takes in
+    // same as it: lit or unlit alike, showing the same colour; anything else
+    // stops it. A cell holding a character counts as lit all over in its ink
+    // colour: it joins a lit area of that colour (a shape made of blocks and
+    // slants recolours whole) and stops an unlit one. An unlit area also takes in
     // the unlit subpixels of drawn cells (ones with lit subpixels) showing
     // the paper colour: the paper a shape drawn in these colours put around
     // it. Unlit areas connect up, down, left and right, lit ones also
@@ -2637,15 +2639,25 @@ class CanvasRenderer {
         // (inverse swaps them)
         // (the ink view shows them unswapped)
         const slots = (cell) => cell.inverse && !inkView ? { on: 'bg', off: 'fg' } : { on: 'fg', off: 'bg' };
-        const start = cellAt(sx, sy);
-        if (start.type !== 'sextant') return { count: 0, changed: 0 };
-        const startLit = start.subpixels[sy % 3][sx % 2];
+        // A character cell is ink all over (a wide char's tail is its head's)
+        const glyphAt = (x, y) => {
+            const row = this.canvas.cells[Math.floor(y / 3)], cx = x >> 1;
+            if (row[cx].type === 'sextant') return null;
+            return row[cx].type === 'wide-tail' && cx > 0 ? row[cx - 1] : row[cx];
+        };
+        const startGlyph = glyphAt(sx, sy);
+        const start = startGlyph || cellAt(sx, sy);
+        const startLit = !!startGlyph || start.subpixels[sy % 3][sx % 2];
         const colour = start[slots(start)[startLit ? 'on' : 'off']];
         const passPaper = !startLit && !this.bgColor.keep ? this.bgColor : null;
-        // Whether (x, y) belongs in the area, worked out as the fill reaches it
+        // Whether (x, y) belongs in the area, worked out as the fill reaches
+        // it: a character cell joins an ink area of its colour, and stops an
+        // unlit one
         const fits = (x, y) => {
+            const glyph = glyphAt(x, y);
+            if (glyph) return startLit && colorsEqual(glyph[slots(glyph).on], colour);
             const cell = cellAt(x, y);
-            if (cell.type !== 'sextant' || cell.subpixels[y % 3][x % 2] !== startLit) return false;
+            if (cell.subpixels[y % 3][x % 2] !== startLit) return false;
             if (inkView && !startLit) return true;   // paper unseen: any unlit subpixel
             const c = cell[slots(cell)[startLit ? 'on' : 'off']];
             return colorsEqual(c, colour) ||
@@ -2683,7 +2695,26 @@ class CanvasRenderer {
         const box = { x1: cols, y1: this.canvas.height, x2: 0, y2: 0 };
         let changed = 0;
         for (const [k, subs] of byCell) {
-            const x = k % cols, y = (k - x) / cols;
+            let x = k % cols;
+            const y = (k - x) / cols;
+            if (this.canvas.cells[y][x].type !== 'sextant') {
+                // A character takes the colours whole (both halves of a wide one)
+                if (this.canvas.cells[y][x].type === 'wide-tail' && x > 0) x--;
+                const row = this.canvas.cells[y], head = row[x];
+                const tail = isWideHead(head) ? row[x + 1] : null;
+                const before = JSON.stringify([head, tail]);
+                this.beforeChange(x, y, x + 1, y);
+                const slot = slots(head);
+                for (const cell of tail ? [head, tail] : [head]) {
+                    if (paper) cell[slot.off] = { ...this.bgColor };
+                    if (ink) cell[slot.on] = { ...this.fgColor };
+                }
+                if (JSON.stringify([head, tail]) === before) continue;
+                changed++;
+                box.x1 = Math.min(box.x1, x); box.x2 = Math.max(box.x2, x + (tail ? 1 : 0));
+                box.y1 = Math.min(box.y1, y); box.y2 = Math.max(box.y2, y);
+                continue;
+            }
             const cell = this.canvas.cells[y][x];
             const before = JSON.stringify(cell);
             const slot = slots(cell);
