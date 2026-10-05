@@ -1,5 +1,6 @@
 // Bitmap image import: an image converted to cells. Each cell gets the two
-// colours that best fit its 2x3 subpixels, and the subpixels are dithered
+// colours that best fit its 2xR subpixels (R = blockRows: 2 quadrants, 3
+// sextants, 4 octants), and the subpixels are dithered
 // between them by error diffusion, in linear light.
 
 const IMAGE_DITHERS = {
@@ -24,17 +25,17 @@ function linearToSrgb(v) {
 
 // Cells whose paper is the mean colour of the image's opaque subpixels
 // there (null where most of the cell is transparent)
-function paperCells(px, opaque, cols, rows) {
+function paperCells(px, opaque, cols, rows, R) {
     const W = cols * 2;
     return Array.from({ length: rows }, (_, cy) => Array.from({ length: cols }, (_, cx) => {
         const idx = [];
-        for (let r = 0; r < 3; r++) {
+        for (let r = 0; r < R; r++) {
             for (let c = 0; c < 2; c++) {
-                const i = (cy * 3 + r) * W + cx * 2 + c;
+                const i = (cy * R + r) * W + cx * 2 + c;
                 if (opaque[i]) idx.push(i);
             }
         }
-        if (idx.length < 3) return null;
+        if (idx.length < R) return null;
         const v = mean(px, idx);
         const cell = createCell();
         cell.bg = { r: linearToSrgb(v[0]), g: linearToSrgb(v[1]), b: linearToSrgb(v[2]), default: false };
@@ -77,10 +78,10 @@ function fitImageCols(image, aspect, maxCols, maxRows) {
 // outlines keep subpixel detail.
 // Options: mono (only the colours fg and bg), paperOnly (each cell just its
 // paper, the mean colour of the image there), fg, bg, dither (a key of
-// IMAGE_DITHERS), strength (0-1: how much of the error is diffused) and the
-// tone (see toneToLinear).
-function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, bg, dither = 'floyd-steinberg', strength = 1, ...tone } = {}) {
-    const W = cols * 2, H = rows * 3;
+// IMAGE_DITHERS), strength (0-1: how much of the error is diffused),
+// blockRows (subpixel rows per cell) and the tone (see toneToLinear).
+function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, bg, dither = 'floyd-steinberg', strength = 1, blockRows: R = 3, ...tone } = {}) {
+    const W = cols * 2, H = rows * R, N = 2 * R;
     const canvas = document.createElement('canvas');
     canvas.width = W;
     canvas.height = H;
@@ -101,7 +102,7 @@ function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, 
         opaque[i] = data[4 * i + 3] >= 128 ? 1 : 0;
     }
 
-    if (paperOnly) return paperCells(px, opaque, cols, rows);
+    if (paperOnly) return paperCells(px, opaque, cols, rows, R);
     const toLinear = (col) => [col.r, col.g, col.b].map(v => SRGB_TO_LINEAR[v]);
     const monoPair = mono ? [toLinear(bg), toLinear(fg)] : null;
     // Mono dithers one value per subpixel: where it lies from bg (0) to fg
@@ -120,17 +121,17 @@ function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, 
         const pairs = [], edge = [];
         for (let cx = 0; cx < cols; cx++) {
             const idx = [];
-            for (let r = 0; r < 3; r++) idx.push((cy * 3 + r) * W + cx * 2, (cy * 3 + r) * W + cx * 2 + 1);
+            for (let r = 0; r < R; r++) idx.push((cy * R + r) * W + cx * 2, (cy * R + r) * W + cx * 2 + 1);
             const solid = idx.filter(i => opaque[i]);
-            edge.push(solid.length < 6);
+            edge.push(solid.length < N);
             pairs.push(solid.length === 0 ? null
-                : monoPair || (solid.length < 6 ? [null, mean(px, solid)] : bestPair(px, idx)));
+                : monoPair || (solid.length < N ? [null, mean(px, solid)] : bestPair(px, idx)));
         }
 
-        // Dither the band's three subpixel rows between them, serpentine
-        const bits = new Uint8Array(cols * 6);
-        for (let r = 0; r < 3; r++) {
-            const sy = cy * 3 + r;
+        // Dither the band's subpixel rows between them, serpentine
+        const bits = new Uint8Array(cols * N);
+        for (let r = 0; r < R; r++) {
+            const sy = cy * R + r;
             const dir = sy % 2 ? -1 : 1;
             for (let n = 0; n < W; n++) {
                 const sx = dir > 0 ? n : W - 1 - n;
@@ -168,8 +169,8 @@ function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, 
         out.push(pairs.map((pair, cx) => {
             if (!pair) return null;
             const cell = createCell();
-            const set = bits.subarray(cx * 6, cx * 6 + 6);
-            cell.subpixels = [[!!set[0], !!set[1]], [!!set[2], !!set[3]], [!!set[4], !!set[5]]];
+            const set = bits.subarray(cx * N, cx * N + N);
+            cell.subpixels = Array.from({ length: R }, (_, r) => [!!set[2 * r], !!set[2 * r + 1]]);
             if (mono) {
                 cell.fg = { ...fg };
                 cell.bg = { ...bg };
@@ -177,11 +178,11 @@ function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, 
             }
             const b = toColor(pair[0]), f = toColor(pair[1]);
             // One colour only (not at the edge): an empty cell with that background
-            const count = set[0] + set[1] + set[2] + set[3] + set[4] + set[5];
+            const count = set.reduce((a, v) => a + v, 0);
             const same = f.r === b.r && f.g === b.g && f.b === b.b;
-            if (!edge[cx] && (count === 0 || count === 6 || same)) {
-                cell.subpixels = [[false, false], [false, false], [false, false]];
-                cell.bg = count === 6 ? f : b;
+            if (!edge[cx] && (count === 0 || count === N || same)) {
+                cell.subpixels = Array.from({ length: R }, () => [false, false]);
+                cell.bg = count === N ? f : b;
                 return cell;
             }
             cell.fg = f;
@@ -226,8 +227,8 @@ function mean(px, idx) {
     return [clamp(r / idx.length), clamp(g / idx.length), clamp(b / idx.length)];
 }
 
-// The two colours that best fit the six subpixels idx: the means of the best
-// split of them into two groups, out of all 31 (subpixel 5 stays in group 0)
+// The two colours that best fit the subpixels idx: the means of the best
+// split of them into two groups, out of all (the last stays in group 0)
 function bestPair(px, idx) {
     let tr = 0, tg = 0, tb = 0;
     for (const i of idx) {
@@ -238,11 +239,11 @@ function bestPair(px, idx) {
     // Least squared error = most of sum(S^2 / n) over the two groups, with S
     // a group's colour sum and n its size
     const fit = (r, g, b, n) => (LUMA[0] * r * r + LUMA[1] * g * g + LUMA[2] * b * b) / n;
-    const single = fit(tr, tg, tb, 6);
+    const n0 = idx.length, single = fit(tr, tg, tb, n0);
     let best = single, bestMask = 0;
-    for (let mask = 1; mask < 32; mask++) {
+    for (let mask = 1; mask < 1 << (n0 - 1); mask++) {
         let n = 0, r = 0, g = 0, b = 0;
-        for (let k = 0; k < 5; k++) {
+        for (let k = 0; k < n0 - 1; k++) {
             if (!((mask >> k) & 1)) continue;
             const i = 3 * idx[k];
             n++;
@@ -250,7 +251,7 @@ function bestPair(px, idx) {
             g += px[i + 1];
             b += px[i + 2];
         }
-        const score = fit(r, g, b, n) + fit(tr - r, tg - g, tb - b, 6 - n);
+        const score = fit(r, g, b, n) + fit(tr - r, tg - g, tb - b, n0 - n);
         if (score > best + 1e-6) {
             best = score;
             bestMask = mask;

@@ -501,6 +501,7 @@ class Toolbar {
             if (this.renderer.dragStart) this.renderer.cancelDrag();
             pressOne(styles, btn);
             this.renderer.boxLineStyle = parseInt(btn.dataset.style);
+            this.showPixelRows();
         }));
         const fills = [...document.querySelectorAll('[data-fill]')];
         fills.forEach(btn => btn.addEventListener('click', () => {
@@ -522,7 +523,33 @@ class Toolbar {
         brushes.forEach(btn => btn.addEventListener('click', () => {
             pressOne(brushes, btn);
             this.renderer.brushCell = btn.dataset.brush === 'cell';
+            this.showPixelRows();
         }));
+        // Subpixels per cell, one setting shown in each panel it applies to
+        document.querySelectorAll('[data-pixels-in]').forEach(row => {
+            row.innerHTML = '<span class="label">Pixels</span><div class="segmented wide" role="group" aria-label="Subpixels per cell">' +
+                [[2, 'Quadrant', '2×2 subpixels per cell (quadrant blocks)'], [3, 'Sextant', '2×3 subpixels per cell (sextants)'],
+                    [4, 'Octant', '2×4 subpixels per cell (octants: Unicode 16, so older terminal fonts can\'t show them)']]
+                    .map(([rows, name, title]) => `<button data-pixels="${rows}" aria-pressed="false" title="${title}">${name}</button>`).join('') +
+                '</div>';
+        });
+        const pixels = [...document.querySelectorAll('[data-pixels]')];
+        this.setBlockRows = (rows, save = true) => {
+            this.renderer.setBlockRows(rows);
+            pixels.forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.pixels === rows)));
+            if (save) saveSetting('motd-editor.pixels', rows);
+        };
+        pixels.forEach(b => b.addEventListener('click', () => this.setBlockRows(+b.dataset.pixels)));
+        const saved = +loadSetting('motd-editor.pixels');
+        this.setBlockRows([2, 3, 4].includes(saved) ? saved : 3, false);
+    }
+
+    // The Pixels control where subpixels are drawn: not for whole-cell
+    // brushes, character boxes and lines, or cell selections
+    showPixelRows() {
+        const r = this.renderer;
+        const shown = { brush: !r.brushCell, fill: true, shape: r.boxLineStyle === SUBPIXEL_STYLE, selection: r.tool === 'select-subpixel', image: true };
+        document.querySelectorAll('[data-pixels-in]').forEach(el => { el.hidden = !shown[el.dataset.pixelsIn]; });
     }
 
     // Switch to an editor tool ('draw', 'box', …) or a dock tool ('brush',
@@ -556,6 +583,7 @@ class Toolbar {
         const none = document.querySelector('.tile[data-style="0"]');
         none.hidden = tool === 'line';
         if (tool === 'line' && r.boxLineStyle === 0) document.querySelector('.tile[data-style="1"]').click();
+        this.showPixelRows();
     }
 
     // The inspector's panel: the Image panel while an image is being
@@ -1115,6 +1143,7 @@ class Toolbar {
             ['Tools', 'Hand: move the view', 'H', tool('hand')],
             ['Brush', 'Brush tip: subpixel', '', () => { this.setTool('brush'); document.querySelector('[data-brush="subpixel"]').click(); }],
             ['Brush', 'Brush tip: whole cell', '', () => { this.setTool('brush'); document.querySelector('[data-brush="cell"]').click(); }],
+            ...[[2, 'quadrant (2×2)'], [3, 'sextant (2×3)'], [4, 'octant (2×4)']].map(([rows, name]) => ['Pixels', `Pixels: ${name}`, '', () => this.setBlockRows(rows)]),
             ['File', 'New canvas', '', act('new')],
             ['File', 'Open…', '', act('open')],
             ['File', 'Save', '⌘S', act('save')],

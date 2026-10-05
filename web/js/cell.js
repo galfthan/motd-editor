@@ -38,22 +38,34 @@ function isTriangleChar(code) {
     return code >= 0x1FB68 && code <= 0x1FB6F;
 }
 
-function setCellSubpixel(cell, row, col, filled) {
+// Set or clear subpixel (row, col) of a block cell `rows` subpixels high:
+// another resolution is converted first (best effort), a character cell
+// becomes an empty block cell
+function setCellSubpixel(cell, row, col, filled, rows = 3) {
     if (cell.type !== 'sextant') {
         cell.type = 'sextant';
         cell.charCode = 0;
-        cell.subpixels = [[false, false], [false, false], [false, false]];
+        cell.subpixels = patternToSubpixels(0, rows);
+    } else if (cell.subpixels.length !== rows) {
+        cell.subpixels = resampleSubpixels(cell.subpixels, rows);
     }
     cell.subpixels[row][col] = filled;
+}
+
+// Whether a block cell's area at subpixel (row, col) of a `rows`-high grid
+// is set (read at that resolution, best effort, if the cell has another)
+function cellSubpixelAt(cell, row, col, rows = 3) {
+    if (cell.type !== 'sextant') return false;
+    return cell.subpixels.length === rows ? cell.subpixels[row][col] : resampleSubpixels(cell.subpixels, rows)[row][col];
 }
 
 // Set a cell from a character. Sextant/block chars (and space) become sextant
 // cells, so they stay editable with the draw tools.
 function setCellChar(cell, charCode) {
-    const sextant = runeToSextantPattern(charCode || 32);
-    if (sextant.ok) {
+    const block = charToBlock(charCode || 32);
+    if (block) {
         clearCell(cell);
-        cell.subpixels = patternToSubpixels(sextant.pattern);
+        cell.subpixels = block;
         return;
     }
     if (isDiagonalChar(charCode)) {
@@ -224,7 +236,7 @@ function colorsEqual(a, b) {
 function cellToChar(cell) {
     if (cell.type === 'wide-tail') return '';
     if (cell.type === 'sextant') {
-        return sextantPatternToChar(subpixelsToPattern(cell.subpixels));
+        return blockToChar(cell.subpixels);
     }
     return cell.charCode ? String.fromCodePoint(cell.charCode) : ' ';
 }
