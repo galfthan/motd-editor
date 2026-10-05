@@ -2779,7 +2779,8 @@ class CanvasRenderer {
     //   both   paper, then ink. A cell left out of the ink for a line of
     //          another colour, where the area covers all its unlit
     //          subpixels, takes the ink colour as paper instead: the area
-    //          looks solid up to the line.
+    //          looks solid up to the line. Started on ink, the same for
+    //          the enclosed unlit gaps between the area and such lines.
     // Returns the area's size (0: (sx, sy) is in a character cell, or the
     // colours to use are keep), how many cells changed, and their rect.
     fillAt(sx, sy, mode = this.fillMode) {
@@ -2849,16 +2850,70 @@ class CanvasRenderer {
             }
         }
 
-        // The area's subpixels by cell
-        const byCell = new Map();
-        for (const i of area) {
-            const x = i % W, y = (i - x) / W;
-            const k = Math.floor(y / BLOCK_ROWS) * cols + (x >> 1);
-            if (!byCell.has(k)) byCell.set(k, []);
-            byCell.get(k).push([y % BLOCK_ROWS, x % 2]);
+        // Subpixels (indices) by cell: cell index → [[row, col], ...]
+        const byCellOf = (indices) => {
+            const map = new Map();
+            for (const i of indices) {
+                const x = i % W, y = (i - x) / W;
+                const k = Math.floor(y / BLOCK_ROWS) * cols + (x >> 1);
+                if (!map.has(k)) map.set(k, []);
+                map.get(k).push([y % BLOCK_ROWS, x % 2]);
+            }
+            return map;
+        };
+        const byCell = byCellOf(area);
+        // Both, started on ink: the unlit gaps between the area and lines of
+        // other colours (those cells kept their own ink): unlit subpixels
+        // next to it, 4-connected, that reach no cell without ink
+        const gaps = [];
+        if (startLit && ink && paper) {
+            const unlit = (x, y) => !glyphAt(x, y) && !view(cellAt(x, y))[y % BLOCK_ROWS][x % 2];
+            const done = new Uint8Array(W * H);
+            const near = (i, fn) => {
+                const x = i % W, y = (i - x) / W;
+                for (const [dx, dy] of steps.slice(0, 4)) {
+                    const nx = x + dx, ny = y + dy;
+                    if (nx >= 0 && nx < W && ny >= 0 && ny < H) fn(ny * W + nx, nx, ny);
+                }
+            };
+            for (const i of area) near(i, (j0, x0, y0) => {
+                if (done[j0] || !unlit(x0, y0)) return;
+                const part = [], stack = [j0];
+                let open = false;
+                done[j0] = 1;
+                while (stack.length) {
+                    const j = stack.pop(), x = j % W;
+                    part.push(j);
+                    if (!view(cellAt(x, (j - x) / W)).flat().some(Boolean)) open = true;
+                    near(j, (n, nx, ny) => {
+                        if (done[n] || !unlit(nx, ny)) return;
+                        done[n] = 1;
+                        stack.push(n);
+                    });
+                }
+                if (!open) gaps.push(...part);
+            });
         }
         const box = { x1: cols, y1: this.canvas.height, x2: 0, y2: 0 };
         let changed = 0;
+        const grow = (x1, x2, y) => {
+            changed++;
+            box.x1 = Math.min(box.x1, x1); box.x2 = Math.max(box.x2, x2);
+            box.y1 = Math.min(box.y1, y); box.y2 = Math.max(box.y2, y);
+        };
+        // A block cell whose unlit subpixels are all in `subs`
+        const covers = (cell, subs) => {
+            const set = new Set(subs.map(([r, c]) => r * 2 + c));
+            return view(cell).flat().every((on, i) => on || set.has(i));
+        };
+        for (const [k, subs] of byCellOf(gaps)) {
+            const x = k % cols, y = (k - x) / cols, cell = this.canvas.cells[y][x];
+            const slot = slots(cell);
+            if (!covers(cell, subs) || colorsEqual(cell[slot.off], this.fgColor)) continue;
+            this.beforeChange(x, y, x, y);
+            cell[slot.off] = { ...this.fgColor };
+            grow(x, x, y);
+        }
         for (const [k, subs] of byCell) {
             let x = k % cols;
             const y = (k - x) / cols;
@@ -2874,10 +2929,7 @@ class CanvasRenderer {
                     if (paper) cell[slot.off] = { ...this.bgColor };
                     if (ink) cell[slot.on] = { ...this.fgColor };
                 }
-                if (JSON.stringify([head, tail]) === before) continue;
-                changed++;
-                box.x1 = Math.min(box.x1, x); box.x2 = Math.max(box.x2, x + (tail ? 1 : 0));
-                box.y1 = Math.min(box.y1, y); box.y2 = Math.max(box.y2, y);
+                if (JSON.stringify([head, tail]) !== before) grow(x, x + (tail ? 1 : 0), y);
                 continue;
             }
             const cell = this.canvas.cells[y][x];
@@ -2897,14 +2949,11 @@ class CanvasRenderer {
                         cell.subpixels = view(cell).map(row => row.slice());
                         for (const [r, c] of subs) cell.subpixels[r][c] = true;
                     }
-                } else if (paper && view(cell).flat().every((on, i) => on || inArea.has(i))) {
+                } else if (paper && covers(cell, subs)) {
                     cell[slot.off] = { ...this.fgColor };
                 }
             }
-            if (JSON.stringify(cell) === before) continue;
-            changed++;
-            box.x1 = Math.min(box.x1, x); box.x2 = Math.max(box.x2, x);
-            box.y1 = Math.min(box.y1, y); box.y2 = Math.max(box.y2, y);
+            if (JSON.stringify(cell) !== before) grow(x, x, y);
         }
         if (changed) this.updateCellRect(box.x1, box.y1, box.x2, box.y2);
         return { count: area.length, changed, rect: changed ? box : null };
