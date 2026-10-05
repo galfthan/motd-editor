@@ -149,7 +149,7 @@ class CanvasRenderer {
         // Box/line tool state
         this.dragStart = null;      // { x, y } cell where the drag began
         this.dragEnd = null;        // { x, y } current cell
-        this.boxLineStyle = 1;      // 0=none, 1=light, 2=heavy, 3=double, 4=subpixels (SUBPIXEL_STYLE)
+        this.boxLineStyle = 1;      // 0=none, 1=light, 2=heavy, 3=double, 4=subpixels (SUBPIXEL_STYLE), 5=rounded (ROUNDED_STYLE)
         this.boxFillMode = 0;       // 0=no fill, 1=fill & clear, 2=recolor only
         this.linePath = 's';        // the paper view's line: 's' (two knees) or 'straight' (see linePathCells)
 
@@ -1239,7 +1239,8 @@ class CanvasRenderer {
             const vc = Math.round((g.left + cx) * g.kx - tdx / 2) + tdx / 2 - g.ox;
             const hEnd = hDir === 'right' ? g.X(g.w) : g.X(0);
             const vEnd = vDir === 'down' ? g.Y(CELL_H) : g.Y(0);
-            const r = 6 * Math.min(g.kx, g.ky);
+            // As terminals draw them: a quarter circle from the centre to the edge
+            const r = Math.min(Math.abs(hEnd - vc), Math.abs(vEnd - hc));
             ctx.beginPath();
             ctx.moveTo(hEnd, hc);
             ctx.arcTo(vc, hc, vc, vEnd, r);
@@ -2844,7 +2845,10 @@ class CanvasRenderer {
             }
         }
 
-        for (const c of computeBoxChars(x1, y1, x2, y2, this.boxLineStyle, this.canvas.cells, boxDrawLookup)) {
+        const rounded = this.boxLineStyle === ROUNDED_STYLE;
+        let chars = computeBoxChars(x1, y1, x2, y2, rounded ? 1 : this.boxLineStyle, this.canvas.cells, boxDrawLookup);
+        if (rounded) chars = roundCorners(chars);
+        for (const c of chars) {
             this.beforeChange(c.x, c.y, c.x, c.y);
             this.applyCurrentColors(this.canvas.cells[c.y][c.x]);
             setGridChar(this.canvas.cells, c.x, c.y, c.charCode);
@@ -2877,11 +2881,13 @@ class CanvasRenderer {
             this.commitSubpixelShape('line');
             return;
         }
-        const chars = computeLineChars(
+        const rounded = this.boxLineStyle === ROUNDED_STYLE;
+        let chars = computeLineChars(
             this.dragStart.x, this.dragStart.y,
             this.dragEnd.x, this.dragEnd.y,
-            this.boxLineStyle, this.canvas.cells, boxDrawLookup
+            rounded ? 1 : this.boxLineStyle, this.canvas.cells, boxDrawLookup
         );
+        if (rounded) chars = roundCorners(chars);   // a line's knees
         for (const c of chars) {
             this.beforeChange(c.x, c.y, c.x, c.y);
             this.applyCurrentColors(this.canvas.cells[c.y][c.x]);
