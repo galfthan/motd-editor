@@ -141,7 +141,7 @@ function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, 
                 if (level) {
                     const v = clamp(level[i] + err[3 * i]);
                     const on = v >= 0.5 ? 1 : 0;
-                    bits[(sx >> 1) * 6 + r * 2 + (sx & 1)] = on;
+                    bits[(sx >> 1) * N + r * 2 + (sx & 1)] = on;
                     for (let t = 0; t < kernel.length; t++) {
                         const x = sx + kernel[t][0] * dir, y = sy + kernel[t][1];
                         if (x >= 0 && x < W && y < H) err[3 * (y * W + x)] += (v - on) * kernel[t][2];
@@ -153,7 +153,7 @@ function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, 
                 const v1 = clamp(px[3 * i + 1] + err[3 * i + 1]);
                 const v2 = clamp(px[3 * i + 2] + err[3 * i + 2]);
                 const on = !pair[0] || dist(v0, v1, v2, pair[1]) < dist(v0, v1, v2, pair[0]) ? 1 : 0;
-                bits[(sx >> 1) * 6 + r * 2 + (sx & 1)] = on;
+                bits[(sx >> 1) * N + r * 2 + (sx & 1)] = on;
                 const q = pair[on], e0 = v0 - q[0], e1 = v1 - q[1], e2 = v2 - q[2];
                 for (let t = 0; t < kernel.length; t++) {
                     const x = sx + kernel[t][0] * dir, y = sy + kernel[t][1], k = kernel[t][2];
