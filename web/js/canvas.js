@@ -111,9 +111,9 @@ class CanvasRenderer {
         // What the user sees and edits: 'both', 'ink' (lit subpixels and
         // characters, in their ink; paper hidden and never changed) or
         // 'paper' (each cell's paper; art hidden and never changed). See
-        // editView: the AI add-on edits everything whatever the view.
+        // editView: the AI add-on sets editOverride for its operations.
         this.view = 'both';
-        this.editAll = false;
+        this.editOverride = null;
         this.inverse = false;
         this.isDrawing = false;
         this.lastPoint = null;     // Previous point of a draw/erase/symbol stroke
@@ -483,9 +483,10 @@ class CanvasRenderer {
         if (cursor && this.tool === 'text') this.setTextCursor(cursor.x, cursor.y);
     }
 
-    // The view editing follows ('both' while the AI add-on edits)
+    // The view editing follows: the user's, or editOverride (the AI add-on's
+    // operations choose their own)
     editView() {
-        return this.editAll ? 'both' : this.view;
+        return this.editOverride || this.view;
     }
 
     // The ink and paper drawing gives cells: keep for the one the view hides
@@ -514,6 +515,7 @@ class CanvasRenderer {
         this.view = view;
         this.cancelDrag();
         this.redrawEverything();
+        if (this.imagePaste) this.updateImagePaste();   // converted for the view
         if (this._hoverEvent) {
             this.updateHover(this._hoverEvent);
             this.updatePointerInfo(this._hoverEvent);
@@ -1743,12 +1745,17 @@ class CanvasRenderer {
 
         this.copySelection();
 
-        const { x1, y1, x2, y2 } = this.selection;
+        this.clearCells(this.selection);
+        this.clearSelection();
+    }
+
+    // Empty the cells in a rect: in the paper view only their paper, in the
+    // ink view all but it
+    clearCells({ x1, y1, x2, y2 }) {
         const view = this.editView();
         this.beforeChange(x1, y1, x2, y2);
         for (let y = y1; y <= y2; y++) {
             for (let x = x1; x <= x2; x++) {
-                // The paper view clears only paper, the ink view all but it
                 const bg = this.canvas.cells[y][x].bg;
                 if (view === 'paper') {
                     this.canvas.cells[y][x].bg = defaultBG();
@@ -1759,9 +1766,7 @@ class CanvasRenderer {
                 if (view === 'ink') this.canvas.cells[y][x].bg = bg;
             }
         }
-
         this.updateCellRect(x1, y1, x2, y2);
-        this.clearSelection();
     }
 
     pasteAt(x, y) {
@@ -2076,8 +2081,13 @@ class CanvasRenderer {
     // Convert the image again (after a change of size or options) and show it
     updateImagePaste() {
         const p = this.imagePaste;
+        // The ink view draws it in the ink alone over the paper there, the
+        // paper view gives each cell's paper the image's colour
+        const view = this.editView();
         p.cells = imageToCells(p.image, p.cols, p.rows, {
-            mono: p.mono, fg: this.fgColor, bg: this.bgColor, dither: p.dither, strength: p.strength,
+            mono: p.mono || view === 'ink', paperOnly: view === 'paper',
+            fg: this.fgColor, bg: view === 'ink' ? keepColor('bg') : this.bgColor,
+            dither: p.dither, strength: p.strength,
             brightness: p.brightness, contrast: p.contrast, midtones: p.midtones, invert: p.invert
         });
         this.showImagePreview();

@@ -151,8 +151,8 @@
                             <button data-tool-set="box" aria-pressed="true">Box</button>
                             <button data-tool-set="line" aria-pressed="false">Line <kbd>L</kbd></button>
                         </div>
-                        <span class="label">Border</span>
-                        <div class="tiles row" role="group" aria-label="Border style">
+                        <span class="label ink-only">Border</span>
+                        <div class="tiles row ink-only" role="group" aria-label="Border style">
                             <button class="tile" data-style="1" aria-pressed="true"><span class="tile-glyph">┌─┐
 └─┘</span>Light</button>
                             <button class="tile" data-style="2" aria-pressed="false"><span class="tile-glyph">┏━┓
@@ -164,7 +164,7 @@
                             <button class="tile" data-style="0" aria-pressed="false"><span class="tile-glyph">╌╌╌
 ╌╌╌</span>None</button>
                         </div>
-                        <div class="box-only">
+                        <div class="box-only ink-only">
                             <span class="label">Inside</span>
                             <div class="segmented wide" role="group" aria-label="Inside the box">
                                 <button data-fill="0" aria-pressed="true">Keep</button>
@@ -177,7 +177,7 @@
                     <section data-panel="selection">
                         <div class="segmented wide" role="group" aria-label="Select precision">
                             <button data-tool-set="select" aria-pressed="true">Cells</button>
-                            <button data-tool-set="select-subpixel" aria-pressed="false">Subpixels</button>
+                            <button class="ink-only" data-tool-set="select-subpixel" aria-pressed="false">Subpixels</button>
                         </div>
                         <p class="hint">Drag to select, then <kbd>⌘C</kbd> copy, <kbd>⌘X</kbd> cut, <kbd>⌘V</kbd> paste. Paste or drop an image and scroll to scale it before placing.</p>
                     </section>
@@ -199,18 +199,18 @@
                             <button class="btn small" data-image-action="fit-canvas">Fit canvas</button>
                             <button class="btn small" data-image-action="fit-selection">Fit selection</button>
                         </div>
-                        <span class="label">Colours</span>
-                        <div class="segmented wide" role="group" aria-label="Image colours">
+                        <span class="label both-only ink-only">Colours</span>
+                        <div class="segmented wide both-only ink-only" role="group" aria-label="Image colours">
                             <button data-image-mono="false" aria-pressed="true">Full colour</button>
                             <button data-image-mono="true" aria-pressed="false" title="Only the ink and paper colours below">Two colours</button>
                         </div>
-                        <span class="label">Dither</span>
-                        <div class="segmented wide" role="group" aria-label="Dithering">
+                        <span class="label ink-only">Dither</span>
+                        <div class="segmented wide ink-only" role="group" aria-label="Dithering">
                             <button data-image-dither="floyd-steinberg" aria-pressed="true">Floyd–Steinberg</button>
                             <button data-image-dither="atkinson" aria-pressed="false">Atkinson</button>
                             <button data-image-dither="none" aria-pressed="false">None</button>
                         </div>
-                        <label class="slider"><span>Strength</span><input type="range" data-image-slider="strength" min="0" max="100" value="100"><output></output></label>
+                        <label class="slider ink-only"><span>Strength</span><input type="range" data-image-slider="strength" min="0" max="100" value="100"><output></output></label>
                         <span class="label">Tone</span>
                         <label class="slider"><span>Brightness</span><input type="range" data-image-slider="brightness" min="-100" max="100" value="0"><output></output></label>
                         <label class="slider"><span>Contrast</span><input type="range" data-image-slider="contrast" min="-100" max="100" value="0"><output></output></label>

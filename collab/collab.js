@@ -84,6 +84,11 @@ function checkCell(x, y) {
     }
 }
 
+// Characters are ink
+function inkOnly(op) {
+    if (r.editView() === 'paper') throw new Error(`${op} writes characters, which are ink: use edit ink or both`);
+}
+
 function checkSubpixel(sx, sy) {
     if (!(sx >= 0 && sx < r.canvas.width * 2 && sy >= 0 && sy < r.canvas.height * 3)) {
         throw new Error(`subpixel (${sx}, ${sy}) is outside the ${r.canvas.width * 2}x${r.canvas.height * 3} subpixel canvas`);
@@ -119,6 +124,19 @@ function showFlash() {
 // Set or clear subpixels ({ x, y, filled } in subpixel coords, off-canvas
 // ones skipped), repainting each touched cell once
 function paintSubpixels(points) {
+    // Editing paper: the cells' paper (set subpixels give it, cleared ones
+    // the terminal's own)
+    if (r.editView() === 'paper') {
+        for (const filled of [true, false]) {
+            const cells = new Map();
+            for (const p of points) {
+                if (p.filled === filled && r.subpixelAt(p.x, p.y)) cells.set(`${p.x >> 1},${Math.floor(p.y / 3)}`, { x: p.x >> 1, y: Math.floor(p.y / 3) });
+            }
+            r.paintPaper([...cells.values()], !filled);
+            for (const c of cells.values()) flash({ x1: c.x, y1: c.y, x2: c.x, y2: c.y });
+        }
+        return;
+    }
     const changed = new Map();
     for (const p of points) {
         if (!r.subpixelAt(p.x, p.y)) continue;
@@ -335,6 +353,7 @@ const OPS = {
     },
 
     place_symbols(a) {
+        inkOnly('place_symbols');
         withState(colorState(a), () => {
             for (const { x, y, char } of a.items) {
                 checkCell(x, y);
@@ -354,6 +373,7 @@ const OPS = {
     },
 
     write_text(a) {
+        inkOnly('write_text');
         withState(colorState(a), () => {
             a.text.normalize('NFC').split('\n').forEach((line, dy) => {
                 const y = a.y + dy;
@@ -409,11 +429,15 @@ const OPS = {
         checkSubpixel(a.sx, a.sy);
         const mode = a.mode || 'ink';
         if (!['ink', 'paper', 'both'].includes(mode)) throw new Error(`unknown mode "${mode}": use ink, paper or both`);
-        const { count, changed, rect } = withState(colorState(a), () => r.fillAt(a.sx, a.sy, mode));
+        // Editing paper: connected cells of the same paper
+        const unit = r.editView() === 'paper' ? 'cells' : 'subpixels';
+        const { count, changed, rect } = withState(colorState(a), () => r.editView() === 'paper'
+            ? { ...r.fillPaperAt(a.sx >> 1, Math.floor(a.sy / 3)), rect: { x1: a.sx >> 1, y1: Math.floor(a.sy / 3), x2: a.sx >> 1, y2: Math.floor(a.sy / 3) } }
+            : r.fillAt(a.sx, a.sy, mode));
         if (!count) return `nothing was filled: (${a.sx}, ${a.sy}) is in a character cell, or the colours it would use are keep`;
-        if (!changed) return `nothing changed: the area (${count} subpixels) already has those colours, or ink mode left out all its cells (lines of another colour run through them)`;
+        if (!changed) return `nothing changed: the area (${count} ${unit}) already has those colours, or ink mode left out all its cells (lines of another colour run through them)`;
         flash(rect);
-        return `filled an area of ${count} subpixels, changing ${changed} cells`;
+        return `filled an area of ${count} ${unit}, changing ${changed} cells`;
     },
 
     copy_region(a) {
@@ -434,16 +458,7 @@ const OPS = {
         }
         const clipboard = r.canvas.cells.slice(src.y1, src.y2 + 1)
             .map(row => structuredClone(row.slice(src.x1, src.x2 + 1)));
-        if (a.move) {
-            r.beforeChange(src.x1, src.y1, src.x2, src.y2);
-            for (let y = src.y1; y <= src.y2; y++) {
-                for (let x = src.x1; x <= src.x2; x++) {
-                    detachWide(r.canvas.cells, x, y);
-                    r.canvas.cells[y][x] = createCell();
-                }
-            }
-            r.updateCellRect(src.x1, src.y1, src.x2, src.y2);
-        }
+        if (a.move) r.clearCells(src);
         withState({ clipboard, pasteMode: false }, () => r.pasteAt(a.to_x, a.to_y));
         flash(src);
         flash(dest);
@@ -482,9 +497,13 @@ const OPS = {
         }
         const strength = a.dither_strength ?? 100;
         if (!(strength >= 0 && strength <= 100)) throw new Error('dither_strength must be 0-100');
+        // Editing ink: drawn in fg alone over the paper there; editing
+        // paper: each cell's paper the image's colour there
+        const edit = r.editView();
         const cells = imageToCells(image, cols, rows, {
-            mono: a.mono, fg: parseColor(a.fg, defaultFG), bg: parseColor(a.bg, defaultBG), dither: a.dither || 'floyd-steinberg',
-            strength: strength / 100, invert: !!a.invert, ...tone
+            mono: a.mono || edit === 'ink', paperOnly: edit === 'paper',
+            fg: parseColor(a.fg, defaultFG), bg: edit === 'ink' ? keepColor('bg') : parseColor(a.bg, defaultBG),
+            dither: a.dither || 'floyd-steinberg', strength: strength / 100, invert: !!a.invert, ...tone
         });
         withState({ clipboard: cells, pasteMode: false }, () => r.pasteAt(x, y));
         flash({ x1: x, y1: y, x2: x + cols - 1, y2: y + rows - 1 });
@@ -530,7 +549,8 @@ const OPS = {
         }
         for (const [i, { op, args }] of a.ops.entries()) {
             try {
-                results.push(OPS[op](args || {}) ?? 'ok');
+                // Each op's own edit, else the batch's
+                results.push(withState({ editOverride: editOf(args || {}, r.editOverride) }, () => OPS[op](args || {})) ?? 'ok');
             } catch (e) {
                 throw new Error(`ops[${i}] (${op}): ${e.message}. Operations before it were applied.`);
             }
@@ -552,11 +572,18 @@ async function prepare(op, args) {
 
 // Run one operation; each one that edits is one undo step. Operations are
 // synchronous, so the user's own edits can't end up inside the step.
-// The AI edits ink and paper whatever the user's view (see editView)
+// An operation's `edit`: what it changes, like the user's views (see
+// editView); the user's own view doesn't matter
+function editOf(a, fallback = 'both') {
+    const edit = a.edit ?? fallback;
+    if (!['ink', 'paper', 'both'].includes(edit)) throw new Error(`unknown edit "${edit}": use ink, paper or both`);
+    return edit;
+}
+
 function run(op, args) {
     if (!Object.hasOwn(OPS, op)) throw new Error(`unknown operation "${op}"`);
     if (NO_STEP.has(op)) return OPS[op](args);
-    return withState({ editAll: true }, () => r.recordEdit(`AI ${op}`, () => OPS[op](args)));
+    return withState({ editOverride: editOf(args) }, () => r.recordEdit(`AI ${op}`, () => OPS[op](args)));
 }
 
 // --- Connection and activity panel ---

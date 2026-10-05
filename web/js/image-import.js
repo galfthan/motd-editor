@@ -22,6 +22,26 @@ function linearToSrgb(v) {
     return Math.round(255 * (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055));
 }
 
+// Cells whose paper is the mean colour of the image's opaque subpixels
+// there (null where most of the cell is transparent)
+function paperCells(px, opaque, cols, rows) {
+    const W = cols * 2;
+    return Array.from({ length: rows }, (_, cy) => Array.from({ length: cols }, (_, cx) => {
+        const idx = [];
+        for (let r = 0; r < 3; r++) {
+            for (let c = 0; c < 2; c++) {
+                const i = (cy * 3 + r) * W + cx * 2 + c;
+                if (opaque[i]) idx.push(i);
+            }
+        }
+        if (idx.length < 3) return null;
+        const v = mean(px, idx);
+        const cell = createCell();
+        cell.bg = { r: linearToSrgb(v[0]), g: linearToSrgb(v[1]), b: linearToSrgb(v[2]), default: false };
+        return cell;
+    }));
+}
+
 // A table from an sRGB channel value (0-255) to linear light, after the tone
 // adjustments, each -100 to 100 (0: none): brightness shifts every value,
 // contrast spreads them from or squeezes them to the middle, and midtones
@@ -55,10 +75,11 @@ function fitImageCols(image, aspect, maxCols, maxRows) {
 // its edge, the transparent subpixels are cleared and the rest get one colour
 // on the background already there (bg marked `keep`, see placeCell), so
 // outlines keep subpixel detail.
-// Options: mono (only the colours fg and bg), fg, bg, dither (a key of
+// Options: mono (only the colours fg and bg), paperOnly (each cell just its
+// paper, the mean colour of the image there), fg, bg, dither (a key of
 // IMAGE_DITHERS), strength (0-1: how much of the error is diffused) and the
 // tone (see toneToLinear).
-function imageToCells(image, cols, rows, { mono = false, fg, bg, dither = 'floyd-steinberg', strength = 1, ...tone } = {}) {
+function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, bg, dither = 'floyd-steinberg', strength = 1, ...tone } = {}) {
     const W = cols * 2, H = rows * 3;
     const canvas = document.createElement('canvas');
     canvas.width = W;
@@ -80,6 +101,7 @@ function imageToCells(image, cols, rows, { mono = false, fg, bg, dither = 'floyd
         opaque[i] = data[4 * i + 3] >= 128 ? 1 : 0;
     }
 
+    if (paperOnly) return paperCells(px, opaque, cols, rows);
     const toLinear = (col) => [col.r, col.g, col.b].map(v => SRGB_TO_LINEAR[v]);
     const monoPair = mono ? [toLinear(bg), toLinear(fg)] : null;
     // Mono dithers one value per subpixel: where it lies from bg (0) to fg

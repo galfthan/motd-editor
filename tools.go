@@ -17,7 +17,13 @@ import (
 // operations themselves are in collab/collab.js (after a prepare step, for
 // types that have one).
 
+// What an operation changes, like the editor's Ink / Paper / Both views
+type editing struct {
+	Edit string `json:"edit,omitempty" jsonschema:"both (the default), ink (lit subpixels, characters and their colours; the paper stays) or paper (cells' backgrounds only: subpixels paint whole cells' paper, characters are refused)"`
+}
+
 type colors struct {
+	editing
 	Bold    bool   `json:"bold,omitempty" jsonschema:"bold text (cells drawn on get it, or lose it when false)"`
 	Inverse bool   `json:"inverse,omitempty" jsonschema:"fg and bg swapped as the terminal shows them, following the terminal's own colours where they are default (cells drawn on get it, or lose it when false)"`
 	FG      string `json:"fg,omitempty" jsonschema:"foreground colour: #rrggbb, default (the default) or keep (each cell keeps its own)"`
@@ -100,6 +106,7 @@ type lineArgs struct {
 }
 
 type fillArgs struct {
+	editing
 	SX   int    `json:"sx" jsonschema:"subpixel column where the fill starts"`
 	SY   int    `json:"sy" jsonschema:"subpixel row"`
 	Mode string `json:"mode,omitempty" jsonschema:"ink (the default): light the area in fg, leaving out cells where that would repaint other lit subpixels (a line through them); paper: give every cell the area reaches bg; both: paper, then ink"`
@@ -109,6 +116,7 @@ type fillArgs struct {
 
 type copyArgs struct {
 	rect
+	editing
 	ToX      int  `json:"to_x" jsonschema:"where the copy's top-left goes"`
 	ToY      int  `json:"to_y"`
 	Move     bool `json:"move,omitempty" jsonschema:"clear the source (cut and paste)"`
@@ -116,6 +124,7 @@ type copyArgs struct {
 }
 
 type importArgs struct {
+	editing
 	Text    string `json:"text" jsonschema:"ANSI text, as in a MOTD file"`
 	X       int    `json:"x,omitempty" jsonschema:"where to paste it (default 0)"`
 	Y       int    `json:"y,omitempty"`
@@ -123,6 +132,7 @@ type importArgs struct {
 }
 
 type imageArgs struct {
+	editing
 	Path           string `json:"path,omitempty" jsonschema:"absolute path of an image file on this computer: PNG, JPEG, GIF, WebP or BMP"`
 	URL            string `json:"url,omitempty" jsonschema:"or the image's http(s) URL"`
 	X              int    `json:"x,omitempty" jsonschema:"left cell (default 0)"`

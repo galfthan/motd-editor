@@ -269,7 +269,7 @@ class Toolbar {
             case 'zoom-out': this.stepZoom(-1); break;
             case 'zoom-fit': this.zoomToFit(); break;
             case 'zoom-reset': this.setZoom(1); break;
-            case 'swap-colors': this.setColors(r.bgColor, r.fgColor); break;
+            case 'swap-colors': if (r.view === 'both') this.setColors(r.bgColor, r.fgColor); break;
             case 'default-colors':
                 this.setStyle(false, false);
                 this.setColors(defaultFG(), defaultBG());
@@ -528,6 +528,7 @@ class Toolbar {
         const group = Object.keys(TOOL_GROUPS).find(g => TOOL_GROUPS[g].includes(tool));
         if (!group) return;
         const r = this.renderer;
+        if (r.view === 'paper' && (group === 'glyph' || group === 'text' || tool === 'select-subpixel')) return;   // ink only
         if (tool === 'pick' && r.tool !== 'pick') this.toolBeforePick = r.tool;
         if (group in this.lastTool) this.lastTool[group] = tool;
 
@@ -728,9 +729,22 @@ class Toolbar {
         document.querySelector('.color-target[data-target="bg"]').classList.toggle('unused', view === 'ink');
         document.querySelector('.color-target[data-target="fg"]').classList.toggle('unused', view === 'paper');
         document.querySelector('.style-toggles').classList.toggle('unused', view === 'paper');
-        document.getElementById('inspector').classList.toggle('paper-view', view === 'paper');
+        document.getElementById('fg-color').disabled = view === 'paper';
+        document.getElementById('bg-color').disabled = view === 'ink';
+        const inspector = document.getElementById('inspector');
+        inspector.classList.toggle('paper-view', view === 'paper');
+        inspector.classList.toggle('ink-view', view === 'ink');
         if (view === 'ink') this.setColorTarget('fg');
         if (view === 'paper') this.setColorTarget('bg');
+        // Swapping would change the colour the view hides
+        document.querySelector('[data-action="swap-colors"]').disabled = view !== 'both';
+        // Subpixel selection: paper is per cell
+        if (view === 'paper' && this.renderer.tool === 'select-subpixel') this.setTool('select');
+        // Glyphs and text are ink: not in the paper view
+        for (const group of ['glyph', 'text']) document.querySelector(`.dock-btn[data-tool="${group}"]`).disabled = view === 'paper';
+        if (view === 'paper' && ['char', 'text'].includes(this.renderer.tool)) this.setTool('brush');
+        // The ink view's box has no Recolour (the Fill tool recolours)
+        if (view === 'ink' && this.renderer.boxFillMode === 2) document.querySelector('[data-fill="0"]').click();
         this.showPanel();
     }
 
@@ -743,9 +757,9 @@ class Toolbar {
                 fill: 'Paper view: fills connected cells of the same paper with the paper colour, whatever they hold.',
                 glyph: 'Glyphs are ink: switch to Ink or Both to use this tool.',
                 text: 'Text is ink: switch to Ink or Both to use this tool.',
-                shape: 'Paper view: gives every cell the box or line covers the paper colour.',
+                shape: 'Paper view: the box or line gives every cell it covers the paper colour.',
                 selection: 'Paper view: copy, cut and paste move only the paper.',
-                image: 'Paper view: placing the image changes only the paper.'
+                image: "Paper view: each cell's paper gets the image's colour there."
             },
             ink: {
                 brush: 'Ink view: the paper stays as it is.',
@@ -754,7 +768,7 @@ class Toolbar {
                 text: 'Ink view: the paper stays as it is.',
                 shape: 'Ink view: the paper stays as it is.',
                 selection: 'Ink view: copy, cut and paste leave the paper as it is.',
-                image: 'Ink view: placing the image leaves the paper as it is.'
+                image: 'Ink view: the image is drawn in the ink colour over the paper there.'
             }
         };
         return (notes[view] || {})[group] || '';
