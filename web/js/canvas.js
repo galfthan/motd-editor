@@ -36,6 +36,9 @@ function setCellWidthForAspect(aspect) {
 // Overlays on the overlay canvas, bottom to top (see setOverlay)
 const OVERLAY_ORDER = ['hover', 'hover-subpixel', 'paste', 'image-handle', 'paste-subpixel', 'box', 'box-subpixel', 'selection', 'subpixel-selection'];
 
+// Where a copy is shared with the editor's other tabs (see shareClipboard)
+const SHARED_CLIPBOARD_KEY = 'motd-editor.clipboard';
+
 // Box/line style drawn with subpixels instead of box-drawing characters
 const SUBPIXEL_STYLE = 4;
 
@@ -1748,10 +1751,36 @@ class CanvasRenderer {
 
         // Write text representation to system clipboard
         const text = this.cellsToText(this.clipboard);
+        this.shareClipboard(text);
         try {
             await navigator.clipboard.writeText(text);
         } catch (err) {
             console.warn('Failed to write to system clipboard:', err);
+        }
+    }
+
+    // The editor's other tabs get the copy too, with its colours (as ANSI
+    // text, and its size), through the browser's storage; a paste whose
+    // system clipboard text matches uses it (see sharedClipboard)
+    shareClipboard(text) {
+        const height = this.clipboard.length, width = this.clipboard[0].length;
+        try {
+            localStorage.setItem(SHARED_CLIPBOARD_KEY, JSON.stringify({
+                text, width, height, ansi: canvasToANSI({ width, height, cells: this.clipboard })
+            }));
+        } catch (e) { /* not shared: other tabs paste plain text */ }
+    }
+
+    // The copy another tab shared, as cells, if `text` is its text
+    sharedClipboard(text) {
+        try {
+            const shared = JSON.parse(localStorage.getItem(SHARED_CLIPBOARD_KEY));
+            if (!shared || shared.text !== text) return null;
+            const canvas = parseANSIText(shared.ansi);
+            resizeCanvas(canvas, shared.width, shared.height);
+            return canvas.cells;
+        } catch (e) {
+            return null;
         }
     }
 
@@ -1975,6 +2004,14 @@ class CanvasRenderer {
                 this.pasteMode = true;
                 return;
             }
+        }
+
+        // A copy from another of the editor's tabs, with its colours
+        const shared = systemText && this.sharedClipboard(systemText);
+        if (shared) {
+            this.clipboard = shared;
+            this.pasteMode = true;
+            return;
         }
 
         // System clipboard has different/new content — parse it into cells:
