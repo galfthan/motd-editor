@@ -520,11 +520,6 @@ class CanvasRenderer {
         this.cancelDrag();
         this.redrawEverything();
         if (this.imagePaste) this.updateImagePaste();   // converted for the view
-        // A copy whose region is still selected follows the view, as if
-        // copied again
-        const same = (a, b) => a && b && a.x1 === b.x1 && a.y1 === b.y1 && a.x2 === b.x2 && a.y2 === b.y2;
-        if (same(this.selection, this._copiedFrom)) this.copySelection();
-        if (same(this.subpixelSelection, this._copiedFromSubpixels)) this.copySelectionSubpixel();
         if (this._hoverEvent) {
             this.updateHover(this._hoverEvent);
             this.updatePointerInfo(this._hoverEvent);
@@ -1754,7 +1749,6 @@ class CanvasRenderer {
         this.clipboard = this.canvas.cells.slice(y1, y2 + 1)
             .map(row => structuredClone(row.slice(x1, x2 + 1)));
         this.markCopyForView(this.clipboard, this.editView());
-        this._copiedFrom = { ...this.selection };
 
         // Write text representation to system clipboard
         const text = this.cellsToText(this.clipboard);
@@ -2291,7 +2285,6 @@ class CanvasRenderer {
     // Subpixel-level copy: extracts raw subpixel values and colors from subpixel selection
     copySelectionSubpixel() {
         if (!this.subpixelSelection) return;
-        this._copiedFromSubpixels = { ...this.subpixelSelection };
 
         const { x1, y1, x2, y2 } = this.subpixelSelection;
         this.subpixelClipboard = [];
