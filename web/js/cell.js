@@ -243,67 +243,62 @@ function cellToChar(cell) {
 }
 
 // SGR escape that sets the foreground (or background) to `color`
-function sgrColor(color, isBg) {
-    if (color.default) return isBg ? '\x1b[49m' : '\x1b[39m';
-    return `\x1b[${isBg ? 48 : 38};2;${color.r};${color.g};${color.b}m`;
+// The SGR parameters for a colour as fg or bg
+function sgrColorParams(color, isBg) {
+    if (color.default) return isBg ? '49' : '39';
+    return `${isBg ? 48 : 38};2;${color.r};${color.g};${color.b}`;
 }
 
-// Cells in a row up to its last visible one: trailing blanks on the
-// terminal's own background are left out of exports, so lines don't wrap in
-// terminals narrower than the canvas
+// Cells in a row up to its last one that isn't an all-default blank:
+// trailing ones are left out of exports (opening the file gives them back),
+// so lines don't wrap in terminals narrower than the canvas
 function visibleLength(row) {
+    const blank = (c) => cellToChar(c) === ' ' && c.fg.default && c.bg.default && !c.bold && !c.inverse;
     let n = row.length;
-    while (n > 0 && cellToChar(row[n - 1]) === ' ' && row[n - 1].bg.default && !row[n - 1].inverse) n--;
+    while (n > 0 && blank(row[n - 1])) n--;
     return n;
 }
 
+const SGR_DEFAULT = { fg: defaultFG(), bg: defaultBG(), bold: false, inverse: false };
+
+// The shortest SGR sequence ('' if none) that takes the terminal from
+// `state` to a cell's colours and style: the changes, or a reset and what
+// isn't the default
+function sgrTo(state, cell) {
+    const params = (from) => {
+        const p = [];
+        if (cell.bold !== from.bold) p.push(cell.bold ? '1' : '22');
+        if (cell.inverse !== from.inverse) p.push(cell.inverse ? '7' : '27');
+        if (!colorsEqual(cell.fg, from.fg)) p.push(sgrColorParams(cell.fg, false));
+        if (!colorsEqual(cell.bg, from.bg)) p.push(sgrColorParams(cell.bg, true));
+        return p;
+    };
+    const change = params(state);
+    if (!change.length) return '';
+    // A plain reset is ESC[m
+    const reset = params(SGR_DEFAULT), viaReset = reset.length ? ['0', ...reset] : [''];
+    return `\x1b[${(viaReset.join(';').length < change.join(';').length ? viaReset : change).join(';')}m`;
+}
+
+// The canvas as ANSI text, keeping every cell's colours and style exactly
+// (opening it gives the same cells back), as short as that allows: SGR
+// only where they change, combined into one sequence, and a reset at the
+// end of a line only when it doesn't end in the defaults
 function canvasToANSI(canvas) {
     const lines = [];
-
     for (let y = 0; y < canvas.height; y++) {
-        let line = '';
-        let lastFG = defaultFG();
-        let lastBG = defaultBG();
-        let lastBold = false, lastInverse = false;
-        let lineHasColor = false;
-        const length = visibleLength(canvas.cells[y]);
-
+        const row = canvas.cells[y], length = visibleLength(row);
+        let line = '', state = SGR_DEFAULT;
         for (let x = 0; x < length; x++) {
-            const cell = canvas.cells[y][x];
+            const cell = row[x];
             if (cell.type === 'wide-tail') continue;
-            const ch = cellToChar(cell);
-            const bold = !!cell.bold, inverse = !!cell.inverse;
-
-            if (bold !== lastBold) {
-                line += bold ? '\x1b[1m' : '\x1b[22m';
-                lastBold = bold;
-                lineHasColor = true;
-            }
-            if (inverse !== lastInverse) {
-                line += inverse ? '\x1b[7m' : '\x1b[27m';
-                lastInverse = inverse;
-                lineHasColor = true;
-            }
-            // A space shows only its background, so leave the foreground
-            // alone (unless inverse, which shows the foreground there)
-            if ((ch !== ' ' || inverse) && !colorsEqual(cell.fg, lastFG)) {
-                line += sgrColor(cell.fg, false);
-                lastFG = cell.fg;
-                lineHasColor = true;
-            }
-            if (!colorsEqual(cell.bg, lastBG)) {
-                line += sgrColor(cell.bg, true);
-                lastBG = cell.bg;
-                lineHasColor = true;
-            }
-            line += ch;
+            const now = { fg: cell.fg, bg: cell.bg, bold: !!cell.bold, inverse: !!cell.inverse };
+            line += sgrTo(state, now) + cellToChar(cell);
+            state = now;
         }
-        if (lineHasColor) {
-            line += '\x1b[0m';
-        }
-        lines.push(line);
+        const plain = !state.bold && !state.inverse && state.fg.default && state.bg.default;
+        lines.push(plain ? line : line + '\x1b[m');
     }
-
     return lines.join('\n') + '\n';
 }
 

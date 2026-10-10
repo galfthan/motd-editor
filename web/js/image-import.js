@@ -234,7 +234,7 @@ function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, 
             }
         }
 
-        out.push(pairs.map((pair, cx) => {
+        const row = pairs.map((pair, cx) => {
             if (!pair) return null;
             const cell = createCell();
             const set = bits.subarray(cx * N, cx * N + N);
@@ -245,18 +245,33 @@ function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, 
                 return cell;
             }
             const b = toColor(pair[0]), f = toColor(pair[1]);
-            // One colour only (not at the edge): an empty cell with that background
+            // One colour only (not at the edge): an empty cell with that
+            // background (its ink is unseen: see below)
             const count = set.reduce((a, v) => a + v, 0);
             const same = f.r === b.r && f.g === b.g && f.b === b.b;
             if (!edge[cx] && (count === 0 || count === N || same)) {
                 cell.subpixels = patternToSubpixels(0, R);
                 cell.bg = count === N ? f : b;
+                cell.blank = true;
                 return cell;
             }
             cell.fg = f;
             cell.bg = b;
             return cell;
-        }));
+        });
+        // An empty cell's ink doesn't show: it takes the one before it, so
+        // the ANSI export (which keeps every colour) needn't switch for it
+        let ink = null;
+        for (const cell of row) {
+            if (!cell) continue;
+            if (cell.blank) {
+                delete cell.blank;
+                if (ink) cell.fg = { ...ink };
+            } else {
+                ink = cell.fg;
+            }
+        }
+        out.push(row);
     }
     return out;
 }
