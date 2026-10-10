@@ -631,14 +631,15 @@ class CanvasRenderer {
     }
 
     // Give a cell the currently picked colours (but not "keep" ones) and
-    // text style (not in the paper view)
-    applyCurrentColors(cell) {
+    // text style (not in the paper view). Subpixel drawing (textStyle false)
+    // draws plain: bold and inverse are for characters.
+    applyCurrentColors(cell, textStyle = true) {
         const ink = this.inkColor(), paper = this.paperColor();
         if (!ink.keep) cell.fg = { ...ink };
         if (!paper.keep) cell.bg = { ...paper };
         if (this.editView() !== 'paper') {
-            cell.bold = this.bold;
-            cell.inverse = this.inverse;
+            cell.bold = textStyle && this.bold;
+            cell.inverse = textStyle && this.inverse;
         }
     }
 
@@ -2568,8 +2569,7 @@ class CanvasRenderer {
         // Nothing to do if the subpixel and the colours it sets already match
         const paper = this.paperColor();
         if (cell.type === 'block' && cellSubpixelAt(cell, row, col, BLOCK_ROWS) === filled && colorKeeps(cell.bg, paper) &&
-            (filled ? colorKeeps(cell.fg, this.inkColor()) && !!cell.bold === this.bold && !!cell.inverse === this.inverse
-                : !cell.bold && !cell.inverse)) {
+            (!filled || colorKeeps(cell.fg, this.inkColor())) && !cell.bold && !cell.inverse) {
             return null;
         }
 
@@ -2582,7 +2582,7 @@ class CanvasRenderer {
                 !colorsEqual(cell.inverse ? cell.bg : cell.fg, ink)) {
                 cell.subpixels = patternToSubpixels(0, BLOCK_ROWS);
             }
-            this.applyCurrentColors(cell);
+            this.applyCurrentColors(cell, false);
         } else {
             // Erased, the cell shows plainly (an inverse blank would be a block)
             if (!paper.keep) cell.bg = { ...paper };
@@ -2721,7 +2721,7 @@ class CanvasRenderer {
             if (inside) {
                 this.beforeChange(inside.x1, inside.y1, inside.x2, inside.y2);
                 for (let y = inside.y1; y <= inside.y2; y++) {
-                    for (let x = inside.x1; x <= inside.x2; x++) this.applyCurrentColors(this.canvas.cells[y][x]);
+                    for (let x = inside.x1; x <= inside.x2; x++) this.applyCurrentColors(this.canvas.cells[y][x], false);
                 }
                 this.updateCellRect(inside.x1, inside.y1, inside.x2, inside.y2);
             }

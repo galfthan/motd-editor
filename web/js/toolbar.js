@@ -561,6 +561,7 @@ class Toolbar {
         const shown = { brush: !r.brushCell, fill: true, shape: r.boxLineStyle === SUBPIXEL_STYLE, selection: r.tool === 'select-subpixel', image: true };
         document.querySelectorAll('[data-pixels-in]').forEach(el => { el.hidden = !shown[el.dataset.pixelsIn]; });
         document.querySelectorAll('[data-other-ink-in]').forEach(el => { el.hidden = !shown[el.dataset.otherInkIn]; });
+        this.showStyle();
     }
 
     // Switch to an editor tool ('draw', 'box', …) or a dock tool ('brush',
@@ -608,6 +609,7 @@ class Toolbar {
         const key = document.getElementById('tool-key');
         key.textContent = image || pasting ? '' : GROUP_INFO[panel].key;
         key.hidden = image || pasting;
+        this.showStyle();
         const note = document.getElementById('view-note');
         note.textContent = this.viewNote();
         note.hidden = !note.textContent;
@@ -720,13 +722,36 @@ class Toolbar {
             input.addEventListener('click', () => this.setColorTarget(which));
             document.querySelector(`[data-target-pick="${which}"]`).addEventListener('click', () => this.setColorTarget(which));
         }
+        // Exact colour for the selected target: #rrggbb (or rrggbb, #rgb)
+        const hex = document.getElementById('hex-input');
+        hex.addEventListener('change', () => {
+            const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(hex.value.trim());
+            hex.classList.toggle('invalid', !m);
+            if (!m) return;
+            const h = m[1].length === 3 ? [...m[1]].map(c => c + c).join('') : m[1];
+            this.setColor(this.colorTarget, { ...hexToRgb('#' + h.toLowerCase()), default: false });
+        });
+        hex.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') hex.blur();
+            if (e.key === 'Escape') { this.showHex(); hex.blur(); }
+        });
         this.setColors(this.renderer.fgColor, this.renderer.bgColor);
+    }
+
+    // The selected colour in the hex field (empty for Terminal and Keep)
+    showHex() {
+        const hex = document.getElementById('hex-input');
+        const c = this.colorTarget === 'bg' ? this.renderer.bgColor : this.renderer.fgColor;
+        hex.value = c.keep || c.default ? '' : toHex(c);
+        hex.placeholder = c.keep ? 'Keep' : c.default ? 'Terminal' : '#rrggbb';
+        hex.classList.remove('invalid');
     }
 
     // Which colour the palette sets: 'fg' (ink) or 'bg' (paper)
     setColorTarget(which) {
         this.colorTarget = which;
         document.querySelectorAll('[data-target-pick]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.targetPick === which)));
+        this.showHex();
     }
 
     // Make `color` the current fg/bg colour and show it
@@ -746,6 +771,8 @@ class Toolbar {
         chip.classList.toggle('keep', !!color.keep);
         chip.classList.toggle('default', color.default && !color.keep);
         chip.style.background = color.default ? '' : toHex(color);
+        this.showHex();
+        this.showStyle();
     }
 
     // Set both colours (the pick tool, swap, reset); a pick made with the
@@ -862,12 +889,27 @@ class Toolbar {
         }));
     }
 
-    // Make bold / inverse the style drawn cells get, and show it
+    // Make bold / inverse the style drawn characters get, and show it
     setStyle(bold, inverse) {
         this.renderer.bold = bold;
         this.renderer.inverse = inverse;
-        document.querySelector('[data-style-toggle="bold"]').setAttribute('aria-pressed', String(bold));
-        document.querySelector('[data-style-toggle="inverse"]').setAttribute('aria-pressed', String(inverse));
+        this.showStyle();
+    }
+
+    // Bold and inverse are for characters: shown with the Text and Glyph
+    // tools and character boxes and lines. Inverse only does something with
+    // a Terminal (or keep) colour: with two exact ones it's a swap.
+    showStyle() {
+        const r = this.renderer;
+        const exact = (c) => !c.default && !c.keep;
+        const canInvert = !(exact(r.fgColor) && exact(r.bgColor));
+        if (!canInvert) r.inverse = false;
+        const chars = !r.imagePaste && (['text', 'char'].includes(r.tool) || (['box', 'line'].includes(r.tool) && r.boxLineStyle !== SUBPIXEL_STYLE));
+        document.querySelector('.style-toggles').hidden = !chars;
+        document.querySelector('[data-style-toggle="bold"]').setAttribute('aria-pressed', String(r.bold));
+        const inverse = document.querySelector('[data-style-toggle="inverse"]');
+        inverse.setAttribute('aria-pressed', String(r.inverse));
+        inverse.disabled = !canInvert;
     }
 
     // --- Autosave: the canvas is kept in this browser (as ANSI text, with

@@ -259,9 +259,10 @@
                                 <button class="color-target-name" data-target-pick="bg" aria-pressed="false"><span>Paper</span><span class="color-value" id="bg-value">Terminal</span></button>
                             </div>
                         </div>
+                        <label class="hex-field"><span>Hex</span><input type="text" id="hex-input" spellcheck="false" autocomplete="off" maxlength="7" placeholder="#rrggbb" aria-label="Exact colour of the selected one, #rrggbb"></label>
                         <div class="segmented wide style-toggles" role="group" aria-label="Text style">
-                            <button data-style-toggle="bold" aria-pressed="false" title="Bold text"><strong>B</strong> Bold</button>
-                            <button data-style-toggle="inverse" aria-pressed="false" title="Swap ink and paper as the terminal shows them, also its own colours"><span class="inverse-icon" aria-hidden="true"></span>Inverse</button>
+                            <button data-style-toggle="bold" aria-pressed="false" title="Bold text. Many terminals also show the 16 basic colours brighter when bold."><strong>B</strong> Bold</button>
+                            <button data-style-toggle="inverse" aria-pressed="false" title="Swap the terminal's own colours, so this follows dark and light themes. Needs ink or paper set to Terminal: with exact colours it's the same as Swap."><span class="inverse-icon" aria-hidden="true"></span>Inverse</button>
                         </div>
                         <div class="palette" id="palette" aria-label="Terminal colours"></div>
                         <div class="color-actions">
