@@ -32,14 +32,14 @@ type otherInk struct {
 	ClearOtherInk bool `json:"clear_other_ink,omitempty" jsonschema:"drawing in a cell whose lit subpixels have another ink colour clears them instead of giving them fg: only what you draw is lit, the rest shows the cell's paper (with bg keep, clean lines over an imported picture). draw_box and draw_line: only with style subpixel"`
 }
 
-// Bold, for characters (subpixel drawing has none)
+// Bold, for text (glyphs, emoji and box drawing don't show it)
 type bold struct {
-	Bold bool `json:"bold,omitempty" jsonschema:"bold text; many terminals also show the 16 basic colours brighter when bold (characters drawn get it, or lose it when false; not with style subpixel)"`
+	Bold bool `json:"bold,omitempty" jsonschema:"bold text; many terminals also show the 16 basic colours brighter when bold (characters written get it, or lose it when false)"`
 }
 
-// Inverse, for characters and subpixels
+// Inverse, for characters and subpixels (subpixels: not with edit ink)
 type inverse struct {
-	Inverse bool `json:"inverse,omitempty" jsonschema:"swap fg and bg as the terminal shows them, so the terminal's own colours follow dark and light themes (e.g. subpixels lit in the terminal's background colour on its foreground colour); only matters when fg or bg is default (with two exact colours it's the same as swapping them). Cells drawn get it, or lose it when false"`
+	Inverse bool `json:"inverse,omitempty" jsonschema:"swap fg and bg as the terminal shows them, so the terminal's own colours follow dark and light themes (e.g. subpixels lit in the terminal's background colour on its foreground colour); only matters when fg or bg is default (with two exact colours it's the same as swapping them). Cells drawn get it, or lose it when false; subpixels only with edit both"`
 }
 
 type colors struct {
@@ -107,7 +107,6 @@ type symbolsArgs struct {
 		Y    int    `json:"y"`
 		Char string `json:"char" jsonschema:"one character; wide ones (emoji, CJK) take this cell and the next"`
 	} `json:"items"`
-	bold
 	inverse
 	colors
 }
@@ -127,7 +126,6 @@ type boxArgs struct {
 	Fill  string `json:"fill,omitempty" jsonschema:"none (the default); fill: clear the inside and give it the colours (subpixel style: a solid rectangle of subpixels); recolor: only give the inside the colours. With style none they cover the whole rectangle, its edge cells included"`
 	pixels
 	otherInk
-	bold
 	inverse
 	colors
 }
@@ -138,7 +136,6 @@ type lineArgs struct {
 	Path  string `json:"path,omitempty" jsonschema:"with edit paper: s (the default; two knees) or straight (a direct line of cells from (x1, y1) to (x2, y2), at any angle)"`
 	pixels
 	otherInk
-	bold
 	inverse
 	colors
 }

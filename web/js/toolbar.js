@@ -897,8 +897,9 @@ class Toolbar {
         this.showStyle();
     }
 
-    // Bold is for characters: shown with the Text and Glyph tools and
-    // character boxes and lines. Inverse also with subpixel drawing (Paint,
+    // Bold is for text (glyphs, emoji and box drawing don't show it): shown
+    // with the Text tool. Inverse also with glyphs, character boxes and
+    // lines, and subpixel drawing (Paint,
     // subpixel boxes and lines; in the Both view, as it puts the ink where
     // the paper shows). It only does something with a Terminal (or keep)
     // colour, as the view draws them: with two exact ones it's a swap.
@@ -918,7 +919,7 @@ class Toolbar {
         r.inverse = !!this.wantInverse && canInvert;
         document.querySelector('.style-toggles').hidden = !chars && !blocks;
         const bold = document.querySelector('[data-style-toggle="bold"]');
-        bold.hidden = !chars;
+        bold.hidden = r.tool !== 'text';
         bold.setAttribute('aria-pressed', String(r.bold));
         const inverse = document.querySelector('[data-style-toggle="inverse"]');
         inverse.setAttribute('aria-pressed', String(r.inverse));
@@ -1235,7 +1236,7 @@ class Toolbar {
             ['Shape', 'Subpixel box', '', () => { this.setTool('box'); document.querySelector('.tile[data-style="4"]').click(); }],
             ['Shape', 'Subpixel line', '', () => { this.setTool('line'); document.querySelector('.tile[data-style="4"]').click(); }],
             ['Colour', "Reset to the terminal's colours", '', act('default-colors')],
-            ...(style.chars ? [['Style', r.bold ? 'Bold off' : 'Bold on', '', () => this.setStyle(!r.bold, this.wantInverse)]] : []),
+            ...(r.tool === 'text' ? [['Style', r.bold ? 'Bold off' : 'Bold on', '', () => this.setStyle(!r.bold, this.wantInverse)]] : []),
             ...((style.chars || style.blocks) && style.canInvert ? [['Style', r.inverse ? 'Inverse off' : 'Inverse on', '', () => this.setStyle(r.bold, !r.inverse)]] : []),
             ['View', 'See and edit only the ink', '', () => this.setView('ink')],
             ['View', 'See and edit only the paper', '', () => this.setView('paper')],

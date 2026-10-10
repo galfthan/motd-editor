@@ -632,15 +632,16 @@ class CanvasRenderer {
 
     // Give a cell the currently picked colours (but not "keep" ones) and
     // text style (not in the paper view). `style`: 'text' (bold and
-    // inverse), 'block' (inverse only, see blockInverse: bold is for
-    // characters), 'plain' or null (left as it is).
+    // inverse: bold only shows in text), 'char' (inverse: glyphs, box
+    // drawing), 'block' (inverse, see blockInverse), 'plain' or null (left
+    // as it is).
     applyCurrentColors(cell, style = 'text') {
         const ink = this.inkColor(), paper = this.paperColor();
         if (!ink.keep) cell.fg = { ...ink };
         if (!paper.keep) cell.bg = { ...paper };
         if (style !== null && this.editView() !== 'paper') {
             cell.bold = style === 'text' && this.bold;
-            cell.inverse = style === 'text' ? this.inverse : style === 'block' && this.blockInverse();
+            cell.inverse = style === 'text' || style === 'char' ? this.inverse : style === 'block' && this.blockInverse();
         }
     }
 
@@ -2635,7 +2636,7 @@ class CanvasRenderer {
         }
 
         this.beforeChange(cellX, cellY, cellX + 1, cellY);
-        this.applyCurrentColors(row[cellX]);
+        this.applyCurrentColors(row[cellX], 'char');
         setGridChar(this.canvas.cells, cellX, cellY, this.selectedChar);
         this.updateCell(cellX, cellY);
     }
@@ -3039,7 +3040,7 @@ class CanvasRenderer {
                         detachWide(this.canvas.cells, x, y);
                         clearCell(cell);
                     }
-                    this.applyCurrentColors(cell, cell.type === 'block' ? 'block' : 'text');
+                    this.applyCurrentColors(cell, cell.type === 'block' ? 'block' : 'char');
                 }
             }
         }
@@ -3049,7 +3050,7 @@ class CanvasRenderer {
         if (rounded) chars = roundCorners(chars);
         for (const c of chars) {
             this.beforeChange(c.x, c.y, c.x, c.y);
-            this.applyCurrentColors(this.canvas.cells[c.y][c.x]);
+            this.applyCurrentColors(this.canvas.cells[c.y][c.x], 'char');
             setGridChar(this.canvas.cells, c.x, c.y, c.charCode);
         }
 
@@ -3089,7 +3090,7 @@ class CanvasRenderer {
         if (rounded) chars = roundCorners(chars);   // a line's knees
         for (const c of chars) {
             this.beforeChange(c.x, c.y, c.x, c.y);
-            this.applyCurrentColors(this.canvas.cells[c.y][c.x]);
+            this.applyCurrentColors(this.canvas.cells[c.y][c.x], 'char');
             setGridChar(this.canvas.cells, c.x, c.y, c.charCode);
             this.updateCell(c.x, c.y);
         }
