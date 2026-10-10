@@ -22,6 +22,8 @@ npx serve web
   terminal fonts can't show them. A cell has one ink colour: drawing in it
   recolours its lit subpixels, or with Other ink: Clear clears those of
   another colour (with paper keep, clean lines over a picture)
+- Ellipses drawn with subpixels (outline, filled or recoloured inside);
+  Shift makes a circle, or with boxes a square
 - Extended diagonal and triangle characters (U+1FB3C-1FB6F), blocks, shades
   and emoji, searchable by name
 - Box and line drawing with light/heavy/double/rounded borders, or with subpixels
@@ -55,11 +57,11 @@ npx serve web
 The Ink / Paper / Both switch in the top bar chooses what you see and edit:
 Ink shows only the lit subpixels and characters and changes only them (the
 paper stays), Paper shows only each cell's background and changes only that
-(the brush, box, line and fill then paint cells' paper), Both is everything.
+(the brush, box, line, ellipse and fill then paint cells' paper), Both is everything.
 
 Tools are in the dock at the bottom; the panel on the right has the current
 tool's options and the colours. Shortcuts: B brush, E erase, F fill, G glyph, T text,
-S box, L line, V select (Shift+V subpixels), H hand, I pick a colour (or Alt-click
+S box, L line, O ellipse, V select (Shift+V subpixels), H hand, I pick a colour (or Alt-click
 with any tool), X swap colours. Ctrl+K (⌘K) finds any command or glyph.
 
 ## Working with an AI agent (optional)
@@ -97,7 +99,7 @@ can also see your current selection, so you can select an area and say
 
 The agent gets tools mirroring the editor's: `draw_bitmap` and
 `draw_strokes` (subpixels), `place_symbols`, `write_text`, `draw_box`,
-`draw_line`, `copy_region`, `import_image` (a local file or URL),
+`draw_line`, `draw_ellipse`, `copy_region`, `import_image` (a local file or URL),
 `import_ansi`/`export`, `resize_canvas`,
 `new_canvas`, `undo`/`redo` and `batch`, plus `get_state`, `read_region`
 (text, subpixel bitmap or per-cell colours), `view_canvas` (a PNG, in dark

@@ -416,6 +416,20 @@ const OPS = {
         flash(subpixel ? subpixelToCellRect(rect) : rect);
     },
 
+    draw_ellipse(a) {
+        const rect = normRect({ x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 });
+        if (!r.clipRect(rect, true)) throw new Error('rectangle is outside the canvas');
+        // Editing paper: the cells it covers
+        const at = r.editView() === 'paper' ? subpixelToCellRect(rect) : rect;
+        withState({
+            ...colorState(a),
+            dragStart: { x: at.x1, y: at.y1 },
+            dragEnd: { x: at.x2, y: at.y2 },
+            boxFillMode: lookup(FILLS, a.fill || 'none', 'fill')
+        }, () => r.commitEllipse());
+        flash(subpixelToCellRect(rect));
+    },
+
     draw_line(a) {
         if (a.style === 'none') throw new Error('a line needs a style: light, heavy, double, rounded or subpixel');
         const subpixel = a.style === 'subpixel';
