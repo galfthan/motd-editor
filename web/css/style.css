@@ -451,6 +451,7 @@ kbd {
 .tiles.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 /* One row, as many columns as tiles shown */
 .tiles.row { grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; }
+.tiles[hidden], .label[hidden] { display: none; }
 
 .tile {
     height: 58px;

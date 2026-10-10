@@ -103,7 +103,7 @@ const TOOL_GROUPS = {
     fill: ['fill'],
     glyph: ['char'],
     text: ['text'],
-    shape: ['box', 'line'],
+    shape: ['box', 'line', 'ellipse'],
     selection: ['select', 'select-subpixel'],
     hand: ['hand'],
     pick: ['pick']
@@ -124,7 +124,7 @@ const GROUP_INFO = {
 // and P are the older keys for draw, symbol and pick.
 const KEY_TOOLS = {
     b: 'brush', e: 'erase', d: 'draw', f: 'fill', g: 'glyph', c: 'glyph', t: 'text',
-    s: 'shape', l: 'line', v: 'selection', h: 'hand', i: 'pick', p: 'pick'
+    s: 'shape', l: 'line', o: 'ellipse', v: 'selection', h: 'hand', i: 'pick', p: 'pick'
 };
 
 // Where the canvas is autosaved (see Toolbar.autosave)
@@ -558,7 +558,7 @@ class Toolbar {
     // brushes, character boxes and lines, or cell selections
     showPixelRows() {
         const r = this.renderer;
-        const shown = { brush: !r.brushCell, fill: true, shape: r.boxLineStyle === SUBPIXEL_STYLE, selection: r.tool === 'select-subpixel', image: true };
+        const shown = { brush: !r.brushCell, fill: true, shape: r.tool === 'ellipse' || r.boxLineStyle === SUBPIXEL_STYLE, selection: r.tool === 'select-subpixel', image: true };
         document.querySelectorAll('[data-pixels-in]').forEach(el => { el.hidden = !shown[el.dataset.pixelsIn]; });
         document.querySelectorAll('[data-other-ink-in]').forEach(el => { el.hidden = !shown[el.dataset.otherInkIn]; });
         this.showStyle();
@@ -589,8 +589,10 @@ class Toolbar {
         this.currentGroup = group;
         this.showPanel();
 
-        // Fill applies to boxes only, and a line needs a border
-        document.querySelector('.box-only').hidden = tool !== 'box';
+        // Fill applies to boxes and ellipses only, an ellipse has no border
+        // style (it's subpixels), and a line needs one
+        document.querySelector('.box-only').hidden = tool !== 'box' && tool !== 'ellipse';
+        document.querySelectorAll('.border-only').forEach(el => { el.hidden = tool === 'ellipse'; });
         document.querySelector('.line-path').hidden = tool !== 'line';
         const none = document.querySelector('.tile[data-style="0"]');
         none.hidden = tool === 'line';
@@ -907,9 +909,10 @@ class Toolbar {
     styleState() {
         const r = this.renderer;
         const exact = (c) => !c.default && !c.keep;
-        const shape = ['box', 'line'].includes(r.tool);
-        const chars = !r.imagePaste && (['text', 'char'].includes(r.tool) || (shape && r.boxLineStyle !== SUBPIXEL_STYLE));
-        const blocks = !r.imagePaste && (r.tool === 'draw' || (shape && r.boxLineStyle === SUBPIXEL_STYLE));
+        const shape = ['box', 'line', 'ellipse'].includes(r.tool);
+        const subpixelShape = r.tool === 'ellipse' || (shape && r.boxLineStyle === SUBPIXEL_STYLE);
+        const chars = !r.imagePaste && (['text', 'char'].includes(r.tool) || (shape && !subpixelShape));
+        const blocks = !r.imagePaste && (r.tool === 'draw' || subpixelShape);
         const canInvert = !(exact(r.inkColor()) && exact(r.paperColor())) && (chars || r.view === 'both');
         return { chars, blocks, canInvert };
     }
@@ -1212,6 +1215,7 @@ class Toolbar {
             ['Tools', 'Text', 'T', tool('text')],
             ['Tools', 'Box', 'S', tool('box')],
             ['Tools', 'Line', 'L', tool('line')],
+            ['Tools', 'Ellipse (Shift: circle)', 'O', tool('ellipse')],
             ['Tools', 'Select cells', 'V', tool('select')],
             ['Tools', 'Select subpixels', '⇧V', tool('select-subpixel')],
             ['Tools', 'Pick colour', 'I', tool('pick')],

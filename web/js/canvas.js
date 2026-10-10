@@ -93,6 +93,23 @@ function linePoints(x0, y0, x1, y1) {
     }
 }
 
+// Grid points of the ellipse filling a rect (inclusive), row by row: all,
+// and split into its outline (points with a neighbour up, down, left or
+// right outside: a thin line that still closes off the inside) and inside
+function ellipsePoints(x1, y1, x2, y2) {
+    const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2, a = (x2 - x1) / 2 + 0.5, b = (y2 - y1) / 2 + 0.5;
+    const isIn = (x, y) => ((x - cx) / a) ** 2 + ((y - cy) / b) ** 2 <= 1;
+    const all = [], outline = [], inside = [];
+    for (let y = y1; y <= y2; y++) {
+        for (let x = x1; x <= x2; x++) {
+            if (!isIn(x, y)) continue;
+            all.push({ x, y });
+            (isIn(x - 1, y) && isIn(x + 1, y) && isIn(x, y - 1) && isIn(x, y + 1) ? inside : outline).push({ x, y });
+        }
+    }
+    return { all, outline, inside };
+}
+
 // Parts of rect a (inclusive grid coords) not in rect b: up to 4 rects
 function rectMinus(a, b) {
     if (b.x1 > a.x2 || b.x2 < a.x1 || b.y1 > a.y2 || b.y2 < a.y1) return [a];
@@ -309,6 +326,14 @@ class CanvasRenderer {
     }
 
     setupKeyboardShortcuts() {
+        // Shift squares a box or rounds an ellipse being dragged, at once
+        for (const type of ['keydown', 'keyup']) {
+            document.addEventListener(type, (e) => {
+                if (e.key !== 'Shift' || !this.dragStart || !this._lastPointerEvent) return;
+                const { clientX, clientY } = this._lastPointerEvent;
+                this.handleShapeToolMove({ clientX, clientY, shiftKey: type === 'keydown' });
+            });
+        }
         document.addEventListener('keydown', (e) => {
             if (e.target.closest && e.target.closest('input, textarea, dialog')) return;
 
@@ -1432,7 +1457,7 @@ class CanvasRenderer {
             this.handlePickTool(e);
         } else if (this.tool === 'text') {
             this.handleTextToolClick(e);
-        } else if (this.tool === 'box' || this.tool === 'line') {
+        } else if (this.isShapeTool()) {
             this.handleShapeToolDown(e);
         } else if (this.isSelectTool()) {
             this.handleSelectToolDown(e);
@@ -1482,7 +1507,7 @@ class CanvasRenderer {
 
         if (this.isSelectTool()) {
             this.handleSelectToolMove(e);
-        } else if (this.tool === 'box' || this.tool === 'line') {
+        } else if (this.isShapeTool()) {
             this.handleShapeToolMove(e);
         } else if (!this.container.contains(e.target)) {
             // Freehand tools only paint under the pointer: pause outside the
@@ -1507,6 +1532,7 @@ class CanvasRenderer {
         // Box/line: commit on release
         if (this.dragStart) {
             if (this.tool === 'box') this.commitBox();
+            else if (this.tool === 'ellipse') this.commitEllipse();
             else this.commitLine();
             this.cancelDrag();
         }
@@ -1793,10 +1819,15 @@ class CanvasRenderer {
             ((this.tool === 'draw' || this.tool === 'erase') && !this.brushCell);
     }
 
-    // Whether the box/line tool draws with subpixels (its points are then
-    // subpixel coordinates)
+    isShapeTool() {
+        return ['box', 'line', 'ellipse'].includes(this.tool);
+    }
+
+    // Whether the shape tool draws with subpixels (its points are then
+    // subpixel coordinates): an ellipse always, a box or line with the
+    // subpixel style; never in the paper view (it paints cells)
     subpixelShape() {
-        return (this.tool === 'box' || this.tool === 'line') && this.boxLineStyle === SUBPIXEL_STYLE &&
+        return this.isShapeTool() && (this.tool === 'ellipse' || this.boxLineStyle === SUBPIXEL_STYLE) &&
             this.editView() !== 'paper';
     }
 
@@ -1841,7 +1872,7 @@ class CanvasRenderer {
                 text = this.rectSizeText(this.subpixelSelection, true);
             } else if (this.selectionStart && this.selection) {
                 text = this.rectSizeText(this.selection);
-            } else if (this.tool === 'box' && this.dragStart && this.dragEnd) {
+            } else if ((this.tool === 'box' || this.tool === 'ellipse') && this.dragStart && this.dragEnd) {
                 text = this.rectSizeText(normRect(this.dragStart, this.dragEnd), this.subpixelShape());
             }
         }
@@ -2641,7 +2672,7 @@ class CanvasRenderer {
         this.updateCell(cellX, cellY);
     }
 
-    // --- Box and line tools (drag from dragStart to dragEnd) ---
+    // --- Box, line and ellipse tools (drag from dragStart to dragEnd) ---
 
     // The point a shape drag is at: a cell, or a subpixel for the subpixel style
     shapePoint(e) {
@@ -2662,15 +2693,20 @@ class CanvasRenderer {
 
     handleShapeToolMove(e) {
         if (!this.dragStart) return;
-        const p = this.shapePoint(e);
+        let p = this.shapePoint(e);
         if (!p) return;
+        if (e.shiftKey && this.tool !== 'line') p = this.squarePoint(this.dragStart, p);
         this.dragEnd = p;
 
         if (this.subpixelShape()) {
             // Fill and Recolour change the inside too
-            const rects = this.tool === 'line' ? runsOf(this.subpixelLinePoints())
-                : this.boxFillMode > 0 ? [normRect(this.dragStart, this.dragEnd)] : this.subpixelBoxRects();
+            const parts = this.tool === 'line' ? null : this.subpixelShapeParts(this.tool);
+            const rects = !parts ? runsOf(this.subpixelLinePoints())
+                : this.boxFillMode > 0 ? [...parts.outline, ...parts.inside] : parts.outline;
             this.setOverlay('box-subpixel', rects, true);
+        } else if (this.tool === 'ellipse') {
+            const r = normRect(this.dragStart, this.dragEnd);   // the paper view: its cells
+            this.setOverlay('box', runsOf(ellipsePoints(r.x1, r.y1, r.x2, r.y2).all));
         } else if (this.tool === 'box') {
             const r = normRect(this.dragStart, this.dragEnd);
             if (this.editView() === 'paper') this.setOverlay('box', [r]);   // all of it gets the paper
@@ -2680,6 +2716,28 @@ class CanvasRenderer {
         } else {
             this.showLinePreview();
         }
+    }
+
+    // `p` moved so that the shape from `start` to it looks square (a box) or
+    // round (an ellipse) on screen (Shift). Subpixels and painted cells
+    // count whole; box-drawing lines run through the cells' middles.
+    squarePoint(start, p) {
+        const subpixel = this.subpixelShape();
+        const w = subpixel ? CELL_W / 2 : CELL_W, h = subpixel ? CELL_H / BLOCK_ROWS : CELL_H;
+        const whole = subpixel || this.editView() === 'paper' ? 1 : 0;
+        const dx = p.x - start.x, dy = p.y - start.y;
+        // Spans in units: the longer side sets the shorter one (rounded to
+        // the grid), which then sets the longer one, as square as it gets
+        let nx = Math.abs(dx) + whole, ny = Math.abs(dy) + whole;
+        if (nx * w >= ny * h) {
+            ny = Math.round(nx * w / h);
+            nx = Math.round(ny * h / w);
+        } else {
+            nx = Math.round(ny * h / w);
+            ny = Math.round(nx * w / h);
+        }
+        const along = (d, n) => (d < 0 ? -1 : 1) * Math.max(0, n - whole);
+        return { x: start.x + along(dx, nx), y: start.y + along(dy, ny) };
     }
 
     // The cells of the paper view's line from dragStart to dragEnd: two
@@ -2704,14 +2762,23 @@ class CanvasRenderer {
         return linePoints(this.dragStart.x, this.dragStart.y, this.dragEnd.x, this.dragEnd.y);
     }
 
-    // The box's subpixels as rects: all of it when filled, else its outline
-    subpixelBoxRects() {
-        const { x1, y1, x2, y2 } = normRect(this.dragStart, this.dragEnd);
-        if (this.boxFillMode === 1 || x2 - x1 < 2 || y2 - y1 < 2) return [{ x1, y1, x2, y2 }];
-        return [
-            { x1, y1, x2, y2: y1 }, { x1, y1: y2, x2, y2 },
-            { x1, y1: y1 + 1, x2: x1, y2: y2 - 1 }, { x1: x2, y1: y1 + 1, x2, y2: y2 - 1 }
-        ];
+    // A subpixel 'box' or 'ellipse' as rects: its outline (all of it when
+    // filled) and the inside (none when filled)
+    subpixelShapeParts(shape) {
+        const r = normRect(this.dragStart, this.dragEnd);
+        if (shape === 'ellipse') {
+            const { all, outline, inside } = ellipsePoints(r.x1, r.y1, r.x2, r.y2);
+            return this.boxFillMode === 1 ? { outline: runsOf(all), inside: [] } : { outline: runsOf(outline), inside: runsOf(inside) };
+        }
+        const { x1, y1, x2, y2 } = r;
+        if (this.boxFillMode === 1 || x2 - x1 < 2 || y2 - y1 < 2) return { outline: [r], inside: [] };
+        return {
+            outline: [
+                { x1, y1, x2, y2: y1 }, { x1, y1: y2, x2, y2 },
+                { x1, y1: y1 + 1, x2: x1, y2: y2 - 1 }, { x1: x2, y1: y1 + 1, x2, y2: y2 - 1 }
+            ],
+            inside: [{ x1: x1 + 1, y1: y1 + 1, x2: x2 - 1, y2: y2 - 1 }]
+        };
     }
 
     // Set the subpixels in `rects` (clipped to the canvas) in the current
@@ -2731,29 +2798,40 @@ class CanvasRenderer {
         for (const { cellX, cellY } of changed.values()) this.updateCell(cellX, cellY);
     }
 
-    // Draw the dragged 'box' or 'line' with subpixels
+    // Draw the dragged 'box', 'line' or 'ellipse' with subpixels
     commitSubpixelShape(shape) {
         if (shape === 'line') {
             this.paintSubpixelRects(this.subpixelLinePoints().map(p => ({ x1: p.x, y1: p.y, x2: p.x, y2: p.y })));
             return;
         }
-        const rects = this.subpixelBoxRects();
+        const { outline, inside } = this.subpixelShapeParts(shape);
         // Recolour: the cells inside the outline get the colours too
-        const r = normRect(this.dragStart, this.dragEnd);
-        if (this.boxFillMode === 2 && rects.length === 4) {
-            const inside = this.clipRect(subpixelToCellRect({ x1: r.x1 + 1, y1: r.y1 + 1, x2: r.x2 - 1, y2: r.y2 - 1 }));
-            if (inside) {
-                this.beforeChange(inside.x1, inside.y1, inside.x2, inside.y2);
-                for (let y = inside.y1; y <= inside.y2; y++) {
-                    for (let x = inside.x1; x <= inside.x2; x++) {
-                        const cell = this.canvas.cells[y][x];
-                        this.applyCurrentColors(cell, cell.type === 'block' ? 'block' : null);
-                    }
-                }
-                this.updateCellRect(inside.x1, inside.y1, inside.x2, inside.y2);
+        if (this.boxFillMode === 2) {
+            const cells = new Map();
+            for (const r of inside) {
+                const c = this.clipRect(subpixelToCellRect(r));
+                if (!c) continue;
+                for (let y = c.y1; y <= c.y2; y++) for (let x = c.x1; x <= c.x2; x++) cells.set(y * this.canvas.width + x, { x, y });
+            }
+            for (const { x, y } of cells.values()) {
+                const cell = this.canvas.cells[y][x];
+                this.beforeChange(x, y, x, y);
+                this.applyCurrentColors(cell, cell.type === 'block' ? 'block' : null);
+                this.updateCell(x, y);
             }
         }
-        this.paintSubpixelRects(rects);
+        this.paintSubpixelRects(outline);
+    }
+
+    // An ellipse filling the dragged rect, with subpixels; in the paper view
+    // the paper of the cells it covers
+    commitEllipse() {
+        if (this.editView() === 'paper') {
+            const r = normRect(this.dragStart, this.dragEnd);
+            this.paintPaper(ellipsePoints(r.x1, r.y1, r.x2, r.y2).all);
+            return;
+        }
+        this.commitSubpixelShape('ellipse');
     }
 
     // --- Fill tool ---

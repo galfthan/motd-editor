@@ -149,6 +149,7 @@
                         <div class="segmented wide" role="group" aria-label="Shape">
                             <button data-tool-set="box" aria-pressed="true">Box</button>
                             <button data-tool-set="line" aria-pressed="false">Line <kbd>L</kbd></button>
+                            <button data-tool-set="ellipse" aria-pressed="false" title="Drawn with subpixels. Hold Shift for a circle (and with Box, a square).">Ellipse <kbd>O</kbd></button>
                         </div>
                         <div class="line-path paper-only">
                             <span class="label">Path</span>
@@ -157,8 +158,8 @@
                                 <button data-line-path="straight" aria-pressed="false" title="A direct line of cells to the end point, at any angle">Straight</button>
                             </div>
                         </div>
-                        <span class="label ink-only">Border</span>
-                        <div class="tiles row ink-only" role="group" aria-label="Border style">
+                        <span class="label ink-only border-only">Border</span>
+                        <div class="tiles row ink-only border-only" role="group" aria-label="Border style">
                             <button class="tile" data-style="1" aria-pressed="true"><span class="tile-glyph">┌─┐
 └─┘</span>Light</button>
                             <button class="tile" data-style="2" aria-pressed="false"><span class="tile-glyph">┏━┓

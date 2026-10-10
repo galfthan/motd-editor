@@ -130,6 +130,15 @@ type boxArgs struct {
 	colors
 }
 
+type ellipseArgs struct {
+	rect
+	Fill string `json:"fill,omitempty" jsonschema:"none (the default): the outline; fill: a solid ellipse; recolor: the outline, and the cells inside get the colours"`
+	pixels
+	otherInk
+	inverse
+	colors
+}
+
 type lineArgs struct {
 	rect
 	Style string `json:"style,omitempty" jsonschema:"light (the default), heavy, double, rounded (light, knees rounded), or subpixel: a straight line of subpixels, with x1-y2 subpixel coordinates"`
@@ -283,6 +292,8 @@ func addTools(s *mcp.Server, l *link) {
 		"Type text into cells, like the Text tool.")
 	relay[boxArgs](s, l, "draw_box",
 		"Draw a box with box-drawing characters from (x1, y1) to (x2, y2), cells inclusive, like the Box tool. Borders join with lines and boxes already there. Parts past the canvas edges are left out.")
+	relay[ellipseArgs](s, l, "draw_ellipse",
+		"Draw an ellipse with subpixels, filling the rectangle (x1, y1)-(x2, y2) of subpixel coordinates, inclusive, like the Ellipse tool. Subpixels aren't square: for a circle make height = width × cell_aspect × R / 2 (subpixels; R the rows per cell, 3 for sextants; cell_aspect from get_state's display). The outline is one subpixel thick and closes off the inside (fill stops at it). With edit paper it paints the paper of the cells it covers.")
 	relay[lineArgs](s, l, "draw_line",
 		"Draw a line of box-drawing characters from (x1, y1) to (x2, y2), like the Line tool: straight, or if both x and y differ a Z of three straight legs, the middle one halfway (horizontal-vertical-horizontal when at least as wide as tall, else vertical-horizontal-vertical). Ends on another line join it (╠, ┯). Both ends must be on the canvas. Style subpixel draws a straight line of subpixels between subpixel points instead.")
 	relay[fillArgs](s, l, "fill",
