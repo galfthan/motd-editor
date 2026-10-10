@@ -530,6 +530,21 @@ class Toolbar {
         document.querySelectorAll('[data-pixels]').forEach(b => b.addEventListener('click', () => this.setBlockRows(+b.dataset.pixels)));
         const saved = loadSetting('motd-editor.pixels');
         this.setBlockRows(saved in BLOCK_MODES ? +saved : 3, false);
+
+        // What drawing does to a cell's lit subpixels of another ink colour
+        document.querySelectorAll('[data-other-ink-in]').forEach(row => {
+            row.innerHTML = '<span class="label">Other ink</span><div class="segmented wide" role="group" aria-label="Lit subpixels of another ink colour">' +
+                '<button data-other-ink="recolor" title="Drawing in a cell gives its lit subpixels your ink colour too">Recolour</button>' +
+                '<button data-other-ink="clear" title="Drawing in a cell whose lit subpixels have another ink colour clears them: only what you draw is lit, the rest shows the cell\'s paper. With paper keep, for clean lines over a picture">Clear</button></div>';
+        });
+        document.querySelectorAll('[data-other-ink]').forEach(b => b.addEventListener('click', () => this.setClearOtherInk(b.dataset.otherInk === 'clear')));
+        this.setClearOtherInk(loadSetting('motd-editor.clearOtherInk') === 'true', false);
+    }
+
+    setClearOtherInk(on, save = true) {
+        this.renderer.clearOtherInk = on;
+        document.querySelectorAll('[data-other-ink]').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.otherInk === 'clear') === on)));
+        if (save) saveSetting('motd-editor.clearOtherInk', on);
     }
 
     setBlockRows(rows, save = true) {
@@ -545,6 +560,7 @@ class Toolbar {
         const r = this.renderer;
         const shown = { brush: !r.brushCell, fill: true, shape: r.boxLineStyle === SUBPIXEL_STYLE, selection: r.tool === 'select-subpixel', image: true };
         document.querySelectorAll('[data-pixels-in]').forEach(el => { el.hidden = !shown[el.dataset.pixelsIn]; });
+        document.querySelectorAll('[data-other-ink-in]').forEach(el => { el.hidden = !shown[el.dataset.otherInkIn]; });
     }
 
     // Switch to an editor tool ('draw', 'box', …) or a dock tool ('brush',
@@ -1147,6 +1163,8 @@ class Toolbar {
             ['Brush', 'Brush tip: subpixel', '', () => { this.setTool('brush'); document.querySelector('[data-brush="subpixel"]').click(); }],
             ['Brush', 'Brush tip: whole cell', '', () => { this.setTool('brush'); document.querySelector('[data-brush="cell"]').click(); }],
             ...Object.entries(BLOCK_MODES).map(([rows, name]) => ['Pixels', `Pixels: ${name} (2×${rows})`, '', () => this.setBlockRows(+rows)]),
+            ['Brush', 'Other ink: recolour', '', () => this.setClearOtherInk(false)],
+            ['Brush', 'Other ink: clear', '', () => this.setClearOtherInk(true)],
             ['File', 'New canvas', '', act('new')],
             ['File', 'Open…', '', act('open')],
             ['File', 'Save', '⌘S', act('save')],

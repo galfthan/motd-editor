@@ -149,6 +149,9 @@ class CanvasRenderer {
         // see setBlockRows): 2 quadrants, 3 sextants, 4 octants. Cells keep
         // their own until drawn on.
         this.blockRows = BLOCK_ROWS;
+        // Drawing in a cell whose lit subpixels have another ink colour
+        // clears them instead of recolouring them (see paintSubpixel)
+        this.clearOtherInk = false;
         this.subpixelCopy = null;           // { rows, data: 2D array of {filled, fg, bg} } (see subpixelClipboard)
 
         // Image being placed (see startImagePaste): { image, cols, rows,
@@ -2572,6 +2575,13 @@ class CanvasRenderer {
 
         this.beforeChange(cellX, cellY, cellX, cellY);
         if (filled) {
+            // clearOtherInk: lit subpixels of another ink colour are cleared
+            // rather than recoloured (a clean line over a photo)
+            const ink = this.inkColor();
+            if (this.clearOtherInk && cell.type === 'block' && !ink.keep &&
+                !colorsEqual(cell.inverse ? cell.bg : cell.fg, ink)) {
+                cell.subpixels = patternToSubpixels(0, BLOCK_ROWS);
+            }
             this.applyCurrentColors(cell);
         } else {
             // Erased, the cell shows plainly (an inverse blank would be a block)

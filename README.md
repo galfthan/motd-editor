@@ -19,7 +19,9 @@ npx serve web
 - Subpixel editing in quadrant (2x2), sextant (2x3) or octant (2x4) cells,
   chosen with Pixels in the subpixel tools' panels; cells drawn at another
   resolution are converted (best effort). Octants are Unicode 16, so older
-  terminal fonts can't show them
+  terminal fonts can't show them. A cell has one ink colour: drawing in it
+  recolours its lit subpixels, or with Other ink: Clear clears those of
+  another colour (with paper keep, clean lines over a picture)
 - Extended diagonal and triangle characters (U+1FB3C-1FB6F), blocks, shades
   and emoji, searchable by name
 - Box and line drawing with light/heavy/double/rounded borders, or with subpixels
