@@ -29,7 +29,7 @@ type pixels struct {
 
 // Subpixel drawing over cells lit in another ink colour
 type otherInk struct {
-	ClearOtherInk bool `json:"clear_other_ink,omitempty" jsonschema:"drawing in a cell whose lit subpixels have another ink colour clears them instead of giving them fg: only what you draw is lit, the rest shows the cell's paper (with bg keep, clean lines over an imported picture)"`
+	ClearOtherInk bool `json:"clear_other_ink,omitempty" jsonschema:"drawing in a cell whose lit subpixels have another ink colour clears them instead of giving them fg: only what you draw is lit, the rest shows the cell's paper (with bg keep, clean lines over an imported picture). draw_box and draw_line: only with style subpixel"`
 }
 
 // Characters' text style (subpixel drawing is always plain)

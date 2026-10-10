@@ -741,6 +741,7 @@ class Toolbar {
     // The selected colour in the hex field (empty for Terminal and Keep)
     showHex() {
         const hex = document.getElementById('hex-input');
+        if (document.activeElement === hex) return;   // being typed in
         const c = this.colorTarget === 'bg' ? this.renderer.bgColor : this.renderer.fgColor;
         hex.value = c.keep || c.default ? '' : toHex(c);
         hex.placeholder = c.keep ? 'Keep' : c.default ? 'Terminal' : '#rrggbb';
@@ -884,7 +885,7 @@ class Toolbar {
     setupStyle() {
         document.querySelectorAll('[data-style-toggle]').forEach(btn => btn.addEventListener('click', () => {
             const r = this.renderer;
-            if (btn.dataset.styleToggle === 'bold') this.setStyle(!r.bold, r.inverse);
+            if (btn.dataset.styleToggle === 'bold') this.setStyle(!r.bold, this.wantInverse);
             else this.setStyle(r.bold, !r.inverse);
         }));
     }
@@ -892,19 +893,26 @@ class Toolbar {
     // Make bold / inverse the style drawn characters get, and show it
     setStyle(bold, inverse) {
         this.renderer.bold = bold;
-        this.renderer.inverse = inverse;
+        this.wantInverse = inverse;
         this.showStyle();
     }
 
     // Bold and inverse are for characters: shown with the Text and Glyph
     // tools and character boxes and lines. Inverse only does something with
-    // a Terminal (or keep) colour: with two exact ones it's a swap.
-    showStyle() {
+    // a Terminal (or keep) colour, as the view draws them: with two exact
+    // ones it's a swap. It is off while it can't apply, and back after.
+    styleState() {
         const r = this.renderer;
         const exact = (c) => !c.default && !c.keep;
-        const canInvert = !(exact(r.fgColor) && exact(r.bgColor));
-        if (!canInvert) r.inverse = false;
-        const chars = !r.imagePaste && (['text', 'char'].includes(r.tool) || (['box', 'line'].includes(r.tool) && r.boxLineStyle !== SUBPIXEL_STYLE));
+        return {
+            chars: !r.imagePaste && (['text', 'char'].includes(r.tool) || (['box', 'line'].includes(r.tool) && r.boxLineStyle !== SUBPIXEL_STYLE)),
+            canInvert: !(exact(r.inkColor()) && exact(r.paperColor()))
+        };
+    }
+
+    showStyle() {
+        const r = this.renderer, { chars, canInvert } = this.styleState();
+        r.inverse = !!this.wantInverse && canInvert;
         document.querySelector('.style-toggles').hidden = !chars;
         document.querySelector('[data-style-toggle="bold"]').setAttribute('aria-pressed', String(r.bold));
         const inverse = document.querySelector('[data-style-toggle="inverse"]');
@@ -1189,7 +1197,7 @@ class Toolbar {
     commands() {
         const act = (action) => () => this.handleAction(action);
         const tool = (t) => () => this.setTool(t);
-        const r = this.renderer;
+        const r = this.renderer, style = this.styleState();
         const cmds = [
             ['Tools', 'Brush', 'B', tool('draw')],
             ['Tools', 'Fill', 'F', tool('fill')],
@@ -1222,8 +1230,8 @@ class Toolbar {
             ['Shape', 'Subpixel box', '', () => { this.setTool('box'); document.querySelector('.tile[data-style="4"]').click(); }],
             ['Shape', 'Subpixel line', '', () => { this.setTool('line'); document.querySelector('.tile[data-style="4"]').click(); }],
             ['Colour', "Reset to the terminal's colours", '', act('default-colors')],
-            ['Style', r.bold ? 'Bold off' : 'Bold on', '', () => this.setStyle(!r.bold, r.inverse)],
-            ['Style', r.inverse ? 'Inverse off' : 'Inverse on', '', () => this.setStyle(r.bold, !r.inverse)],
+            ...(style.chars ? [['Style', r.bold ? 'Bold off' : 'Bold on', '', () => this.setStyle(!r.bold, this.wantInverse)]] : []),
+            ...(style.chars && style.canInvert ? [['Style', r.inverse ? 'Inverse off' : 'Inverse on', '', () => this.setStyle(r.bold, !r.inverse)]] : []),
             ['View', 'See and edit only the ink', '', () => this.setView('ink')],
             ['View', 'See and edit only the paper', '', () => this.setView('paper')],
             ['View', 'See and edit ink and paper', '', () => this.setView('both')],
