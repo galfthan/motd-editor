@@ -644,12 +644,15 @@ class Toolbar {
                 case 'place': r.placeImage(); break;
                 case 'cancel': r.endImagePaste(); break;
                 case 'reset-tone': set({ brightness: 0, contrast: 0, midtones: 0, invert: false }); break;
+                case 'crop': r.setImageCropping(!p.cropping); break;
+                case 'reset-crop': r.resetImageCrop(); break;
                 case 'fit-canvas':
                 case 'fit-selection': {
                     const a = btn.dataset.imageAction === 'fit-selection' && r.selection ||
                         { x1: 0, y1: 0, x2: r.canvas.width - 1, y2: r.canvas.height - 1 };
-                    const cols = fitImageCols(p.image, r.cellAspect, a.x2 - a.x1 + 1, a.y2 - a.y1 + 1);
-                    r.setImageOptions({ cols, rows: imageRows(p.image, cols, r.cellAspect), locked: true });
+                    const size = croppedSize(p.image, p.crop);
+                    const cols = fitImageCols(size, r.cellAspect, a.x2 - a.x1 + 1, a.y2 - a.y1 + 1);
+                    r.setImageOptions({ cols, rows: imageRows(size, cols, r.cellAspect), locked: true });
                     r.moveImageTo({ x: a.x1, y: a.y1 });
                     break;
                 }
@@ -697,6 +700,9 @@ class Toolbar {
         });
         document.getElementById('image-invert').checked = p.invert;
         document.querySelector('[data-image-action="fit-selection"]').disabled = !this.renderer.selection;
+        document.querySelector('[data-image-action="crop"]').setAttribute('aria-pressed', String(p.cropping));
+        const c = p.crop;
+        document.querySelector('[data-image-action="reset-crop"]').disabled = c.x1 === 0 && c.y1 === 0 && c.x2 === 1 && c.y2 === 1;
     }
 
     // --- Colours ---

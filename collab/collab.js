@@ -513,10 +513,18 @@ const OPS = {
         const x = a.x ?? 0, y = a.y ?? 0;
         checkCell(x, y);
         if (a.width < 0 || a.height < 0) throw new Error('width and height must be positive');
+        // The part of it to use, in image pixels, as fractions of it
+        const cx = a.crop_x ?? 0, cy = a.crop_y ?? 0;
+        const cw = a.crop_width || image.width - cx, ch = a.crop_height || image.height - cy;
+        if (!(cx >= 0 && cy >= 0 && cw > 0 && ch > 0 && cx + cw <= image.width && cy + ch <= image.height)) {
+            throw new Error(`the crop must be within the image, which is ${image.width}x${image.height} pixels`);
+        }
+        const crop = { x1: cx / image.width, y1: cy / image.height, x2: (cx + cw) / image.width, y2: (cy + ch) / image.height };
+        const size = croppedSize(image, crop);
         let cols = a.width, rows = a.height;
-        if (!cols && !rows) cols = fitImageCols(image, r.cellAspect, r.canvas.width - x, r.canvas.height - y);
-        cols ||= Math.max(1, Math.round(rows * image.width / (image.height * r.cellAspect)));
-        rows ||= imageRows(image, cols, r.cellAspect);
+        if (!cols && !rows) cols = fitImageCols(size, r.cellAspect, r.canvas.width - x, r.canvas.height - y);
+        cols ||= Math.max(1, Math.round(rows * size.width / (size.height * r.cellAspect)));
+        rows ||= imageRows(size, cols, r.cellAspect);
         if (cols > 500 || rows > 200) throw new Error('the image can be at most 500x200 cells');
         const tone = {};
         for (const name of ['brightness', 'contrast', 'midtones']) {
@@ -532,11 +540,11 @@ const OPS = {
         const cells = imageToCells(image, cols, rows, {
             mono: a.mono || edit === 'ink', paperOnly: edit === 'paper',
             fg: parseColor(a.fg, defaultFG), bg: edit === 'ink' ? keepColor('bg') : parseColor(a.bg, defaultBG),
-            strength: strength / 100, blockRows: BLOCK_ROWS, invert: !!a.invert, ...tone
+            strength: strength / 100, blockRows: BLOCK_ROWS, crop, invert: !!a.invert, ...tone
         });
         withState({ clipboard: cells, pasteMode: false }, () => r.pasteAt(x, y));
         flash({ x1: x, y1: y, x2: x + cols - 1, y2: y + rows - 1 });
-        return `placed the image as ${cols}x${rows} cells at (${x}, ${y})`;
+        return `placed the image (${image.width}x${image.height} pixels${cw < image.width || ch < image.height ? `, cropped to ${cw}x${ch} at (${cx}, ${cy})` : ''}) as ${cols}x${rows} cells at (${x}, ${y})`;
     },
 
     export(a) {
