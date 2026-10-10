@@ -899,8 +899,9 @@ class Toolbar {
 
     // Bold is for characters: shown with the Text and Glyph tools and
     // character boxes and lines. Inverse also with subpixel drawing (Paint,
-    // subpixel boxes and lines). It only does something with a Terminal (or
-    // keep) colour, as the view draws them: with two exact ones it's a swap.
+    // subpixel boxes and lines; in the Both view, as it puts the ink where
+    // the paper shows). It only does something with a Terminal (or keep)
+    // colour, as the view draws them: with two exact ones it's a swap.
     // It is off while it can't apply, and back after.
     styleState() {
         const r = this.renderer;
@@ -908,7 +909,8 @@ class Toolbar {
         const shape = ['box', 'line'].includes(r.tool);
         const chars = !r.imagePaste && (['text', 'char'].includes(r.tool) || (shape && r.boxLineStyle !== SUBPIXEL_STYLE));
         const blocks = !r.imagePaste && (r.tool === 'draw' || (shape && r.boxLineStyle === SUBPIXEL_STYLE));
-        return { chars, blocks, canInvert: !(exact(r.inkColor()) && exact(r.paperColor())) };
+        const canInvert = !(exact(r.inkColor()) && exact(r.paperColor())) && (chars || r.view === 'both');
+        return { chars, blocks, canInvert };
     }
 
     showStyle() {

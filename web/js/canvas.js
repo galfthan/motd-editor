@@ -632,16 +632,22 @@ class CanvasRenderer {
 
     // Give a cell the currently picked colours (but not "keep" ones) and
     // text style (not in the paper view). `style`: 'text' (bold and
-    // inverse), 'block' (inverse only: bold is for characters), 'plain' or
-    // null (left as it is).
+    // inverse), 'block' (inverse only, see blockInverse: bold is for
+    // characters), 'plain' or null (left as it is).
     applyCurrentColors(cell, style = 'text') {
         const ink = this.inkColor(), paper = this.paperColor();
         if (!ink.keep) cell.fg = { ...ink };
         if (!paper.keep) cell.bg = { ...paper };
         if (style !== null && this.editView() !== 'paper') {
             cell.bold = style === 'text' && this.bold;
-            cell.inverse = style !== 'plain' && this.inverse;
+            cell.inverse = style === 'text' ? this.inverse : style === 'block' && this.blockInverse();
         }
+    }
+
+    // Whether subpixel drawing is inverse: it puts the ink where the paper
+    // shows, so the Both view only
+    blockInverse() {
+        return this.inverse && this.editView() === 'both';
     }
 
     // Show and edit only the ink, only the paper, or both (see this.view)
@@ -2577,7 +2583,7 @@ class CanvasRenderer {
 
         // Nothing to do if the subpixel and the colours it sets already match
         const paper = this.paperColor();
-        const inverse = filled && this.inverse;
+        const inverse = filled && this.blockInverse();
         if (cell.type === 'block' && cellSubpixelAt(cell, row, col, BLOCK_ROWS) === filled && colorKeeps(cell.bg, paper) &&
             (!filled || colorKeeps(cell.fg, this.inkColor())) && !cell.bold && !!cell.inverse === inverse) {
             return null;
