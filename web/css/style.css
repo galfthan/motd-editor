@@ -703,7 +703,8 @@ kbd {
     font-size: 12px;
 }
 
-.segmented[hidden] { display: none; }
+.segmented[hidden],
+.segmented > button[hidden] { display: none; }
 .segmented button:disabled { opacity: 0.4; cursor: default; }
 
 /* Exact colour for the selected target */
