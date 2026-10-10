@@ -631,17 +631,24 @@ class CanvasRenderer {
     }
 
     // Give a cell the currently picked colours (but not "keep" ones) and
-    // text style (not in the paper view). Subpixel drawing (textStyle false)
-    // draws plain: bold and inverse are for characters; null leaves the
-    // style as it is.
-    applyCurrentColors(cell, textStyle = true) {
+    // text style (not in the paper view). `style`: 'text' (bold and
+    // inverse: bold only shows in text), 'char' (inverse: glyphs, box
+    // drawing), 'block' (inverse, see blockInverse), 'plain' or null (left
+    // as it is).
+    applyCurrentColors(cell, style = 'text') {
         const ink = this.inkColor(), paper = this.paperColor();
         if (!ink.keep) cell.fg = { ...ink };
         if (!paper.keep) cell.bg = { ...paper };
-        if (textStyle !== null && this.editView() !== 'paper') {
-            cell.bold = textStyle && this.bold;
-            cell.inverse = textStyle && this.inverse;
+        if (style !== null && this.editView() !== 'paper') {
+            cell.bold = style === 'text' && this.bold;
+            cell.inverse = style === 'text' || style === 'char' ? this.inverse : style === 'block' && this.blockInverse();
         }
+    }
+
+    // Whether subpixel drawing is inverse: it puts the ink where the paper
+    // shows, so the Both view only
+    blockInverse() {
+        return this.inverse && this.editView() === 'both';
     }
 
     // Show and edit only the ink, only the paper, or both (see this.view)
@@ -2577,27 +2584,29 @@ class CanvasRenderer {
 
         // Nothing to do if the subpixel and the colours it sets already match
         const paper = this.paperColor();
+        const inverse = filled && this.blockInverse();
         if (cell.type === 'block' && cellSubpixelAt(cell, row, col, BLOCK_ROWS) === filled && colorKeeps(cell.bg, paper) &&
-            (!filled || colorKeeps(cell.fg, this.inkColor())) && !cell.bold && !cell.inverse) {
+            (!filled || colorKeeps(cell.fg, this.inkColor())) && !cell.bold && !!cell.inverse === inverse) {
             return null;
         }
 
         this.beforeChange(cellX, cellY, cellX, cellY);
-        // Subpixel cells are plain: an inverse one first gets the colours it
-        // shows (with two terminal colours its inversion is lost)
-        if (cell.type === 'block' && cell.inverse) {
+        // A block cell drawn with the other inverse first swaps its colours,
+        // so it looks the same (with two terminal colours its inversion is
+        // lost: they are the same colour either way round)
+        if (cell.type === 'block' && !!cell.inverse !== inverse) {
             [cell.fg, cell.bg] = [cell.bg, cell.fg];
-            cell.inverse = false;
+            cell.inverse = inverse;
         }
         if (filled) {
-            // clearOtherInk: lit subpixels of another ink colour are cleared
+            // clearOtherInk: lit subpixels showing another colour are cleared
             // rather than recoloured (a clean line over a photo)
-            const ink = this.inkColor();
+            const ink = inverse ? this.paperColor() : this.inkColor();
             if (this.clearOtherInk && cell.type === 'block' && !ink.keep &&
-                !colorsEqual(cell.fg, ink)) {
+                !colorsEqual(inverse ? cell.bg : cell.fg, ink)) {
                 cell.subpixels = patternToSubpixels(0, BLOCK_ROWS);
             }
-            this.applyCurrentColors(cell, false);
+            this.applyCurrentColors(cell, 'block');
         } else {
             // Erased, the cell shows plainly (an inverse blank would be a block)
             if (!paper.keep) cell.bg = { ...paper };
@@ -2627,7 +2636,7 @@ class CanvasRenderer {
         }
 
         this.beforeChange(cellX, cellY, cellX + 1, cellY);
-        this.applyCurrentColors(row[cellX]);
+        this.applyCurrentColors(row[cellX], 'char');
         setGridChar(this.canvas.cells, cellX, cellY, this.selectedChar);
         this.updateCell(cellX, cellY);
     }
@@ -2738,7 +2747,7 @@ class CanvasRenderer {
                 for (let y = inside.y1; y <= inside.y2; y++) {
                     for (let x = inside.x1; x <= inside.x2; x++) {
                         const cell = this.canvas.cells[y][x];
-                        this.applyCurrentColors(cell, cell.type === 'block' ? false : null);
+                        this.applyCurrentColors(cell, cell.type === 'block' ? 'block' : null);
                     }
                 }
                 this.updateCellRect(inside.x1, inside.y1, inside.x2, inside.y2);
@@ -3031,7 +3040,7 @@ class CanvasRenderer {
                         detachWide(this.canvas.cells, x, y);
                         clearCell(cell);
                     }
-                    this.applyCurrentColors(cell, cell.type !== 'block');
+                    this.applyCurrentColors(cell, cell.type === 'block' ? 'block' : 'char');
                 }
             }
         }
@@ -3041,7 +3050,7 @@ class CanvasRenderer {
         if (rounded) chars = roundCorners(chars);
         for (const c of chars) {
             this.beforeChange(c.x, c.y, c.x, c.y);
-            this.applyCurrentColors(this.canvas.cells[c.y][c.x]);
+            this.applyCurrentColors(this.canvas.cells[c.y][c.x], 'char');
             setGridChar(this.canvas.cells, c.x, c.y, c.charCode);
         }
 
@@ -3081,7 +3090,7 @@ class CanvasRenderer {
         if (rounded) chars = roundCorners(chars);   // a line's knees
         for (const c of chars) {
             this.beforeChange(c.x, c.y, c.x, c.y);
-            this.applyCurrentColors(this.canvas.cells[c.y][c.x]);
+            this.applyCurrentColors(this.canvas.cells[c.y][c.x], 'char');
             setGridChar(this.canvas.cells, c.x, c.y, c.charCode);
             this.updateCell(c.x, c.y);
         }

@@ -33,8 +33,8 @@ npx serve web
   both colours, solid up to lines of other colours
 - Ink (foreground) and paper (background) colours, the 16 terminal colours,
   the terminal's own, an exact #rrggbb, or keep (leave each cell's colour as
-  it is); bold and inverse for characters (inverse swaps the terminal's own
-  colours, so it needs one of them)
+  it is); bold for text, inverse for characters and subpixels (it swaps
+  the terminal's own colours, so it needs one of them)
 - Autosave: the canvas is kept in the browser and comes back when you reopen
   the editor (Export saves a file). Tabs of the same editor share it: the
   last one changed wins
