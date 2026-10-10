@@ -149,6 +149,9 @@ class CanvasRenderer {
         // see setBlockRows): 2 quadrants, 3 sextants, 4 octants. Cells keep
         // their own until drawn on.
         this.blockRows = BLOCK_ROWS;
+        // Drawing in a cell whose lit subpixels have another ink colour
+        // clears them instead of recolouring them (see paintSubpixel)
+        this.clearOtherInk = false;
         this.subpixelCopy = null;           // { rows, data: 2D array of {filled, fg, bg} } (see subpixelClipboard)
 
         // Image being placed (see startImagePaste): { image, cols, rows,
@@ -628,14 +631,16 @@ class CanvasRenderer {
     }
 
     // Give a cell the currently picked colours (but not "keep" ones) and
-    // text style (not in the paper view)
-    applyCurrentColors(cell) {
+    // text style (not in the paper view). Subpixel drawing (textStyle false)
+    // draws plain: bold and inverse are for characters; null leaves the
+    // style as it is.
+    applyCurrentColors(cell, textStyle = true) {
         const ink = this.inkColor(), paper = this.paperColor();
         if (!ink.keep) cell.fg = { ...ink };
         if (!paper.keep) cell.bg = { ...paper };
-        if (this.editView() !== 'paper') {
-            cell.bold = this.bold;
-            cell.inverse = this.inverse;
+        if (textStyle !== null && this.editView() !== 'paper') {
+            cell.bold = textStyle && this.bold;
+            cell.inverse = textStyle && this.inverse;
         }
     }
 
@@ -1515,10 +1520,18 @@ class CanvasRenderer {
         const cell = row[c.cellX].type === 'wide-tail' ? row[c.cellX - 1] : row[c.cellX];
 
         if (this.toolbar) {
-            // Only the colour the view shows
+            // An inverse cell with two exact colours: the colours it shows
+            // (inverse only does something with the terminal's own)
+            let { fg, bg } = cell, inverse = !!cell.inverse;
+            if (inverse && !fg.default && !bg.default) {
+                [fg, bg] = [bg, fg];
+                inverse = false;
+            }
+            // Only the colour the view shows (colours first: they decide
+            // whether inverse is possible)
             const view = this.editView();
-            if (view !== 'paper') this.toolbar.setStyle(!!cell.bold, !!cell.inverse);
-            this.toolbar.setColors(view === 'paper' ? this.fgColor : cell.fg, view === 'ink' ? this.bgColor : cell.bg);
+            this.toolbar.setColors(view === 'paper' ? this.fgColor : fg, view === 'ink' ? this.bgColor : bg);
+            if (view !== 'paper') this.toolbar.setStyle(!!cell.bold, inverse);
         }
     }
 
@@ -2565,14 +2578,26 @@ class CanvasRenderer {
         // Nothing to do if the subpixel and the colours it sets already match
         const paper = this.paperColor();
         if (cell.type === 'block' && cellSubpixelAt(cell, row, col, BLOCK_ROWS) === filled && colorKeeps(cell.bg, paper) &&
-            (filled ? colorKeeps(cell.fg, this.inkColor()) && !!cell.bold === this.bold && !!cell.inverse === this.inverse
-                : !cell.bold && !cell.inverse)) {
+            (!filled || colorKeeps(cell.fg, this.inkColor())) && !cell.bold && !cell.inverse) {
             return null;
         }
 
         this.beforeChange(cellX, cellY, cellX, cellY);
+        // Subpixel cells are plain: an inverse one first gets the colours it
+        // shows (with two terminal colours its inversion is lost)
+        if (cell.type === 'block' && cell.inverse) {
+            [cell.fg, cell.bg] = [cell.bg, cell.fg];
+            cell.inverse = false;
+        }
         if (filled) {
-            this.applyCurrentColors(cell);
+            // clearOtherInk: lit subpixels of another ink colour are cleared
+            // rather than recoloured (a clean line over a photo)
+            const ink = this.inkColor();
+            if (this.clearOtherInk && cell.type === 'block' && !ink.keep &&
+                !colorsEqual(cell.fg, ink)) {
+                cell.subpixels = patternToSubpixels(0, BLOCK_ROWS);
+            }
+            this.applyCurrentColors(cell, false);
         } else {
             // Erased, the cell shows plainly (an inverse blank would be a block)
             if (!paper.keep) cell.bg = { ...paper };
@@ -2711,7 +2736,10 @@ class CanvasRenderer {
             if (inside) {
                 this.beforeChange(inside.x1, inside.y1, inside.x2, inside.y2);
                 for (let y = inside.y1; y <= inside.y2; y++) {
-                    for (let x = inside.x1; x <= inside.x2; x++) this.applyCurrentColors(this.canvas.cells[y][x]);
+                    for (let x = inside.x1; x <= inside.x2; x++) {
+                        const cell = this.canvas.cells[y][x];
+                        this.applyCurrentColors(cell, cell.type === 'block' ? false : null);
+                    }
                 }
                 this.updateCellRect(inside.x1, inside.y1, inside.x2, inside.y2);
             }
@@ -3003,7 +3031,7 @@ class CanvasRenderer {
                         detachWide(this.canvas.cells, x, y);
                         clearCell(cell);
                     }
-                    this.applyCurrentColors(cell);
+                    this.applyCurrentColors(cell, cell.type !== 'block');
                 }
             }
         }

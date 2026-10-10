@@ -57,7 +57,7 @@ function withState(state, fn) {
 
 // The colours and text style an operation draws with
 function colorState(a) {
-    return { fgColor: parseColor(a.fg, defaultFG), bgColor: parseColor(a.bg, defaultBG), bold: !!a.bold, inverse: !!a.inverse };
+    return { fgColor: parseColor(a.fg, defaultFG), bgColor: parseColor(a.bg, defaultBG), bold: !!a.bold, inverse: !!a.inverse, clearOtherInk: !!a.clear_other_ink };
 }
 
 // x, y, width, height (all optional) clipped to the canvas

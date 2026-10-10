@@ -530,6 +530,21 @@ class Toolbar {
         document.querySelectorAll('[data-pixels]').forEach(b => b.addEventListener('click', () => this.setBlockRows(+b.dataset.pixels)));
         const saved = loadSetting('motd-editor.pixels');
         this.setBlockRows(saved in BLOCK_MODES ? +saved : 3, false);
+
+        // What drawing does to a cell's lit subpixels of another ink colour
+        document.querySelectorAll('[data-other-ink-in]').forEach(row => {
+            row.innerHTML = '<span class="label">Other ink</span><div class="segmented wide" role="group" aria-label="Lit subpixels of another ink colour">' +
+                '<button data-other-ink="recolor" title="Drawing in a cell gives its lit subpixels your ink colour too">Recolour</button>' +
+                '<button data-other-ink="clear" title="Drawing in a cell whose lit subpixels have another ink colour clears them: only what you draw is lit, the rest shows the cell\'s paper. With paper keep, for clean lines over a picture">Clear</button></div>';
+        });
+        document.querySelectorAll('[data-other-ink]').forEach(b => b.addEventListener('click', () => this.setClearOtherInk(b.dataset.otherInk === 'clear')));
+        this.setClearOtherInk(loadSetting('motd-editor.clearOtherInk') === 'true', false);
+    }
+
+    setClearOtherInk(on, save = true) {
+        this.renderer.clearOtherInk = on;
+        document.querySelectorAll('[data-other-ink]').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.otherInk === 'clear') === on)));
+        if (save) saveSetting('motd-editor.clearOtherInk', on);
     }
 
     setBlockRows(rows, save = true) {
@@ -545,6 +560,8 @@ class Toolbar {
         const r = this.renderer;
         const shown = { brush: !r.brushCell, fill: true, shape: r.boxLineStyle === SUBPIXEL_STYLE, selection: r.tool === 'select-subpixel', image: true };
         document.querySelectorAll('[data-pixels-in]').forEach(el => { el.hidden = !shown[el.dataset.pixelsIn]; });
+        document.querySelectorAll('[data-other-ink-in]').forEach(el => { el.hidden = !shown[el.dataset.otherInkIn]; });
+        this.showStyle();
     }
 
     // Switch to an editor tool ('draw', 'box', …) or a dock tool ('brush',
@@ -592,6 +609,7 @@ class Toolbar {
         const key = document.getElementById('tool-key');
         key.textContent = image || pasting ? '' : GROUP_INFO[panel].key;
         key.hidden = image || pasting;
+        this.showStyle();
         const note = document.getElementById('view-note');
         note.textContent = this.viewNote();
         note.hidden = !note.textContent;
@@ -704,13 +722,37 @@ class Toolbar {
             input.addEventListener('click', () => this.setColorTarget(which));
             document.querySelector(`[data-target-pick="${which}"]`).addEventListener('click', () => this.setColorTarget(which));
         }
+        // Exact colour for the selected target: #rrggbb (or rrggbb, #rgb)
+        const hex = document.getElementById('hex-input');
+        hex.addEventListener('change', () => {
+            const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(hex.value.trim());
+            hex.classList.toggle('invalid', !m);
+            if (!m) return;
+            const h = m[1].length === 3 ? [...m[1]].map(c => c + c).join('') : m[1];
+            this.setColor(this.colorTarget, { ...hexToRgb('#' + h.toLowerCase()), default: false });
+        });
+        hex.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') hex.blur();
+            if (e.key === 'Escape') { this.showHex(); hex.blur(); }
+        });
         this.setColors(this.renderer.fgColor, this.renderer.bgColor);
+    }
+
+    // The selected colour in the hex field (empty for Terminal and Keep)
+    showHex() {
+        const hex = document.getElementById('hex-input');
+        if (document.activeElement === hex) return;   // being typed in
+        const c = this.colorTarget === 'bg' ? this.renderer.bgColor : this.renderer.fgColor;
+        hex.value = c.keep || c.default ? '' : toHex(c);
+        hex.placeholder = c.keep ? 'Keep' : c.default ? 'Terminal' : '#rrggbb';
+        hex.classList.remove('invalid');
     }
 
     // Which colour the palette sets: 'fg' (ink) or 'bg' (paper)
     setColorTarget(which) {
         this.colorTarget = which;
         document.querySelectorAll('[data-target-pick]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.targetPick === which)));
+        this.showHex();
     }
 
     // Make `color` the current fg/bg colour and show it
@@ -730,6 +772,8 @@ class Toolbar {
         chip.classList.toggle('keep', !!color.keep);
         chip.classList.toggle('default', color.default && !color.keep);
         chip.style.background = color.default ? '' : toHex(color);
+        this.showHex();
+        this.showStyle();
     }
 
     // Set both colours (the pick tool, swap, reset); a pick made with the
@@ -841,17 +885,39 @@ class Toolbar {
     setupStyle() {
         document.querySelectorAll('[data-style-toggle]').forEach(btn => btn.addEventListener('click', () => {
             const r = this.renderer;
-            if (btn.dataset.styleToggle === 'bold') this.setStyle(!r.bold, r.inverse);
+            if (btn.dataset.styleToggle === 'bold') this.setStyle(!r.bold, this.wantInverse);
             else this.setStyle(r.bold, !r.inverse);
         }));
     }
 
-    // Make bold / inverse the style drawn cells get, and show it
+    // Make bold / inverse the style drawn characters get, and show it
     setStyle(bold, inverse) {
         this.renderer.bold = bold;
-        this.renderer.inverse = inverse;
-        document.querySelector('[data-style-toggle="bold"]').setAttribute('aria-pressed', String(bold));
-        document.querySelector('[data-style-toggle="inverse"]').setAttribute('aria-pressed', String(inverse));
+        this.wantInverse = inverse;
+        this.showStyle();
+    }
+
+    // Bold and inverse are for characters: shown with the Text and Glyph
+    // tools and character boxes and lines. Inverse only does something with
+    // a Terminal (or keep) colour, as the view draws them: with two exact
+    // ones it's a swap. It is off while it can't apply, and back after.
+    styleState() {
+        const r = this.renderer;
+        const exact = (c) => !c.default && !c.keep;
+        return {
+            chars: !r.imagePaste && (['text', 'char'].includes(r.tool) || (['box', 'line'].includes(r.tool) && r.boxLineStyle !== SUBPIXEL_STYLE)),
+            canInvert: !(exact(r.inkColor()) && exact(r.paperColor()))
+        };
+    }
+
+    showStyle() {
+        const r = this.renderer, { chars, canInvert } = this.styleState();
+        r.inverse = !!this.wantInverse && canInvert;
+        document.querySelector('.style-toggles').hidden = !chars;
+        document.querySelector('[data-style-toggle="bold"]').setAttribute('aria-pressed', String(r.bold));
+        const inverse = document.querySelector('[data-style-toggle="inverse"]');
+        inverse.setAttribute('aria-pressed', String(r.inverse));
+        inverse.disabled = !canInvert;
     }
 
     // --- Autosave: the canvas is kept in this browser (as ANSI text, with
@@ -1131,7 +1197,7 @@ class Toolbar {
     commands() {
         const act = (action) => () => this.handleAction(action);
         const tool = (t) => () => this.setTool(t);
-        const r = this.renderer;
+        const r = this.renderer, style = this.styleState();
         const cmds = [
             ['Tools', 'Brush', 'B', tool('draw')],
             ['Tools', 'Fill', 'F', tool('fill')],
@@ -1147,6 +1213,8 @@ class Toolbar {
             ['Brush', 'Brush tip: subpixel', '', () => { this.setTool('brush'); document.querySelector('[data-brush="subpixel"]').click(); }],
             ['Brush', 'Brush tip: whole cell', '', () => { this.setTool('brush'); document.querySelector('[data-brush="cell"]').click(); }],
             ...Object.entries(BLOCK_MODES).map(([rows, name]) => ['Pixels', `Pixels: ${name} (2×${rows})`, '', () => this.setBlockRows(+rows)]),
+            ['Brush', 'Other ink: recolour', '', () => this.setClearOtherInk(false)],
+            ['Brush', 'Other ink: clear', '', () => this.setClearOtherInk(true)],
             ['File', 'New canvas', '', act('new')],
             ['File', 'Open…', '', act('open')],
             ['File', 'Save', '⌘S', act('save')],
@@ -1162,8 +1230,8 @@ class Toolbar {
             ['Shape', 'Subpixel box', '', () => { this.setTool('box'); document.querySelector('.tile[data-style="4"]').click(); }],
             ['Shape', 'Subpixel line', '', () => { this.setTool('line'); document.querySelector('.tile[data-style="4"]').click(); }],
             ['Colour', "Reset to the terminal's colours", '', act('default-colors')],
-            ['Style', r.bold ? 'Bold off' : 'Bold on', '', () => this.setStyle(!r.bold, r.inverse)],
-            ['Style', r.inverse ? 'Inverse off' : 'Inverse on', '', () => this.setStyle(r.bold, !r.inverse)],
+            ...(style.chars ? [['Style', r.bold ? 'Bold off' : 'Bold on', '', () => this.setStyle(!r.bold, this.wantInverse)]] : []),
+            ...(style.chars && style.canInvert ? [['Style', r.inverse ? 'Inverse off' : 'Inverse on', '', () => this.setStyle(r.bold, !r.inverse)]] : []),
             ['View', 'See and edit only the ink', '', () => this.setView('ink')],
             ['View', 'See and edit only the paper', '', () => this.setView('paper')],
             ['View', 'See and edit ink and paper', '', () => this.setView('both')],

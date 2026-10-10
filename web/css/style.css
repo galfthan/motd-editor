@@ -703,6 +703,34 @@ kbd {
     font-size: 12px;
 }
 
+.segmented[hidden] { display: none; }
+.segmented button:disabled { opacity: 0.4; cursor: default; }
+
+/* Exact colour for the selected target */
+.hex-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.hex-field input {
+    flex: 1;
+    min-width: 0;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--line-strong);
+    border-radius: 7px;
+    background: #17181b;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+}
+
+.hex-field input:focus { outline: none; border-color: var(--accent); }
+.hex-field input.invalid { border-color: var(--danger, #f44336); }
+
 .palette {
     display: grid;
     grid-template-columns: repeat(9, minmax(0, 1fr));

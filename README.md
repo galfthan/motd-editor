@@ -19,7 +19,9 @@ npx serve web
 - Subpixel editing in quadrant (2x2), sextant (2x3) or octant (2x4) cells,
   chosen with Pixels in the subpixel tools' panels; cells drawn at another
   resolution are converted (best effort). Octants are Unicode 16, so older
-  terminal fonts can't show them
+  terminal fonts can't show them. A cell has one ink colour: drawing in it
+  recolours its lit subpixels, or with Other ink: Clear clears those of
+  another colour (with paper keep, clean lines over a picture)
 - Extended diagonal and triangle characters (U+1FB3C-1FB6F), blocks, shades
   and emoji, searchable by name
 - Box and line drawing with light/heavy/double/rounded borders, or with subpixels
@@ -30,8 +32,9 @@ npx serve web
   Paper floods the touching cells of the same paper, Both gives the area
   both colours, solid up to lines of other colours
 - Ink (foreground) and paper (background) colours, the 16 terminal colours,
-  the terminal's own, or keep (leave each cell's colour as it is); bold and
-  inverse text
+  the terminal's own, an exact #rrggbb, or keep (leave each cell's colour as
+  it is); bold and inverse for characters (inverse swaps the terminal's own
+  colours, so it needs one of them)
 - Autosave: the canvas is kept in the browser and comes back when you reopen
   the editor (Export saves a file). Tabs of the same editor share it: the
   last one changed wins

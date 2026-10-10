@@ -27,12 +27,21 @@ type pixels struct {
 	Pixels string `json:"pixels,omitempty" jsonschema:"subpixels per cell for subpixel coordinates and drawing: quadrant (2x2, subpixel row sy = 2*y + row), sextant (2x3, sy = 3*y + row) or octant (2x4, sy = 4*y + row; finest, but needs a terminal font with Unicode 16 octants). Default: the user's, get_state's user.pixels. Cells drawn on at another resolution are converted (best effort)"`
 }
 
+// Subpixel drawing over cells lit in another ink colour
+type otherInk struct {
+	ClearOtherInk bool `json:"clear_other_ink,omitempty" jsonschema:"drawing in a cell whose lit subpixels have another ink colour clears them instead of giving them fg: only what you draw is lit, the rest shows the cell's paper (with bg keep, clean lines over an imported picture). draw_box and draw_line: only with style subpixel"`
+}
+
+// Characters' text style (subpixel drawing is always plain)
+type textStyle struct {
+	Bold    bool `json:"bold,omitempty" jsonschema:"bold text; many terminals also show the 16 basic colours brighter when bold (characters drawn get it, or lose it when false; not with style subpixel)"`
+	Inverse bool `json:"inverse,omitempty" jsonschema:"swap fg and bg as the terminal shows them, so the terminal's own colours follow dark and light themes; only matters when fg or bg is default (with two exact colours it's the same as swapping them). Characters drawn get it, or lose it when false; not with style subpixel"`
+}
+
 type colors struct {
 	editing
-	Bold    bool   `json:"bold,omitempty" jsonschema:"bold text (cells drawn on get it, or lose it when false)"`
-	Inverse bool   `json:"inverse,omitempty" jsonschema:"fg and bg swapped as the terminal shows them, following the terminal's own colours where they are default (cells drawn on get it, or lose it when false)"`
-	FG      string `json:"fg,omitempty" jsonschema:"foreground colour: #rrggbb, default (the default) or keep (each cell keeps its own)"`
-	BG      string `json:"bg,omitempty" jsonschema:"background colour: #rrggbb, default (the default) or keep (each cell keeps its own). Cells drawn on get it even where they had a colour: use keep to leave a background as it is"`
+	FG string `json:"fg,omitempty" jsonschema:"foreground colour: #rrggbb, default (the default) or keep (each cell keeps its own)"`
+	BG string `json:"bg,omitempty" jsonschema:"background colour: #rrggbb, default (the default) or keep (each cell keeps its own). Cells drawn on get it even where they had a colour: use keep to leave a background as it is"`
 }
 
 type region struct {
@@ -74,6 +83,7 @@ type bitmapArgs struct {
 	SY   int      `json:"sy" jsonschema:"subpixel row of the bitmap's top edge"`
 	Rows []string `json:"rows" jsonschema:"one string per subpixel row: # sets a subpixel (giving its cell fg and bg), . clears it (giving its cell bg), a space leaves it unchanged"`
 	pixels
+	otherInk
 	colors
 }
 
@@ -81,6 +91,7 @@ type strokesArgs struct {
 	Strokes [][][]int `json:"strokes" jsonschema:"polylines of [sx, sy] subpixel points; consecutive points are joined by straight lines, a single point paints one subpixel"`
 	Erase   bool      `json:"erase,omitempty" jsonschema:"clear subpixels instead of setting them; the cells get bg as background, so erasing with the default bg removes a background colour"`
 	pixels
+	otherInk
 	colors
 }
 
@@ -90,6 +101,7 @@ type symbolsArgs struct {
 		Y    int    `json:"y"`
 		Char string `json:"char" jsonschema:"one character; wide ones (emoji, CJK) take this cell and the next"`
 	} `json:"items"`
+	textStyle
 	colors
 }
 
@@ -97,6 +109,7 @@ type textArgs struct {
 	X    int    `json:"x"`
 	Y    int    `json:"y"`
 	Text string `json:"text" jsonschema:"text to write from (x, y), which must be on the canvas; each line starts again at x on the next row; text past the right or bottom edge is left out (the reply says how much)"`
+	textStyle
 	colors
 }
 
@@ -105,6 +118,8 @@ type boxArgs struct {
 	Style string `json:"style,omitempty" jsonschema:"border: light (the default), heavy, double, rounded (light with rounded corners ╭╮╯╰), subpixel (drawn with subpixels; x1-y2 are then subpixel coordinates) or none"`
 	Fill  string `json:"fill,omitempty" jsonschema:"none (the default); fill: clear the inside and give it the colours (subpixel style: a solid rectangle of subpixels); recolor: only give the inside the colours. With style none they cover the whole rectangle, its edge cells included"`
 	pixels
+	otherInk
+	textStyle
 	colors
 }
 
@@ -113,6 +128,8 @@ type lineArgs struct {
 	Style string `json:"style,omitempty" jsonschema:"light (the default), heavy, double, rounded (light, knees rounded), or subpixel: a straight line of subpixels, with x1-y2 subpixel coordinates"`
 	Path  string `json:"path,omitempty" jsonschema:"with edit paper: s (the default; two knees) or straight (a direct line of cells from (x1, y1) to (x2, y2), at any angle)"`
 	pixels
+	otherInk
+	textStyle
 	colors
 }
 
