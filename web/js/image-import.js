@@ -110,6 +110,15 @@ function imagePalette(image) {
     return imagePalettes.get(image);
 }
 
+// All of an image (see imageToCells' crop)
+const FULL_CROP = Object.freeze({ x1: 0, y1: 0, x2: 1, y2: 1 });
+
+// An image's size in pixels with a crop: { width, height }, as imageRows
+// and fitImageCols take it
+function croppedSize(image, crop = FULL_CROP) {
+    return { width: image.width * (crop.x2 - crop.x1), height: image.height * (crop.y2 - crop.y1) };
+}
+
 // Rows for an image `cols` cells wide, keeping its proportions in cells of
 // the given aspect (width / height)
 function imageRows(image, cols, aspect) {
@@ -129,9 +138,10 @@ function fitImageCols(image, aspect, maxCols, maxRows) {
 // outlines keep subpixel detail.
 // Options: mono (only the colours fg and bg), paperOnly (each cell just its
 // paper, the mean colour of the image there), fg, bg, strength (0-1: how
-// much of the error is diffused; 0, none),
+// much of the error is diffused; 0, none), crop (the part of the image to
+// use, as fractions of it: { x1, y1, x2, y2 }),
 // blockRows (subpixel rows per cell) and the tone (see toneToLinear).
-function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, bg, strength = 1, blockRows: R = 3, ...tone } = {}) {
+function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, bg, strength = 1, crop = FULL_CROP, blockRows: R = 3, ...tone } = {}) {
     const W = cols * 2, H = rows * R, N = 2 * R;
     // Linear colour per subpixel (r, g, b interleaved); err: the error
     // diffused into it so far
@@ -142,10 +152,16 @@ function imageToCells(image, cols, rows, { mono = false, paperOnly = false, fg, 
     // their opacity (a browser's own scaling overshoots at sharp edges,
     // leaving light or dark fringes)
     const { data, width: sw, height: sh } = imagePixels(image);
+    // The source pixels from `from` (a fraction of `size`) over `span` of
+    // them, for unit i of n: [start, end)
+    const bin = (i, n, from, span, size) => {
+        const a = Math.min(size - 1, Math.floor(from * size + i * span * size / n));
+        return [a, Math.min(size, Math.max(a + 1, Math.floor(from * size + (i + 1) * span * size / n)))];
+    };
     for (let y = 0; y < H; y++) {
-        const y0 = Math.floor(y * sh / H), y1 = Math.max(y0 + 1, Math.floor((y + 1) * sh / H));
+        const [y0, y1] = bin(y, H, crop.y1, crop.y2 - crop.y1, sh);
         for (let x = 0; x < W; x++) {
-            const x0 = Math.floor(x * sw / W), x1 = Math.max(x0 + 1, Math.floor((x + 1) * sw / W));
+            const [x0, x1] = bin(x, W, crop.x1, crop.x2 - crop.x1, sw);
             let a = 0, r = 0, g = 0, b = 0;
             for (let v = y0; v < y1; v++) {
                 for (let u = x0, j = 4 * (v * sw + x0); u < x1; u++, j += 4) {

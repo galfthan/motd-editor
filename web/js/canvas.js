@@ -40,7 +40,7 @@ function setCellWidthForAspect(aspect) {
 }
 
 // Overlays on the overlay canvas, bottom to top (see setOverlay)
-const OVERLAY_ORDER = ['hover', 'hover-subpixel', 'paste', 'image-handle', 'paste-subpixel', 'box', 'box-subpixel', 'selection', 'subpixel-selection'];
+const OVERLAY_ORDER = ['hover', 'hover-subpixel', 'image-crop', 'paste', 'image-handle', 'paste-subpixel', 'box', 'box-subpixel', 'selection', 'subpixel-selection'];
 
 // Where a copy is shared with the editor's other tabs (see shareClipboard)
 const SHARED_CLIPBOARD_KEY = 'motd-editor.clipboard';
@@ -364,7 +364,7 @@ class CanvasRenderer {
 
             // Image paste: Enter places it, the arrows move it, +/- resize it
             // (by key position, so Shift is free to make the step fine), M
-            // switches colour / mono, D dithering on / off
+            // switches colour / mono, D dithering on / off, C cropping
             if (this.isImagePaste() && !e.ctrlKey && !e.metaKey && !e.altKey) {
                 const p = this.imagePaste;
                 const grow = e.code === 'Equal' || e.code === 'NumpadAdd';
@@ -383,6 +383,11 @@ class CanvasRenderer {
                     this.moveImageTo({ x: p.x + d[0], y: p.y + d[1] });
                     this.showImagePreview();
                     if (this.onImagePaste) this.onImagePaste(p);
+                    return;
+                }
+                if (k === 'c') {
+                    e.preventDefault();
+                    this.setImageCropping(!p.cropping);
                     return;
                 }
                 if (grow || shrink || k === 'm' || k === 'd') {
@@ -1866,7 +1871,7 @@ class CanvasRenderer {
         let text = '';
         if (e && this._imageDrag) {
             const p = this.imagePaste;
-            text = this._imageDrag.mode === 'resize' ? `${p.cols}×${p.rows}` : `x ${p.x}, y ${p.y}`;
+            text = this._imageDrag.mode === 'move' ? `x ${p.x}, y ${p.y}` : `${p.cols}×${p.rows}`;
         } else if (e && this.isDrawing) {
             if (this.subpixelSelectionStart && this.subpixelSelection) {
                 text = this.rectSizeText(this.subpixelSelection, true);
@@ -2257,7 +2262,9 @@ class CanvasRenderer {
     // or Place in the inspector) as one undo step, or cancelled (Esc). Drag
     // to move it, the bottom-right cell's handle or the wheel to resize it,
     // and the inspector's Image panel (see onImagePaste) for its options;
-    // every change converts it again.
+    // every change converts it again. Cropping (p.cropping, see
+    // setImageCropping), a drag at its edges cuts them away (p.crop), with
+    // the whole image shown faded around it.
 
     async startImagePaste(blob, at = null) {
         let image;
@@ -2277,6 +2284,7 @@ class CanvasRenderer {
         const rows = imageRows(image, cols, this.cellAspect);
         this.imagePaste = {
             image, cols, rows, locked: true, x: 0, y: 0,
+            crop: FULL_CROP, cropping: false,
             mono: false, strength: 1,
             brightness: 0, contrast: 0, midtones: 0, invert: false
         };
@@ -2319,8 +2327,9 @@ class CanvasRenderer {
         this.imagePaste.image.close();
         this.imagePaste = null;
         this._imageDrag = null;
-        this.container.classList.remove('image-move', 'image-resize');
+        this.container.classList.remove('image-move', 'image-resize', 'image-crop');
         this.setOverlay('paste', []);
+        this.setOverlay('image-crop', []);
         this.setOverlay('image-handle', []);
         if (this.onImagePaste) this.onImagePaste(null);
     }
@@ -2357,7 +2366,7 @@ class CanvasRenderer {
         p.cells = imageToCells(p.image, p.cols, p.rows, {
             mono: p.mono || view === 'ink', paperOnly: view === 'paper',
             fg: this.fgColor, bg: view === 'ink' ? keepColor('bg') : this.bgColor,
-            strength: p.strength, blockRows: BLOCK_ROWS,
+            strength: p.strength, blockRows: BLOCK_ROWS, crop: p.crop,
             brightness: p.brightness, contrast: p.contrast, midtones: p.midtones, invert: p.invert
         });
         this.showImagePreview();
@@ -2386,6 +2395,58 @@ class CanvasRenderer {
         const h = this.imageHandle();
         const handle = h && this.clipRect({ x1: h.x, y1: h.y, x2: h.x, y2: h.y });
         this.setOverlay('image-handle', handle ? [{ ...handle, whole: true }] : []);
+        this.setOverlay('image-crop', [], false, p.cropping ? [this.fadedImage()] : []);
+    }
+
+    // The whole image's place in cells, at the scale its cropped part has
+    imageExtent() {
+        const p = this.imagePaste, c = p.crop;
+        const cols = p.cols / (c.x2 - c.x1), rows = p.rows / (c.y2 - c.y1);
+        return { x: p.x - c.x1 * cols, y: p.y - c.y1 * rows, cols, rows };
+    }
+
+    // The whole image, faded, over the canvas (in device pixels), to show
+    // what cropping cuts away
+    fadedImage() {
+        const p = this.imagePaste, e = this.imageExtent();
+        const sx = CELL_W * this._scaleX, sy = CELL_H * this._scaleY;
+        const x0 = Math.max(0, Math.round(e.x * sx)), y0 = Math.max(0, Math.round(e.y * sy));
+        const x1 = Math.min(Math.round(this.canvas.width * sx), Math.round((e.x + e.cols) * sx));
+        const y1 = Math.min(Math.round(this.canvas.height * sy), Math.round((e.y + e.rows) * sy));
+        const key = [x0, y0, x1, y1, e.cols, e.rows].join();
+        if (this._faded?.key !== key) {
+            const image = document.createElement('canvas');
+            image.width = Math.max(1, x1 - x0);
+            image.height = Math.max(1, y1 - y0);
+            const ctx = image.getContext('2d');
+            ctx.globalAlpha = 0.35;
+            ctx.drawImage(p.image, Math.round(e.x * sx) - x0, Math.round(e.y * sy) - y0, e.cols * sx, e.rows * sy);
+            this._faded = { key, image, x: x0, y: y0 };
+        }
+        return this._faded;
+    }
+
+    // Start or stop cropping (dragging the image's edges cuts them away)
+    setImageCropping(on) {
+        const p = this.imagePaste;
+        if (!p) return;
+        p.cropping = on;
+        this._imageDrag = null;
+        this.showImagePreview();
+        if (this.onImagePaste) this.onImagePaste(p);
+    }
+
+    // The whole image again, at the scale its cropped part has
+    resetImageCrop() {
+        const p = this.imagePaste;
+        if (!p) return;
+        const e = this.imageExtent();
+        Object.assign(p, {
+            crop: FULL_CROP, x: Math.round(e.x) || 0, y: Math.round(e.y) || 0,
+            cols: Math.min(500, Math.max(1, Math.round(e.cols))), rows: Math.min(200, Math.max(1, Math.round(e.rows)))
+        });
+        this.moveImageTo(p);
+        this.scheduleImageUpdate();
     }
 
     // Change image options ({ cols, rows, locked, mono, strength,
@@ -2399,11 +2460,12 @@ class CanvasRenderer {
         const clamp = (v, max) => Math.min(max, Math.max(1, Math.round(v)));
         if (p.locked) {
             // Width and height together, as large as asked within the limits
-            const colsPerRow = p.image.width / (p.image.height * this.cellAspect);
+            const size = croppedSize(p.image, p.crop);
+            const colsPerRow = size.width / (size.height * this.cellAspect);
             let cols = 'rows' in changes && !('cols' in changes) ? p.rows * colsPerRow : p.cols;
             cols = Math.min(cols, 500, 200 * colsPerRow);
             p.cols = clamp(cols, 500);
-            p.rows = clamp(imageRows(p.image, p.cols, this.cellAspect), 200);
+            p.rows = clamp(imageRows(size, p.cols, this.cellAspect), 200);
         } else {
             p.cols = clamp(p.cols, 500);
             p.rows = clamp(p.rows, 200);
@@ -2427,7 +2489,7 @@ class CanvasRenderer {
     // which is dragged to move it
     imageHandle() {
         const p = this.imagePaste, r = this.imageRect();
-        if (p.cols === 1 && p.rows === 1) return null;
+        if (p.cropping || (p.cols === 1 && p.rows === 1)) return null;
         return { x: Math.min(r.x2, this.canvas.width - 1), y: Math.min(r.y2, this.canvas.height - 1) };
     }
 
@@ -2436,22 +2498,61 @@ class CanvasRenderer {
         return !!h && c.cellX === h.x && c.cellY === h.y;
     }
 
-    // Image dragging: from its handle resizes, from anywhere else moves it
+    // Image dragging: from its handle resizes, from anywhere else moves it;
+    // cropping, from its edge cells (or past them) crops that side
     startImageDrag(e) {
         const p = this.imagePaste;
         const c = this.cellCoordsFromEvent(e);
+        const sides = p.cropping ? this.cropSides(c) : null;
         this._imageDrag = {
-            mode: this.onImageHandle(c) ? 'resize' : 'move',
-            from: c, x: p.x, y: p.y, cols: p.cols, rows: p.rows
+            mode: sides ? 'crop' : this.onImageHandle(c) ? 'resize' : 'move', sides,
+            from: c, x: p.x, y: p.y, cols: p.cols, rows: p.rows, extent: this.imageExtent()
         };
         this.isDrawing = true;
+    }
+
+    // The sides a crop drag from cell c moves: those whose edge cell it is
+    // on or past (null: inside, which moves the image)
+    cropSides(c) {
+        const r = this.imageRect();
+        const s = { left: c.cellX <= r.x1, right: c.cellX >= r.x2, top: c.cellY <= r.y1, bottom: c.cellY >= r.y2 };
+        // A thin image's edge cell is both sides: the one nearer the pointer
+        if (s.left && s.right) s[c.cellX < r.x1 ? 'right' : 'left'] = c.cellX > r.x2;
+        if (s.top && s.bottom) s[c.cellY < r.y1 ? 'bottom' : 'top'] = c.cellY > r.y2;
+        return s.left || s.right || s.top || s.bottom ? s : null;
+    }
+
+    // Crop to the pointer: the moved sides go to its cell, within the whole
+    // image and at least a cell from the other side
+    updateImageCrop(c) {
+        const d = this._imageDrag, p = this.imagePaste, e = d.extent;
+        const span = (sides, at, from, size, lo, hi, all) => {
+            const min = Math.ceil(lo - 1e-9), max = Math.floor(hi + 1e-9);
+            let a = from, b = from + size;
+            if (sides[0]) a = Math.max(min, Math.min(b - 1, at));
+            if (sides[1]) b = Math.min(max, Math.max(a + 1, at + 1));
+            // (an edge at the image's own snaps to it, past rounding)
+            const frac = (v) => { const f = (v - lo) / all; return f < 1e-6 ? 0 : f > 1 - 1e-6 ? 1 : f; };
+            return [a, b, frac(a), frac(b)];
+        };
+        const [x1, x2, cx1, cx2] = span([d.sides.left, d.sides.right], c.cellX, d.x, d.cols, e.x, e.x + e.cols, e.cols);
+        const [y1, y2, cy1, cy2] = span([d.sides.top, d.sides.bottom], c.cellY, d.y, d.rows, e.y, e.y + e.rows, e.rows);
+        const crop = {
+            x1: d.sides.left ? cx1 : p.crop.x1, x2: d.sides.right ? cx2 : p.crop.x2,
+            y1: d.sides.top ? cy1 : p.crop.y1, y2: d.sides.bottom ? cy2 : p.crop.y2
+        };
+        if (x1 === p.x && y1 === p.y && x2 - x1 === p.cols && y2 - y1 === p.rows) return;
+        Object.assign(p, { crop, x: x1, y: y1, cols: x2 - x1, rows: y2 - y1 });
+        this.scheduleImageUpdate();
     }
 
     updateImageDrag(e) {
         const d = this._imageDrag, p = this.imagePaste;
         const c = this.cellCoordsFromEvent(e);
         const dx = c.cellX - d.from.cellX, dy = c.cellY - d.from.cellY;
-        if (d.mode === 'move') {
+        if (d.mode === 'crop') {
+            this.updateImageCrop(c);
+        } else if (d.mode === 'move') {
             this.moveImageTo({ x: d.x + dx, y: d.y + dy });
             this.showImagePreview();
             if (this.onImagePaste) this.onImagePaste(p);
@@ -2462,9 +2563,12 @@ class CanvasRenderer {
 
     // The pointer shows what a drag on the image does
     updateImageCursor(e) {
-        const onHandle = this.onImageHandle(this.cellCoordsFromEvent(e)) && this.container.contains(e.target);
+        const c = this.cellCoordsFromEvent(e), inside = this.container.contains(e.target);
+        const onHandle = this.onImageHandle(c) && inside;
+        const crop = this.imagePaste.cropping && inside && !!this.cropSides(c);
         this.container.classList.toggle('image-resize', onHandle);
-        this.container.classList.toggle('image-move', !onHandle);
+        this.container.classList.toggle('image-crop', crop);
+        this.container.classList.toggle('image-move', !onHandle && !crop);
     }
 
     // Subpixel value and cell colours at subpixel coordinates

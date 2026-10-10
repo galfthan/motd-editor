@@ -44,7 +44,8 @@ npx serve web
 - Copy/paste with system clipboard integration
 - Image import: paste (Ctrl+V), drop or Import image a picture. It floats
   over the canvas until you place it (Enter): drag it to move it, its corner
-  handle or the wheel to resize it, and set its size, full colour or two
+  handle or the wheel to resize it, Crop (C) and drag its edges to cut them
+  away, and set its size, full colour or two
   colours (ink and paper), dithering and tone (brightness, contrast,
   midtones, invert) in the panel on the right. Each cell gets the two
   colours that best fit its subpixels; transparent areas leave the canvas

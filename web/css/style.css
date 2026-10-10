@@ -157,6 +157,8 @@ kbd {
 .btn.ghost:hover { background: var(--raised); }
 .btn.small { height: 30px; padding: 0 10px; font-size: 12px; gap: 6px; }
 .btn.small .ic { width: 15px; height: 15px; }
+.btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.btn:disabled { opacity: 0.4; cursor: default; }
 
 .btn.primary {
     background: var(--accent);
@@ -1159,6 +1161,7 @@ dialog h3 {
 /* Placing an image: drags move it, or resize it from its handle */
 .canvas.image-move .grid-canvas { cursor: move; }
 .canvas.image-resize .grid-canvas { cursor: nwse-resize; }
+.canvas.image-crop .grid-canvas { cursor: crosshair; }
 
 /* Glyph styles by character range, for the glyph palette and (read via a
    probe element) the grid canvas; see CanvasRenderer.glyphStyle */

@@ -211,6 +211,10 @@
                             <button class="btn small" data-image-action="fit-canvas">Fit canvas</button>
                             <button class="btn small" data-image-action="fit-selection">Fit selection</button>
                         </div>
+                        <div class="image-fit">
+                            <button class="btn small" data-image-action="crop" aria-pressed="false" title="Drag the image's edges or corners to cut them away (C)">Crop <kbd>C</kbd></button>
+                            <button class="btn small" data-image-action="reset-crop" title="The whole image again">Reset crop</button>
+                        </div>
                         <span class="label both-only ink-only">Colours</span>
                         <div class="segmented wide both-only ink-only" role="group" aria-label="Image colours">
                             <button data-image-mono="false" aria-pressed="true">Full colour</button>
@@ -226,7 +230,7 @@
                             <label class="check"><input type="checkbox" id="image-invert"> Invert</label>
                             <button class="btn small" data-image-action="reset-tone">Reset tone</button>
                         </div>
-                        <p class="hint help">Drag the image to move it, or its corner handle to resize it; the wheel and <kbd>+</kbd> <kbd>−</kbd> resize it too, the arrow keys move it.</p>
+                        <p class="hint help">Drag the image to move it, or its corner handle to resize it; the wheel and <kbd>+</kbd> <kbd>−</kbd> resize it too, the arrow keys move it. With Crop on, dragging its edges or corners cuts them away instead; the cut-away part shows faded, and dragging back out brings it back.</p>
                     </section>
 
                     <section data-panel="hand">

@@ -185,7 +185,11 @@ type imageArgs struct {
 	URL            string `json:"url,omitempty" jsonschema:"or the image's http(s) URL"`
 	X              int    `json:"x,omitempty" jsonschema:"left cell (default 0)"`
 	Y              int    `json:"y,omitempty" jsonschema:"top cell (default 0)"`
-	Width          int    `json:"width,omitempty" jsonschema:"cells; with only one of width and height the other keeps the image's proportions at the editor's cell aspect (default: as large as fits the canvas from x, y)"`
+	CropX          int    `json:"crop_x,omitempty" jsonschema:"use only part of the image: its left edge in image pixels (default 0; the reply gives the image's size)"`
+	CropY          int    `json:"crop_y,omitempty" jsonschema:"the part's top edge in image pixels (default 0)"`
+	CropWidth      int    `json:"crop_width,omitempty" jsonschema:"the part's width in image pixels (default: to the right edge)"`
+	CropHeight     int    `json:"crop_height,omitempty" jsonschema:"the part's height in image pixels (default: to the bottom edge)"`
+	Width          int    `json:"width,omitempty" jsonschema:"cells; with only one of width and height the other keeps the image's (or crop's) proportions at the editor's cell aspect (default: as large as fits the canvas from x, y)"`
 	Height         int    `json:"height,omitempty" jsonschema:"cells"`
 	Mono           bool   `json:"mono,omitempty" jsonschema:"use only the colours fg and bg (default: full colour, two colours per cell fitted to the image). With edit ink the image is always drawn in fg alone over the paper there; with edit paper each cell's paper gets the image's colour there (mono, dither_strength, fg and bg not used)"`
 	DitherStrength *int   `json:"dither_strength,omitempty" jsonschema:"dithering (Atkinson error diffusion), 0 (none) to 100 (the default): how much of each subpixel's error is passed on; lower is less grainy"`
